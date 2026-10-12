@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.49.0](https://github.com/dryvist/ai-workflows/compare/v0.48.9...v0.49.0) (2026-10-12)
+
+
+### Features
+
+* **workflows:** default the review models to the medium capability ([5f62cc6](https://github.com/dryvist/ai-workflows/commit/5f62cc648ae42d41bb5ab42194db993757401433))
+* **workflows:** default the review models to the medium capability ([#550](https://github.com/dryvist/ai-workflows/issues/550)) ([8625786](https://github.com/dryvist/ai-workflows/commit/8625786dae224123b6e0e80ea78f63f2d08970b3))
+
 ## [0.48.9](https://github.com/dryvist/ai-workflows/compare/v0.48.8...v0.48.9) (2026-10-12)
 
 
