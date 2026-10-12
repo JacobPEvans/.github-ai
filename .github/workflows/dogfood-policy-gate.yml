@@ -11,7 +11,7 @@ jobs:
   policy-gate:
     uses: ./.github/workflows/policy-gate.yml
     with:
-      model: review-local
+      model: medium
     secrets:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}

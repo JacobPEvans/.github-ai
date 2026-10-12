@@ -46,10 +46,10 @@ on:
         required: false
         default: dryvist/docs-private
       model:
-        description: "Router ROLE alias to call (e.g. cheap, judge, subagent) — never a vendor model id"
+        description: "Router ROLE alias to call (e.g. small, medium, large) — never a vendor model id"
         type: string
         required: false
-        default: cheap
+        default: small
       runner_label:
         description: "Runner label for the job(s). Must be a runner that can reach the model router."
         type: string

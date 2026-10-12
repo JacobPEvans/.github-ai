@@ -33,7 +33,7 @@ on:
       model:
         description: >-
           Router ROLE alias used ONLY to summarise the computed facts (e.g.
-          cheap, judge). Always an alias the router resolves — never a vendor
+          small, medium, large). Always an alias the router resolves — never a vendor
           model id.
         type: string
         required: false

@@ -1,6 +1,6 @@
 # Thread Triage
 
-`thread-triage.yml` asks a cheap model, served through the org's
+`thread-triage.yml` asks a small model, served through the org's
 OpenAI-compatible model router, to classify every unresolved review thread on a
 pull request. The verdicts are rendered as one sticky comment that is updated in
 place as reviews come in.
@@ -8,7 +8,7 @@ place as reviews come in.
 It exists to take a specific job off the premium models. Both the
 `resolve-pr-threads` and `receiving-code-review` skills begin the same way:
 read every unresolved thread and decide which ones still matter. That first
-pass is classification, not authorship, so it belongs on the cheap router role;
+pass is classification, not authorship, so it belongs on the small router role;
 the premium model then starts from the shortlist.
 
 It is deliberately inert: it never resolves a thread, never replies in one,
@@ -43,7 +43,7 @@ quietly dropped.
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `runner_label` | `self-hosted` | Runner label for the job |
-| `model` | `cheap` | Router **role alias** to call — never a vendor model id |
+| `model` | `small` | Router **role alias** to call — never a vendor model id |
 | `max_threads` | `20` | Triage at most this many unresolved threads |
 | `max_tokens` | `1200` | Completion token ceiling |
 
