@@ -217,7 +217,7 @@ runs:
       id: codex
       if: steps.prepare.outputs.effective-agent == 'codex'
       continue-on-error: true
-      uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1.12
+      uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # v1.13
       env:
         # Read operations such as `gh issue view` use the job-scoped token.
         # Agent jobs must keep this token read-only; publishers run separately.
