@@ -31,7 +31,7 @@ on:
         default: self-hosted
       model:
         description: >-
-          Router ROLE alias to call (e.g. cheap, judge, subagent). Always an
+          Router ROLE alias to call (e.g. small, medium, large). Always an
           alias the router resolves — never a vendor model id.
         type: string
         required: false

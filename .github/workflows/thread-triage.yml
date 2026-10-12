@@ -1,13 +1,13 @@
 # Thread Triage
 #
-# Triage of the unresolved review threads on a pull request, by a cheap model
+# Triage of the unresolved review threads on a pull request, by a small model
 # served through the org's OpenAI-compatible model router. Each thread is
 # classified outdated | addressed | needs-code | escalate and the verdicts
 # are rendered as one sticky comment.
 #
 # Why: the premium-model responder and the resolve-pr-threads skill both begin
 # by reading every unresolved thread to decide which ones still matter. That
-# first pass is classification, not authorship, so it belongs on the cheap
+# first pass is classification, not authorship, so it belongs on the small
 # router role.
 #
 # It never resolves a thread, never replies in one, and never edits code.
@@ -32,11 +32,11 @@ on:
         default: self-hosted
       model:
         description: >-
-          Router ROLE alias to call (e.g. cheap, judge, subagent). Always an
+          Router ROLE alias to call (e.g. small, medium, large). Always an
           alias the router resolves — never a vendor model id.
         type: string
         required: false
-        default: cheap
+        default: small
       max_threads:
         description: "Triage at most this many unresolved threads"
         type: number

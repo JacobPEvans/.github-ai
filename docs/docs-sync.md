@@ -23,7 +23,7 @@ stale to fix, opens no PR — that is the expected, common outcome.
 | `merge_sha` | *(required)* | Merge commit SHA in `source_repo` |
 | `docs_repo` | `dryvist/docs-private` | `owner/repo` of the private docs site this workflow may open a PR against |
 | `docs_repo_app_id` | *(required)* | App ID of the GitHub App installed on `docs_repo`, used to mint both the read-only checkout token and the write PR token |
-| `model` | `cheap` | Router **role alias** to call — never a vendor model id |
+| `model` | `small` | Router **role alias** to call — never a vendor model id |
 | `runner_label` | `self-hosted` | Runner label for the job(s) — must be a runner that can reach the model router |
 | `draft_prs` | `"true"` | Open the resulting PR as a draft instead of ready-for-review |
 | `daily_run_limit` | `"10"` | Max workflow runs per calling repo per day (`0` to disable) |

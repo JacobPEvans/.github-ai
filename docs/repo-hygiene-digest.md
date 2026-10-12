@@ -48,7 +48,7 @@ request has already been merged or closed.
 | --- | --- | --- |
 | `runner_label` | `self-hosted` | Runner label for the job |
 | `repos` | the calling repository | Comma-separated `owner/name` list |
-| `model` | `cheap` | Router **role alias** for the summary — never a vendor model id |
+| `model` | `medium` | Router **role alias** for the summary — never a vendor model id |
 | `slack` | `false` | Post the digest to Slack when the webhook secret is present |
 | `stale_days` | `30` | Age at which a pull-request-less branch counts as stale |
 | `max_tokens` | `400` | Completion token ceiling for the summary |

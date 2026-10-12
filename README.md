@@ -18,7 +18,7 @@ Reusable AI agent workflows for GitHub Actions. Each workflow is a
 | `cc-dep-review.yml` | `pull_request: [opened]` | On Renovate PR | Native Dependency Review + advisory AI `risk:*` label + sticky comment; never merges |
 | `cc-code-simplifier.yml` | `workflow_call` | Daily 4am UTC | Simplifies changed code and opens a PR |
 | `cc-release-notes.yml` | `pull_request` | On release PR | Posts sticky AI release-highlights comment on release-please PRs (refreshed per head SHA) |
-| `docs-drift.yml` | `workflow_call` | On push to default branch | Cheap model lists docs the merge contradicts; summary, artifact, sticky PR comment |
+| `docs-drift.yml` | `workflow_call` | On push to default branch | Medium model lists docs the merge contradicts; summary, artifact, sticky PR comment |
 | `docs-sync.yml` | `workflow_call` (dispatch pattern) | On merge (consumer) | Per-merged-PR check; drafts a docs-private correction when needed |
 | `issue-hygiene.yml` | `workflow_call` | Mon 7am UTC | Detects duplicates, links merged PRs, flags stale issues |
 | `cc-issue-resolver.yml` | `issues: [opened]` | On issue open | Creates draft PRs for simple, well-scoped issues |
@@ -29,12 +29,12 @@ Reusable AI agent workflows for GitHub Actions. Each workflow is a
 | `cc-post-merge-docs-review.yml` | `workflow_call` (dispatch pattern) | On merge | Reviews documentation after merges, creates fix PRs |
 | `cc-post-merge-tests.yml` | `workflow_call` (dispatch pattern) | On merge | Analyzes merged code, creates draft PRs with targeted tests |
 | `cc-pr-review-responder.yml` | `pull_request_review*` | On PR review (consumer) | Fixes valid review feedback, replies, resolves threads (never merges) |
-| `policy-gate.yml` | `workflow_call` | On PR (consumer) | `review-local` role scores the diff against a fixed 5-check rubric; advisory sticky comment |
+| `policy-gate.yml` | `workflow_call` | On PR (consumer) | `medium` role scores the diff against a fixed 5-check rubric; advisory sticky comment |
 | `pr-agent.yml` | `workflow_call` | On PR (consumer) | PR-Agent review, improve and describe on the router; prompts in the consumer's `.pr_agent.toml` |
 | `project-router.yml` | `workflow_call` | On issue/PR events | Routes items to GitHub Projects with smart field assignment |
 | `repo-hygiene-digest.yml` | `workflow_call` | Nightly (consumer) | Read-only branch, PR, and promotion digest; model writes only the summary |
 | `review-thread-resolver.yml` | `workflow_call` | Hourly org sweep (hub) | Resolves outdated/failed bot review threads that block merges — no AI tokens |
-| `thread-triage.yml` | `workflow_call` | On PR review (consumer) | Cheap model classifies each unresolved review thread; one sticky comment |
+| `thread-triage.yml` | `workflow_call` | On PR review (consumer) | Small model classifies each unresolved review thread; one sticky comment |
 
 ---
 
