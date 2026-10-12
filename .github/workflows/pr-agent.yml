@@ -45,20 +45,20 @@ on:
         default: self-hosted
       model:
         description: >-
-          Router ROLE alias called on a private repo. Always an alias the
-          router resolves — never a vendor model id — and one
-          LLM_ROUTER_API_KEY is scoped to reach. The role's own fallback
+          Router capability name requested on a private repo, never a vendor
+          model id. One LLM_ROUTER_API_KEY is scoped to reach it. The
+          capability's fallback
           ladder is what absorbs a busy backend.
         type: string
         required: false
-        default: review-private
+        default: medium
       oss_model:
         description: >-
-          Router ROLE alias called on an open-source repo, one
+          Router capability name called on an open-source repo, one
           LLM_ROUTER_OSS_API_KEY is scoped to reach.
         type: string
         required: false
-        default: review-oss
+        default: medium
       max_tokens:
         description: >-
           Input context the alias can be assumed to hold, for PR-Agent's own
