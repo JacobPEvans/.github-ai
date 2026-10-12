@@ -66,7 +66,7 @@ function report(env, { mode = 'ok', job = 'demo', reason = 'rate-limited' } = {}
 describe('gateway failure classification', () => {
   it('names the budget, fallback, rate and connection classes', () => {
     expect(classify('Error: Budget has been exceeded for this key')).toBe('budget-exceeded');
-    expect(classify('No fallback model group found for role review-private')).toBe('no-fallback-model');
+    expect(classify('No fallback model group found for role medium')).toBe('no-fallback-model');
     expect(classify('API Error: 429 Too Many Requests')).toBe('rate-limited');
     expect(classify('connect ECONNREFUSED 10.0.0.1:4000')).toBe('connection');
     expect(classify('litellm.Timeout: APITimeoutError - Request timed out. timeout value=90.0')).toBe('timeout');
@@ -74,7 +74,7 @@ describe('gateway failure classification', () => {
 
   it('matches the router wording for a model group with no fallback', () => {
     expect(
-      classify("model group 'review-oss' failed with the error above and no fallback model group was found for it"),
+      classify("model group 'medium' failed with the error above and no fallback model group was found for it"),
     ).toBe('no-fallback-model');
   });
 

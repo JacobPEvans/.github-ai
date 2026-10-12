@@ -32,12 +32,11 @@ on:
         default: ""
       model:
         description: >-
-          Router ROLE alias used ONLY to summarise the computed facts (e.g.
-          small, medium, large). Always an alias the router resolves — never a vendor
-          model id.
+          Router capability name used ONLY to summarise the computed facts
+          (e.g. small, medium, large), never a vendor model id.
         type: string
         required: false
-        default: review-private
+        default: medium
       slack:
         description: "Post the digest to Slack when a webhook secret is present"
         type: boolean

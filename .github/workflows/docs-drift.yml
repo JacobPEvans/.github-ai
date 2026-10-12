@@ -31,11 +31,11 @@ on:
         default: self-hosted
       model:
         description: >-
-          Router ROLE alias to call (e.g. small, medium, large). Always an
-          alias the router resolves — never a vendor model id.
+          Router capability name to request (e.g. small, medium, large), never
+          a vendor model id.
         type: string
         required: false
-        default: review-private
+        default: medium
       docs_globs:
         description: >-
           Comma-separated documentation globs to consider. Only the files that
