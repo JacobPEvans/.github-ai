@@ -108,9 +108,6 @@
     "contents": "read",
     "pull-requests": "write"
   },
-  "pricing-discovery.yml": {
-    "contents": "read"
-  },
   "project-router.yml": {
     "contents": "read"
   },
