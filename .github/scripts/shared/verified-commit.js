@@ -103,7 +103,7 @@ async function commitToBranch({ github, context, core, branch, message, extraExc
 
 // Shape 2: create a new branch off the checked-out HEAD, verified-commit the diff,
 // and open a PR. Returns { opened, pr } (opened: false when there were no changes).
-async function openPr({ github, context, core, branch, title, body, baseBranch, extraExcludes, draft, repoWithOwner }) {
+async function openPr({ github, context, core, branch, title, body, baseBranch, extraExcludes, repoWithOwner, labels }) {
   if (!branch || !title) { core.setFailed('openPr: branch and title are required'); return { opened: false }; }
   const [owner, repo] = repoWithOwner ? repoWithOwner.split('/') : [context.repo.owner, context.repo.repo];
   if (!owner || !repo) { core.setFailed('openPr: repoWithOwner must be owner/repo'); return { opened: false }; }
@@ -119,7 +119,24 @@ async function openPr({ github, context, core, branch, title, body, baseBranch, 
     else throw e;
   }
   await createCommitOnBranch(github, `${owner}/${repo}`, branch, title, baseOid, changes);
-  const { data: pr } = await github.rest.pulls.create({ owner, repo, head: branch, base, title, body, draft: !!draft });
+  const { data: pr } = await github.rest.pulls.create({ owner, repo, head: branch, base, title, body });
+  // The opener enables native auto-merge; human:review keeps a person in the loop by leaving it off.
+  if (labels?.length) await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
+  if (labels?.includes('human:review')) {
+    core.setOutput('auto_merge', 'false');
+  } else {
+    try {
+      await github.graphql(
+        'mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }',
+        { id: pr.node_id },
+      );
+      core.setOutput('auto_merge', 'true');
+    } catch (e) {
+      // A repo without auto-merge or squash still gets its PR; the warning keeps the miss visible.
+      core.warning(`PR #${pr.number}: auto-merge not enabled (${e.message}); it will not merge by itself.`);
+      core.setOutput('auto_merge', 'false');
+    }
+  }
   core.info(`Opened PR #${pr.number} (${changes.additions.length} change(s)) from ${branch}: ${pr.html_url}`);
   core.setOutput('opened', 'true');
   core.setOutput('pr_number', String(pr.number));
