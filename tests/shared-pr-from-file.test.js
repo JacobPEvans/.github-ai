@@ -85,6 +85,31 @@ describe('pr-from-file', () => {
     expect(Object.hasOwn(github.rest.pulls.create.mock.calls[0][0], 'draft')).toBe(false);
   });
 
+  it('enables native auto-merge on an unlabeled PR', async () => {
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\n');
+    fs.writeFileSync(path.join(dir, '.claude-pr.md'), 'docs: fix x\n\nBody.');
+
+    await runIn(dir, { github, context, core });
+
+    const calls = github.graphql.mock.calls.map((c) => c[0]);
+    expect(calls.some((q) => q.includes('enablePullRequestAutoMerge'))).toBe(true);
+    expect(core.getOutput('auto_merge')).toBe('true');
+  });
+
+  it('leaves auto-merge off for a human:review PR', async () => {
+    github.rest.issues = { addLabels: mock(async () => ({})) };
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\n');
+    fs.writeFileSync(path.join(dir, '.claude-pr.md'), 'test: cover x\n\nBody.');
+    process.env.PR_LABELS = 'human:review';
+
+    await runIn(dir, { github, context, core });
+
+    const calls = github.graphql.mock.calls.map((c) => c[0]);
+    expect(calls.some((q) => q.includes('enablePullRequestAutoMerge'))).toBe(false);
+    expect(core.getOutput('auto_merge')).toBe('false');
+    delete process.env.PR_LABELS;
+  });
+
   it('labels the PR from PR_LABELS and adds no label without it', async () => {
     github.rest.issues = { addLabels: mock(async () => ({})) };
     fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\n');

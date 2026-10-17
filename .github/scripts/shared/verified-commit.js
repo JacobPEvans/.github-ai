@@ -120,8 +120,23 @@ async function openPr({ github, context, core, branch, title, body, baseBranch, 
   }
   await createCommitOnBranch(github, `${owner}/${repo}`, branch, title, baseOid, changes);
   const { data: pr } = await github.rest.pulls.create({ owner, repo, head: branch, base, title, body });
-  // A labels entry such as human:review keeps a person in the loop: auto-merge skips labeled PRs.
+  // The opener enables native auto-merge; human:review keeps a person in the loop by leaving it off.
   if (labels?.length) await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
+  if (labels?.includes('human:review')) {
+    core.setOutput('auto_merge', 'false');
+  } else {
+    try {
+      await github.graphql(
+        'mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }',
+        { id: pr.node_id },
+      );
+      core.setOutput('auto_merge', 'true');
+    } catch (e) {
+      // A repo without auto-merge or squash still gets its PR; the warning keeps the miss visible.
+      core.warning(`PR #${pr.number}: auto-merge not enabled (${e.message}); it will not merge by itself.`);
+      core.setOutput('auto_merge', 'false');
+    }
+  }
   core.info(`Opened PR #${pr.number} (${changes.additions.length} change(s)) from ${branch}: ${pr.html_url}`);
   core.setOutput('opened', 'true');
   core.setOutput('pr_number', String(pr.number));
