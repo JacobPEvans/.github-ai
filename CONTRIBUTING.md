@@ -59,7 +59,7 @@ jobs:
       - name: Checkout ai-workflows scripts
         uses: actions/checkout@v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             .github/scripts
@@ -155,7 +155,7 @@ Pin every GitHub Action and every `dryvist/*` reusable workflow to a full 40-cha
 
 ```yaml
 - uses: actions/checkout@<40-hex-sha> # vX.Y.Z
-- uses: dryvist/ai-workflows/.github/workflows/<name>.yml@<40-hex-sha> # vX.Y.Z
+- uses: JacobPEvans/.github-ai/.github/workflows/<name>.yml@<40-hex-sha> # vX.Y.Z
 ```
 
 Do not pin `@main`, `@develop`, or a bare major tag such as `@vN`.

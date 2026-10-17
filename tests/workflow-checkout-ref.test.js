@@ -11,7 +11,7 @@ const files = readdirSync(dir).filter((f) => f.endsWith('.yml'));
 const OWN_REF = '${{ job.workflow_sha }}';
 
 test('at least one workflow checks out ai-workflows', () => {
-  expect(files.some((f) => readFileSync(join(dir, f), 'utf8').includes('repository: dryvist/ai-workflows'))).toBe(true);
+  expect(files.some((f) => readFileSync(join(dir, f), 'utf8').includes('repository: JacobPEvans/.github-ai'))).toBe(true);
 });
 
 for (const f of files) {
@@ -27,7 +27,7 @@ for (const f of files) {
   test(`${f} checks out ai-workflows at job.workflow_sha`, () => {
     for (const job of Object.values(doc.jobs ?? {})) {
       for (const step of job.steps ?? []) {
-        if (step.with?.repository !== 'dryvist/ai-workflows') continue;
+        if (step.with?.repository !== 'JacobPEvans/.github-ai') continue;
         expect(step.with.ref).toBe(OWN_REF);
       }
     }

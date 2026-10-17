@@ -192,21 +192,3 @@ done
 **Total**: 10 of 13 workflows verified via real triggers.
 
 ---
-
-## Test F: On-Demand Workflows (Manual Dispatch)
-
-Tests: **project-router**
-
-These workflows have no event trigger — they are `workflow_call` / `workflow_dispatch` only. Verify via manual dispatch:
-
-```bash
-gh workflow run "Project Router" --repo "<OWNER>/<REPO>"
-gh run list --repo "<OWNER>/<REPO>" --workflow "Project Router" --limit 1 \
-  --json status,conclusion,url
-```
-
-**Pass condition**: Workflows triggered successfully (not stuck at startup_failure with 0 jobs).
-
-Note: `project-router` needs real issue or pull request events, or project
-board configuration, to do meaningful work — verify it starts without an
-"Invalid API key" failure.

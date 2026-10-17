@@ -75,7 +75,7 @@ jobs:
   eligibility-check:
     name: Check eligibility
     runs-on: ${{ inputs.runner_label }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       issues: read
       pull-requests: read
@@ -91,7 +91,7 @@ jobs:
       - name: Checkout ai-workflows scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts
           path: .ai-workflows
@@ -119,7 +119,7 @@ jobs:
       contents: read
       issues: read
       pull-requests: read
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -130,7 +130,7 @@ jobs:
       - name: Checkout ai-workflows
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             .github/scripts
@@ -194,7 +194,7 @@ jobs:
     name: Publish resolution PR
     needs: [eligibility-check, resolve]
     runs-on: ${{ inputs.runner_label }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
     steps:
@@ -207,7 +207,7 @@ jobs:
       - name: Checkout publisher
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts
           path: .ai-workflows
@@ -257,7 +257,7 @@ jobs:
     needs: [eligibility-check, resolve, publish]
     if: failure()
     runs-on: ${{ inputs.runner_label }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       issues: write
     steps:

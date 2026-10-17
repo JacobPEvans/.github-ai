@@ -27,7 +27,7 @@ permissions:
   issues: write            # add what this workflow needs
 jobs:
   run:
-    uses: dryvist/ai-workflows/.github/workflows/<name>.yml@<40-hex-sha> # vX.Y.Z
+    uses: JacobPEvans/.github-ai/.github/workflows/<name>.yml@v1
     secrets: inherit
 ```
 
@@ -92,7 +92,7 @@ jobs:
       id-token: write # required by the OIDC credential step in the fix job
       issues: write
       pull-requests: write
-    uses: dryvist/ai-workflows/.github/workflows/suite-ci.yml@<40-hex-sha> # vX.Y.Z
+    uses: JacobPEvans/.github-ai/.github/workflows/suite-ci.yml@v1
     with:
       workflow_name: CI
       repo_context: Brief description of this repository
@@ -147,22 +147,6 @@ permissions:
 ```
 
 See [docs/PATTERNS.md — Post-Merge Dispatch Pattern](PATTERNS.md#post-merge-dispatch-pattern) for the full two-job consumer caller template.
-
-#### `project-router.yml`
-
-Triggered by issue/PR events. Routes items to GitHub Projects.
-
-```yaml
-on:
-  issues:
-    types: [opened, labeled]
-  pull_request:
-    types: [opened, ready_for_review]
-permissions:
-  contents: read
-  issues: write
-  pull-requests: read
-```
 
 ---
 

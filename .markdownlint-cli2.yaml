@@ -1,6 +1,6 @@
 # dryvist organization-wide markdownlint canonical.
 #
-# Copied verbatim from dryvist/.github, which is the single source of truth and
+# Copied verbatim from JacobPEvans/.github, which is the single source of truth and
 # says consumer repos copy it at scaffold time. Keeping a local copy also means
 # the org lint workflow does not have to fetch it at run time — that fetch
 # resolves its ref from `github.job_workflow_sha`, which is empty when the

@@ -13,7 +13,7 @@ jobs:
   # client, no network call and no TYPESAFE_API_KEY needed.
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -25,9 +25,8 @@ jobs:
           python-version: "3.15"
       - run: python3 -m unittest scripts/test_scope_classify.py -v
 
-  # Runs the classifier for visibility on this repo's own PRs. Wiring its
-  # outputs into this repo's ci-gate.yml (and the dryvist/.github shared
-  # reusable workflows) is a follow-up - see the PR description.
+  # Runs the classifier for visibility on this repo's own PRs. The generic
+  # CI gate calls this reusable classifier from JacobPEvans/.github.
   scope:
     uses: ./.github/workflows/scope-classify.yml
     secrets:

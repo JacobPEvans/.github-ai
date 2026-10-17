@@ -5,7 +5,7 @@
 # Branch protection requires only "AI Merge Gate" as the single AI check.
 #
 # Usage:
-#   uses: dryvist/ai-workflows/.github/workflows/_ai-merge-gate.yml@<40-hex commit SHA> # vX.Y.Z
+#   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate.yml@v1
 name: _ai-merge-gate
 
 on:
@@ -33,7 +33,7 @@ jobs:
   check:
     name: AI Merge Gate
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     env:
       GH_TOKEN: ${{ github.token }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

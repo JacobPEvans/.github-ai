@@ -4,7 +4,7 @@
 # other AI workflow SKIPS renovate/dependabot PRs; this one runs ONLY on them.
 # It runs on EVERY Renovate/Dependabot PR (not a trust-tier subset), reported
 # under the separate AI Merge Gate. Renovate owns all merging under the org
-# dependency-freshness model (dryvist/.github → SECURITY.md → Dependency
+# dependency-freshness model (JacobPEvans/.github → SECURITY.md → Dependency
 # Trust): minor/patch auto-merges publisher-agnostically after a 3-day soak +
 # green CI; majors open for review. This workflow NEVER merges: it is a
 # deterministic native gate plus an advisory AI signal.
@@ -86,7 +86,7 @@ jobs:
   check-eligibility:
     name: Check eligibility
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
       pull-requests: read
@@ -98,7 +98,7 @@ jobs:
       - name: Checkout ai-workflows scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts
           path: .ai-workflows
@@ -123,7 +123,7 @@ jobs:
     needs: check-eligibility
     if: needs.check-eligibility.outputs.should_run == 'true'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
       pull-requests: write
@@ -144,7 +144,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -154,7 +154,7 @@ jobs:
       - name: Checkout ai-workflows
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             .github/scripts
@@ -206,7 +206,7 @@ jobs:
     name: Publish dependency review
     needs: [check-eligibility, review]
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
       pull-requests: write
@@ -214,7 +214,7 @@ jobs:
       - name: Checkout publisher
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts
           path: .ai-workflows
