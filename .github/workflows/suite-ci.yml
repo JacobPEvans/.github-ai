@@ -1,6 +1,6 @@
 # Suite: CI Failures
 #
-# Reusable workflow: bundles ci-fix + ci-fail-issue.
+# Reusable workflow: bundles CI failure repair.
 # Call after CI jobs fail and pass their run context as inputs. Existing
 # workflow_run callers remain supported while they migrate.
 # Fork guard is baked into ci-fix job condition.
@@ -9,7 +9,7 @@
 # suite when called by a child repo (e.g., @main rides the whole chain).
 #
 # Usage:
-#   uses: dryvist/ai-workflows/.github/workflows/suite-ci.yml@<40-hex commit SHA> # vX.Y.Z
+#   uses: JacobPEvans/.github-ai/.github/workflows/suite-ci.yml@v1
 #   with:
 #     repo_context: "Brief description of the repository"
 #     ci_structure: "Description of CI workflows and what they check"
@@ -117,18 +117,4 @@ jobs:
       failure_head_branch: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
       failure_head_repository: ${{ inputs.failure_head_repository || github.event.workflow_run.head_repository.full_name }}
       failure_actor: ${{ inputs.failure_actor || github.actor }}
-    secrets: inherit
-
-  ci-fail-issue:
-    if: >-
-      (inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure' &&
-      (inputs.failure_head_branch || github.event.workflow_run.head_branch) == 'main'
-    uses: ./.github/workflows/ci-fail-issue.yml
-    with:
-      runner_label: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-      workflow_name: ${{ inputs.workflow_name }}
-      failure_conclusion: ${{ inputs.failure_conclusion || github.event.workflow_run.conclusion }}
-      failure_run_id: ${{ inputs.failure_run_id || github.event.workflow_run.id }}
-      failure_run_url: ${{ inputs.failure_run_url || github.event.workflow_run.html_url }}
-      failure_head_sha: ${{ inputs.failure_head_sha || github.event.workflow_run.head_sha }}
     secrets: inherit

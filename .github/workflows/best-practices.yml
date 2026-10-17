@@ -36,7 +36,7 @@ jobs:
   check-recent-activity:
     name: Check for recent human activity
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
       issues: read
@@ -46,7 +46,7 @@ jobs:
       - name: Checkout ai-workflows scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts
           path: .ai-workflows
@@ -62,7 +62,7 @@ jobs:
   check-daily-limit:
     name: Check daily run limit
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     # Listing runs needs actions: read. Callers must grant it, or the run fails at startup.
     permissions:
       actions: read
@@ -72,7 +72,7 @@ jobs:
       - name: Checkout ai-workflows scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts
           path: .ai-workflows
@@ -97,7 +97,7 @@ jobs:
       contents: read
       issues: read
       pull-requests: read
-    timeout-minutes: 5
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -107,7 +107,7 @@ jobs:
       - name: Checkout ai-workflows
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             .github/scripts
@@ -150,7 +150,7 @@ jobs:
     name: Publish recommendation
     needs: best-practices
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
       issues: write
@@ -164,7 +164,7 @@ jobs:
       - name: Checkout trusted publisher
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts
           path: .ai-workflows

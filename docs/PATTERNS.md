@@ -9,7 +9,7 @@ adapter. The following patterns are shared by the reusable workflows.
 
 Used by most workflows. Static prompt, least-privilege agent access.
 
-**Workflows**: issue-triage, issue-hygiene, issue-sweeper, project-router, best-practices, next-steps (scheduled)
+**Workflows**: issue-triage, issue-hygiene, issue-sweeper, best-practices, next-steps (scheduled)
 
 **Key elements**:
 
@@ -303,7 +303,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
   review:
     if: github.event_name == 'workflow_dispatch'
-    uses: dryvist/ai-workflows/.github/workflows/cc-post-merge-tests.yml@<40-hex-sha> # vX.Y.Z
+    uses: JacobPEvans/.github-ai/.github/workflows/cc-post-merge-tests.yml@v1
     with:
       commit_sha: ${{ inputs.commit_sha || github.sha }}
     secrets: inherit
@@ -361,7 +361,7 @@ When a bot creates the PR and isn't in `allowed_bots`, the step shows as **skipp
 ```yaml
 jobs:
   link-issues:
-    uses: dryvist/ai-workflows/.github/workflows/issue-linker.yml@<40-hex-sha> # vX.Y.Z
+    uses: JacobPEvans/.github-ai/.github/workflows/issue-linker.yml@v1
     with:
       allowed_bots: "claude"  # Allow Claude App PRs to be linked
     secrets: inherit
@@ -393,7 +393,7 @@ Loop prevention is handled by the attempt counter (`check-attempts.js`, max 2 at
 
 `cc-dep-review.yml` is the deliberate **inverse** of Layer 3 — it runs ONLY on
 dependency-bot PRs and skips everything else. It is two layers, reported under the
-separate AI Merge Gate (dryvist/.github → SECURITY.md → Dependency Trust): a
+separate AI Merge Gate (JacobPEvans/.github → SECURITY.md → Dependency Trust): a
 deterministic native gate and an advisory AI review. Renovate opens the bump PRs. A
 patch bump merges after the Merge Gate is green. A minor or major bump is merged by a
 person. This workflow has no internal auto-merge — it only labels and comments.
@@ -515,7 +515,7 @@ jobs:
             -f issue_number="$ISSUE_NUM"
   run-triage:
     if: github.event_name == 'workflow_dispatch'
-    uses: dryvist/ai-workflows/.github/workflows/issue-triage.yml@<version>
+    uses: JacobPEvans/.github-ai/.github/workflows/issue-triage.yml@v1
     secrets: inherit
     with:
       issue_number: ${{ inputs.issue_number }}
@@ -525,7 +525,7 @@ jobs:
       always() &&
       github.event_name == 'workflow_dispatch' &&
       (needs.run-triage.result == 'success' || needs.run-triage.result == 'skipped')
-    uses: dryvist/ai-workflows/.github/workflows/cc-issue-resolver.yml@<version>
+    uses: JacobPEvans/.github-ai/.github/workflows/cc-issue-resolver.yml@v1
     secrets: inherit
     with:
       repo_context: "<repo-specific>"
@@ -565,7 +565,7 @@ jobs:
         (github.event.action == 'opened' && !github.event.pull_request.draft) ||
         (github.event.action == 'closed' && github.event.pull_request.merged == true)
       )
-    uses: dryvist/ai-workflows/.github/workflows/issue-linker.yml@<40-hex-sha> # vX.Y.Z
+    uses: JacobPEvans/.github-ai/.github/workflows/issue-linker.yml@v1
     secrets: inherit
 ```
 
@@ -705,8 +705,7 @@ per-PR group).
 
 Not every reusable workflow needs Claude. When the job is deterministic
 (GraphQL mutations, notifications, labeling), a plain `actions/github-script`
-workflow is cheaper, faster, and immune to AI-token limits. Current members:
-`ci-fail-issue.yml`, `review-thread-resolver.yml`.
+workflow is cheaper, faster, and immune to AI-token limits. Current member: `review-thread-resolver.yml`.
 
 **Review Thread Resolver** (`review-thread-resolver.yml`) exists because the
 org branch ruleset enforces `required_review_thread_resolution`: bot reviewers

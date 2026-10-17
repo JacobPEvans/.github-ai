@@ -56,7 +56,7 @@ on:
       TYPESAFE_API_KEY:
         description: >-
           Bearer token for the typesafe.ai API. Not `required: true`: a
-          caller several `workflow_call` layers away (e.g. dryvist/.github's
+          caller several `workflow_call` layers away (e.g. JacobPEvans/.github's
           `_ci-gate.yml`) may not have this secret plumbed all the way
           through yet. An absent/empty key fails the SDK call, which the
           fail-safe already turns into source=fallback, full/yes - the
@@ -71,7 +71,7 @@ jobs:
   scope:
     name: Classify CI scope
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     outputs:
       ci: ${{ steps.classify.outputs.ci }}
       molecule: ${{ steps.classify.outputs.molecule }}
@@ -81,7 +81,7 @@ jobs:
       reason: ${{ steps.classify.outputs.reason }}
       source: ${{ steps.classify.outputs.source }}
     steps:
-      # Explicitly dryvist/ai-workflows, not the default (the CALLER's own
+      # Explicitly JacobPEvans/.github-ai, not the default (the CALLER's own
       # repo) - this job needs nothing from the caller's checkout (every
       # PR fact it needs comes from the GitHub API, not local git), only
       # its own scripts/ and rubric, which live here regardless of who
@@ -90,7 +90,7 @@ jobs:
       # could be ahead or behind), however deep the workflow_call nesting.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             scripts

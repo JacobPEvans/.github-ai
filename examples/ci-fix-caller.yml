@@ -1,4 +1,4 @@
-# Example consumer caller for dryvist/ai-workflows cc-ci-fix.yml
+# Example consumer caller for JacobPEvans/.github-ai cc-ci-fix.yml
 #
 # Drop this in your repo at .github/workflows/ci-fix.yml. When your CI workflow
 # fails on a PR branch, Claude analyzes the failure logs and pushes a fix commit
@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   ci-fix:
-    uses: dryvist/ai-workflows/.github/workflows/cc-ci-fix.yml@<40-hex-sha> # vX.Y.Z
+    uses: JacobPEvans/.github-ai/.github/workflows/cc-ci-fix.yml@v1
     secrets: inherit
     with:
       repo_context: "Describe your repo: language, frameworks, how it builds."

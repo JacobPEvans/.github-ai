@@ -29,7 +29,7 @@ repositories are public. An explicit-secret caller forwards the pair:
 ```yaml
 jobs:
   run:
-    uses: dryvist/ai-workflows/.github/workflows/<name>.yml@<40-hex-sha> # vX.Y.Z
+    uses: JacobPEvans/.github-ai/.github/workflows/<name>.yml@v1
     secrets:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
@@ -110,12 +110,12 @@ Run the same dogfood workflow once per selector value:
 
 ```bash
 gh variable set GH_ACTION_AI_AGENT --org dryvist -b claude
-gh workflow run dogfood-ci.yml --repo dryvist/ai-workflows
-gh run watch --repo dryvist/ai-workflows
+gh workflow run dogfood-ci.yml --repo JacobPEvans/.github-ai
+gh run watch --repo JacobPEvans/.github-ai
 
 gh variable set GH_ACTION_AI_AGENT --org dryvist -b codex
-gh workflow run dogfood-ci.yml --repo dryvist/ai-workflows
-gh run watch --repo dryvist/ai-workflows
+gh workflow run dogfood-ci.yml --repo JacobPEvans/.github-ai
+gh run watch --repo JacobPEvans/.github-ai
 ```
 
 A successful run for each value proves that selection, credential forwarding,

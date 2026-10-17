@@ -3,9 +3,6 @@
     "checks": "read",
     "contents": "read"
   },
-  "_copilot-setup-steps.yml": {
-    "contents": "read"
-  },
   "best-practices.yml": {
     "actions": "read",
     "contents": "read",
@@ -57,22 +54,10 @@
     "contents": "read",
     "pull-requests": "write"
   },
-  "ci-fail-issue.yml": {
-    "actions": "read",
-    "contents": "read",
-    "issues": "write"
-  },
   "copilot-setup-steps.yml": {},
   "docs-drift.yml": {
     "contents": "read",
     "pull-requests": "write"
-  },
-  "docs-publisher.yml": {
-    "contents": "read"
-  },
-  "docs-sync.yml": {
-    "actions": "read",
-    "contents": "read"
   },
   "issue-backlog-sweep.yml": {
     "contents": "read",
@@ -107,9 +92,6 @@
   "pr-agent.yml": {
     "contents": "read",
     "pull-requests": "write"
-  },
-  "project-router.yml": {
-    "contents": "read"
   },
   "repo-hygiene-digest.yml": {
     "actions": "read",

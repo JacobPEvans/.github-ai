@@ -40,7 +40,7 @@ jobs:
     permissions:
       contents: read
       issues: read
-    timeout-minutes: 5
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -50,7 +50,7 @@ jobs:
       - name: Checkout ai-workflows
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             .github/scripts
@@ -97,14 +97,14 @@ jobs:
     name: Publish issue triage
     needs: triage
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
     steps:
       - name: Checkout publisher
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: dryvist/ai-workflows
+          repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts/issue-triage
           path: .ai-workflows-publisher
