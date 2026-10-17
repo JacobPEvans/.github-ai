@@ -6,12 +6,11 @@
 # lookup lives in this workflow instead of the reusable workflow below.
 name: AI Review
 
-# Each value is a vault-action selector: `secret/data/<path> <field>`.
-# Replace each placeholder from the ci-ai-review secret-path contract.
+# Each value is a vault-action selector: `<mount>/data/<path> <field>`, readable by the ci-ai-review policy.
 env:
-  OPENBAO_ROUTER_KEY_PATH: "secret/data/REPLACE_WITH_PRIVATE_ROUTER_KEY_PATH REPLACE_WITH_PRIVATE_ROUTER_KEY_FIELD"
-  OPENBAO_ROUTER_OSS_KEY_PATH: "secret/data/REPLACE_WITH_OPEN_SOURCE_ROUTER_KEY_PATH REPLACE_WITH_OPEN_SOURCE_ROUTER_KEY_FIELD"
-  OPENBAO_ROUTER_URL_PATH: "secret/data/REPLACE_WITH_ROUTER_URL_PATH REPLACE_WITH_ROUTER_URL_FIELD"
+  OPENBAO_ROUTER_KEY_PATH: "secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key"
+  OPENBAO_ROUTER_OSS_KEY_PATH: "secret/data/apps/github-actions-oss github_actions_oss_llm_router_key"
+  OPENBAO_ROUTER_URL_PATH: "config/data/ci-ai-review base_url"
 
 on:
   pull_request:
