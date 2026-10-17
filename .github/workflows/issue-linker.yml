@@ -129,6 +129,8 @@ jobs:
           prompt: ${{ steps.render-prompt.outputs.content }}
           permission_profile: workspace
           allowed_tools: "Write,Read,Glob,Grep,LS,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh search issues:*)"
+          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
       - name: Upload issue-linker artifact
         if: >-

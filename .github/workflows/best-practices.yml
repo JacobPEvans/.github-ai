@@ -137,6 +137,8 @@ jobs:
           codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}
           permission_profile: workspace
           allowed_tools: "Write,Read,Glob,Grep,LS,Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh search issues:*)"
+          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
       - name: Upload recommendation artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -62,6 +62,9 @@ on:
         required: false
         default: moderate
     secrets:
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY:
+        description: Claude bot App key; posts the neutral check run on a router failure.
+        required: false
       LLM_ROUTER_BASE_URL:
         required: true
       LLM_ROUTER_API_KEY:
@@ -190,6 +193,8 @@ jobs:
           openai_effort: ${{ vars.GH_ACTION_AI_CODEX_EFFORT }}
           codex_version: ${{ vars.GH_ACTION_AI_CODEX_VERSION }}
           allowed_bots: "github-actions,renovate,dependabot"
+          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
       - name: Upload review handoff
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
