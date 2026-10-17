@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Run the requested PR-Agent tools against the router.
 #
-# Credentials reach PR-Agent through a protected env file rather than command
-# arguments. The review and simplification prompts come from the central rubric
-# checked out from this workflow's ref and override consumer configuration.
+# Credentials reach Docker through environment variable names, not command
+# arguments or files. Non-secret settings use an env file. The review and
+# simplification prompts come from this workflow's central rubric.
 #
 # Env: BASE_URL API_KEY JOB_TOKEN MODEL MAX_TOKENS JOB_TIMEOUT_MINUTES RUBRIC_FILE
 #      PR_URL RUN_REVIEW RUN_IMPROVE RUN_DESCRIBE
@@ -29,15 +29,11 @@ export PR_REVIEWER__EXTRA_INSTRUCTIONS="$reviewer_instructions"
 export PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS="$suggestion_instructions"
 
 env_file="$(mktemp)"
-chmod 600 "$env_file"
 trap 'rm -f "$env_file"' EXIT
 
 # --env-file parses KEY=VALUE literally: no quoting, no interpolation, and a
 # quote character would become part of the value.
 {
-  echo "OPENAI__KEY=$API_KEY"
-  echo "OPENAI__API_BASE=$BASE_URL"
-  echo "GITHUB__USER_TOKEN=$JOB_TOKEN"
   echo "CONFIG__MODEL=openai/${MODEL:?MODEL is required}"
   # The built-in fallback list names a vendor model this key cannot reach, so
   # leaving it at its default turns the first model error into an auth error.
@@ -66,6 +62,9 @@ trap 'rm -f "$env_file"' EXIT
   echo "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY=false"
   echo "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT=false"
 } > "$env_file"
+export OPENAI__KEY="$API_KEY"
+export OPENAI__API_BASE="$BASE_URL"
+export GITHUB__USER_TOKEN="$JOB_TOKEN"
 
 tools=""
 [ "${RUN_REVIEW:-false}" = "true" ] && tools="${tools} review"
@@ -83,6 +82,7 @@ trap 'rm -f "$env_file" "$log"' EXIT
 for tool in $tools; do
   echo "::group::pr-agent $tool"
   docker run --rm --env-file "$env_file" \
+    --env OPENAI__KEY --env OPENAI__API_BASE --env GITHUB__USER_TOKEN \
     --env PR_REVIEWER__EXTRA_INSTRUCTIONS \
     --env PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS \
     "$image" --pr_url "$PR_URL" "$tool" 2>&1 | tee "$log"

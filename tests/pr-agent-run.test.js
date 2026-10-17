@@ -71,6 +71,12 @@ test('run.sh gives PR-Agent exactly one request per model call', () => {
     expect(env).toContain('CONFIG__AI_TIMEOUT=240\n');
     expect(env).toContain('CONFIG__RETRY_SAME_MODEL_ON_TIMEOUT=false\n');
     expect(env).toContain('CONFIG__NUM_RETRIES=0\n');
+    expect(env).toContain('docker-env=OPENAI__KEY');
+    expect(env).toContain('docker-env=OPENAI__API_BASE');
+    expect(env).toContain('docker-env=GITHUB__USER_TOKEN');
+    expect(env).not.toContain('OPENAI__KEY=k');
+    expect(env).not.toContain('OPENAI__API_BASE=https://router.invalid/v1');
+    expect(env).not.toContain('GITHUB__USER_TOKEN=t');
     expect(env).toContain('docker-env=PR_REVIEWER__EXTRA_INSTRUCTIONS');
     expect(env).toContain('docker-env=PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS');
     expect(env).toContain('Is every third-party `uses:` pinned to a full commit SHA');

@@ -77,11 +77,11 @@ request over the API — and the image is pinned by digest in
 | --- | --- | --- |
 | `LLM_ROUTER_BASE_URL` | Actions **secret** | The router's OpenAI-compatible base URL, ending in `/v1` |
 | `LLM_ROUTER_API_KEY` | Actions **secret** | Scoped router virtual key for private repositories (never the router's master key) |
-| `LLM_ROUTER_OSS_API_KEY` | Actions **secret** | A second router virtual key, scoped to the open-source role; read only on such a repo |
+| `LLM_ROUTER_OSS_API_KEY` | Optional Actions **secret** | A second router virtual key, scoped to the open-source role; read only on such a repo |
 
-The first two are required. The base URL is a secret rather than a variable
-because a run log prints each step's environment verbatim, and these
-repositories are public.
+Reusable-workflow callers pass the base URL and private-repository key, plus the
+open-source key when reviewing public repositories. The required workflow entry
+reads all three values from OpenBao instead of relying on GitHub secrets.
 
 ## Central rubric
 
@@ -117,14 +117,24 @@ Do **not** give the caller a `concurrency:` block that repeats this workflow's
 own group. A caller sharing the reusable workflow's exact concurrency group
 produces an opaque zero-job `startup_failure` that appears nowhere in the API.
 
+## Required workflow entry
+
+`.github/workflows/ai-review.yml` is the input-free, secretless required entry.
+It retains the scope classifier, dependency-bot skip, and fork rejection, then
+reads the router credentials from OpenBao before its review step reads the pull
+request. The OpenBao role binds to this required workflow's OIDC identity, so
+the required entry runs the shared PR-Agent runner directly. The reusable
+`pr-agent.yml` remains available to existing callers, which continue to pass
+its current router secrets.
+
 ## Security notes
 
 - `pull_request` only, never `pull_request_target`.
-- Same-repo heads only, so a fork never sees the router key. Draft pull
-  requests are skipped.
+- Same-repo heads only, so a fork never receives the OIDC token or router key.
+  Draft pull requests are reviewed too.
 - The job token is read-only on contents and write only on pull requests.
-- Configuration reaches the container through an env file, so the key never
-  appears in a process listing.
+- Credentials reach Docker by environment variable name, so their values do
+  not appear in process arguments or temporary files.
 - The base URL and its bare host are registered with `::add-mask::` before the
   first request: a connection error names the host, and that string is not the
   secret, so Actions would not mask it on its own.

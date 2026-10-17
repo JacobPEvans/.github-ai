@@ -18,7 +18,7 @@
 #    closed, because this is a required check: the job summary says the review
 #    was not performed, a check run is posted with conclusion failure, and one
 #    ops alert is sent to ntfy. Any other tool failure also fails the job. The
-#    job is capped (`timeout_minutes`, ten by default). It never reports success
+#    job is capped (`timeout_minutes`, five by default). It never reports success
 #    having reviewed nothing.
 #
 # PR-Agent is invoked as its published container through the CLI it documents,
@@ -96,12 +96,12 @@ on:
         description: >-
           The router's OpenAI-compatible base URL, ending in /v1. A secret
           rather than a variable: run logs print step environments verbatim.
-        required: false
+        required: true
       LLM_ROUTER_API_KEY:
         description: >-
           Scoped router virtual key for private repositories (never the
           router's master key).
-        required: false
+        required: true
       LLM_ROUTER_OSS_API_KEY:
         description: >-
           A second router virtual key, scoped to the role open-source
@@ -161,7 +161,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: JacobPEvans/.github-ai
-          ref: ${{ job.workflow_sha }}
+          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
           sparse-checkout: |
             .github/scripts
             pr-agent/rubric.toml
