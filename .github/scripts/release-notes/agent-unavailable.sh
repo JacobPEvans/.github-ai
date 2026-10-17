@@ -21,7 +21,7 @@ if [ "$AGENT_OUTCOME" = "success" ]; then
   exit 0
 fi
 
-if [ $(( $(date +%s) - STARTED )) -lt "${DEADLINE_SECONDS:-360}" ]; then
+if [ $(( $(date +%s) - STARTED )) -lt "${DEADLINE_SECONDS:-180}" ]; then
   echo "::error::Release highlights agent failed for a reason other than the router, a budget or the deadline."
   exit 1
 fi

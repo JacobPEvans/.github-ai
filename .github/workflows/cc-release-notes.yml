@@ -158,9 +158,9 @@ jobs:
 
       - name: Run AI agent
         id: agent
-        # Leaves room inside the job's 8-minute cap for the report and publish
+        # Leaves room inside the job's 5-minute pull_request cap for the report
         # steps. A step that runs past this bound is a deadline, not a failure.
-        timeout-minutes: 6
+        timeout-minutes: 3
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
           agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
@@ -177,7 +177,7 @@ jobs:
           claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
-      # A gateway, budget or 429 failure, or the 6-minute bound, ends this job
+      # A gateway, budget or 429 failure, or the 3-minute bound, ends this job
       # neutrally with the summary line and an ops alert. Any other failure fails it.
       # Minted only when the agent did not succeed, for the deadline check run.
       # A failed mint is named by the unavailable step, which then fails.
@@ -198,7 +198,7 @@ jobs:
           AGENT_OUTCOME: ${{ steps.agent.outcome }}
           GATEWAY_CLASS: ${{ steps.agent.outputs.gateway_class }}
           STARTED: ${{ steps.clock.outputs.started }}
-          DEADLINE_SECONDS: "360"
+          DEADLINE_SECONDS: "180"
           JOB_NAME: ${{ github.workflow }}
           NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
