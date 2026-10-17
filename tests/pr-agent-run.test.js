@@ -1,5 +1,5 @@
 const { expect, test } = require('bun:test');
-const { mkdtempSync, rmSync, writeFileSync, chmodSync } = require('fs');
+const { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } = require('fs');
 const { join } = require('path');
 const { tmpdir } = require('os');
 
@@ -35,12 +35,97 @@ function runWithDockerPrinting(output) {
   }
 }
 
+function runWithDockerSequence(outputs) {
+  const dir = mkdtempSync(join(tmpdir(), 'pr-agent-run-'));
+  const callsFile = join(dir, 'docker-calls');
+  const sleepsFile = join(dir, 'sleep-calls');
+  try {
+    const docker = join(dir, 'docker');
+    const sleep = join(dir, 'sleep');
+    const cases = outputs.map((output, index) => {
+      const lines = output.split('\n').map((line) => JSON.stringify(line)).join(' ');
+      return '    ' + (index + 1) + ") printf '%s\\n' " + lines + ' ;;';
+    }).join('\n');
+    const dockerScript = [
+      '#!/usr/bin/env bash',
+      'count=0',
+      'if [ -f "$DOCKER_CALLS" ]; then count="$(cat "$DOCKER_CALLS")"; fi',
+      'count=$((count + 1))',
+      "printf '%s\\n' \"$count\" > \"$DOCKER_CALLS\"",
+      'case "$count" in',
+      cases,
+      '    *) ;;',
+      'esac',
+      '',
+    ].join('\n');
+    writeFileSync(docker, dockerScript);
+    writeFileSync(sleep, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$SLEEP_CALLS"\n');
+    chmodSync(docker, 0o755);
+    chmodSync(sleep, 0o755);
+    const result = Bun.spawnSync(['bash', script], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        PATH: dir + ':' + process.env.PATH,
+        BASE_URL: 'https://router.invalid/v1',
+        API_KEY: 'k',
+        JOB_TOKEN: 't',
+        MODEL: 'medium',
+        JOB_TIMEOUT_MINUTES: '5',
+        MAX_TOKENS: '32000',
+        RUBRIC_FILE: rubricFile,
+        PR_URL: 'https://github.com/o/r/pull/1',
+        RUN_REVIEW: 'true',
+        DOCKER_CALLS: callsFile,
+        SLEEP_CALLS: sleepsFile,
+      },
+    });
+    return {
+      result,
+      callCount: Number(readFileSync(callsFile, 'utf8').trim()),
+      sleepCalls: existsSync(sleepsFile) ? readFileSync(sleepsFile, 'utf8').trim().split('\n') : [],
+      gatewayReason: existsSync(join(dir, 'gateway-reason.txt'))
+        ? readFileSync(join(dir, 'gateway-reason.txt'), 'utf8').trim()
+        : undefined,
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 test('run.sh fails when PR-Agent logs a failed request', () => {
   const result = runWithDockerPrinting(
     '2026-09-19 20:07:54.285 | ERROR | pr_agent.agent.pr_agent:_handle_request:184 - Failed to process the command.',
   );
   expect(result.exitCode).toBe(1);
   expect(result.stdout.toString()).toContain('::error::pr-agent review failed');
+});
+
+test('run.sh retries a connection failure once and continues after success', () => {
+  const failedConnection = [
+    '2026-09-19 20:07:54.285 | ERROR | pr_agent.agent.pr_agent:_handle_request:184 - Failed to process the command.',
+    'connect ECONNRESET 10.0.0.1:4000',
+  ].join('\n');
+  const run = runWithDockerSequence([
+    failedConnection,
+    'INFO | pr_agent.tools.pr_reviewer:run:203 - Reviewing PR: done',
+  ]);
+  expect(run.result.exitCode).toBe(0);
+  expect(run.callCount).toBe(2);
+  expect(run.sleepCalls).toEqual(['15']);
+  expect(run.gatewayReason).toBeUndefined();
+});
+
+test('run.sh does not retry a timeout-class failure', () => {
+  const failedTimeout = [
+    '2026-09-19 20:07:54.285 | ERROR | pr_agent.agent.pr_agent:_handle_request:184 - Failed to process the command.',
+    'litellm.Timeout: APITimeoutError - Request timed out. timeout value=90.0',
+  ].join('\n');
+  const run = runWithDockerSequence([failedTimeout]);
+  expect(run.result.exitCode).toBe(0);
+  expect(run.callCount).toBe(1);
+  expect(run.sleepCalls).toEqual([]);
+  expect(run.gatewayReason).toBe('timeout');
 });
 
 test('run.sh gives PR-Agent exactly one request per model call', () => {
