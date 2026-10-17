@@ -138,6 +138,8 @@ jobs:
           codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}
           permission_profile: workspace
           allowed_tools: "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git status:*),Bash(git branch:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh search:*)"
+          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
       - name: Capture proposed patch
         run: git diff --binary -- . ':(exclude).ai-output/**' > .ai-output/changes.patch

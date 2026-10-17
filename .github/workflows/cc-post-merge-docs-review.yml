@@ -205,6 +205,8 @@ jobs:
           agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
           prompt: |
             ${{ steps.prompt.outputs.content }}
+          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
             ${{ inputs.extra_prompt_instructions }}
           claude_model: ${{ vars.GH_ACTION_AI_MODEL }}
