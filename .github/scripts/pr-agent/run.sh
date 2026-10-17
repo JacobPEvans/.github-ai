@@ -79,23 +79,35 @@ fi
 log="$(mktemp)"
 trap 'rm -f "$env_file" "$log"' EXIT
 
-for tool in $tools; do
-  echo "::group::pr-agent $tool"
+run_tool() {
   docker run --rm --env-file "$env_file" \
     --env OPENAI__KEY --env OPENAI__API_BASE --env GITHUB__USER_TOKEN \
     --env PR_REVIEWER__EXTRA_INSTRUCTIONS \
     --env PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS \
-    "$image" --pr_url "$PR_URL" "$tool" 2>&1 | tee "$log"
+    "$image" --pr_url "$PR_URL" "$1" 2>&1 | tee "$log"
+}
+# PR-Agent 0.45.0 exits 0 whatever happened; a failed request is logged as
+# exactly this line. Fixed upstream in qodo-ai/pr-agent#3368 — drop this
+# check once the pinned image carries it.
+failed() { grep -q "Failed to process the command\." "$log"; }
+gateway_reason() { bash "$(dirname "$0")/../shared/gateway-failure.sh" classify "$log"; }
+
+for tool in $tools; do
+  echo "::group::pr-agent $tool"
+  run_tool "$tool"
+  # One retry for the fast gateway classes only: it fits inside the 5-minute
+  # cap, while a timed-out ladder walk does not.
+  if failed && [[ "$(gateway_reason)" =~ ^(connection|rate-limited)$ ]]; then
+    sleep 15
+    run_tool "$tool"
+  fi
   echo "::endgroup::"
-  # PR-Agent 0.45.0 exits 0 whatever happened; a failed request is logged as
-  # exactly this line. Fixed upstream in qodo-ai/pr-agent#3368 — drop this
-  # check once the pinned image carries it.
-  if grep -q "Failed to process the command\." "$log"; then
+  if failed; then
     # A router, budget or 429 failure is not a review finding, so it never
     # blocks a merge: the job passes and the following steps post a neutral
     # "AI review not performed" check run and an ops alert. The remaining tools
     # would hit the same refusal, so they are not run.
-    reason="$(bash "$(dirname "$0")/../shared/gateway-failure.sh" classify "$log")"
+    reason="$(gateway_reason)"
     if [ -n "$reason" ]; then
       echo "$reason" > gateway-reason.txt
       echo "::warning::pr-agent $tool: router gateway failure ($reason); review not performed."
