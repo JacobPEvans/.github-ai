@@ -4,22 +4,15 @@
 # (`org-ai-review`), which injects this workflow into the pull requests of
 # EVERY repo in the org — no per-repo `uses:` caller, so a repo cannot opt out
 # by omission. It mirrors markdownlint.yml (the proven required-workflow
-# pattern) and defers the actual review to JacobPEvans/.github-ai' reusable
-# PR-Agent workflow, which reads each repo's own `.pr_agent.toml` for its
-# checklist.
+# pattern) and defers the actual review to the same-ref PR-Agent reusable
+# workflow, which applies this repository's central rubric. This required
+# entry takes no inputs or secrets.
 #
 # Every review runs on the shared self-hosted pool against the org's model
-# router — the only runners that reach it. Repository visibility picks the
-# router key, as data on the one call below, never a second job: a private
-# repo reviews with LLM_ROUTER_API_KEY, an open-source repo with
-# LLM_ROUTER_OSS_API_KEY, a second router key scoped to the open-source role.
-# The reusable workflow picks the matching role (`model` / `oss_model`)
-# from the same expression, and each role carries its own fallback ladder on
-# the router — local models first — so where a diff may travel is decided by
-# the role and the key that may call it, never here. All three router secrets
-# are org secrets synced from the secret manager; the reusable workflow never
-# reads the open-source key on a private repo. GH_APP_CLAUDE_BOT_PRIVATE_KEY
-# mints the token that posts the failure check run after a router failure.
+# router — the only runners that reach it. Repository visibility selects the
+# private-repo or open-source key and role in the reusable workflow. The
+# required path obtains these values through workload identity; other callers
+# can continue passing the existing reusable-workflow secrets.
 #
 # A router that is down or at capacity fails the review within seconds —
 # never a green check that reviewed nothing. Whether that failure blocks the
@@ -53,8 +46,6 @@ jobs:
       contents: read
       pull-requests: read
     uses: JacobPEvans/.github-ai/.github/workflows/scope-classify.yml@v1
-    secrets:
-      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
 
   # Renovate and release-please pull requests are version bumps and
   # changelog/lockfile edits by construction; a model review of them answers
@@ -86,17 +77,5 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: JacobPEvans/.github-ai/.github/workflows/pr-agent.yml@v1
-    with:
-      review: true
-      # Open-source repositories request review-oss.
-      oss_model: review-oss
-      # improve stays off: over 84 org-wide runs (2026-09-18/19) it took a
-      # median 62 s of model time per pull request — more than the review
-      # itself — and produced "No code suggestions" three times out of four.
-      # A repository that wants suggestions opts in through its own caller.
-    secrets:
-      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
-      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
-      LLM_ROUTER_OSS_API_KEY: ${{ secrets.LLM_ROUTER_OSS_API_KEY }}
-      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+      id-token: write
+    uses: ./.github/workflows/pr-agent.yml

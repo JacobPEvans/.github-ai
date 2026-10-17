@@ -96,12 +96,12 @@ on:
         description: >-
           The router's OpenAI-compatible base URL, ending in /v1. A secret
           rather than a variable: run logs print step environments verbatim.
-        required: true
+        required: false
       LLM_ROUTER_API_KEY:
         description: >-
           Scoped router virtual key for private repositories (never the
           router's master key).
-        required: true
+        required: false
       LLM_ROUTER_OSS_API_KEY:
         description: >-
           A second router virtual key, scoped to the role open-source
