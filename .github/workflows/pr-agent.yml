@@ -68,11 +68,11 @@ on:
         default: 32000
       timeout_minutes:
         description: >-
-          Job cap, and the client deadline PR-Agent hands its completion
-          client: one number, so the client never gives up before the job.
+          Job cap. The model request timeout leaves a 60-second margin for
+          setup and PR publication.
         type: number
         required: false
-        default: 10
+        default: 5
       review:
         description: "Run the review tool: verdicts on the diff as one sticky comment."
         type: boolean
@@ -153,6 +153,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    # Five minutes is 300 seconds; a 240-second request leaves 60 seconds for
+    # setup and PR publication, with request retries disabled.
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || inputs.timeout_minutes }}
     steps:
       - name: Checkout ai-workflows scripts
@@ -171,7 +173,7 @@ jobs:
           JOB_TOKEN: ${{ github.token }}
           MODEL: ${{ github.event.repository.private && inputs.model || inputs.oss_model }}
           MAX_TOKENS: ${{ inputs.max_tokens }}
-          JOB_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+          JOB_TIMEOUT_MINUTES: ${{ github.event_name == 'pull_request' && 5 || inputs.timeout_minutes }}
           CONFIG_BRANCH: ${{ github.head_ref }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           RUN_REVIEW: ${{ inputs.review }}

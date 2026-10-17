@@ -22,7 +22,7 @@ function runWithDockerPrinting(output) {
         API_KEY: 'k',
         JOB_TOKEN: 't',
         MODEL: 'medium',
-        JOB_TIMEOUT_MINUTES: '10',
+        JOB_TIMEOUT_MINUTES: '5',
         MAX_TOKENS: '32000',
         PR_URL: 'https://github.com/o/r/pull/1',
         RUN_REVIEW: 'true',
@@ -58,14 +58,14 @@ test('run.sh gives PR-Agent exactly one request per model call', () => {
         API_KEY: 'k',
         JOB_TOKEN: 't',
         MODEL: 'medium',
-        JOB_TIMEOUT_MINUTES: '10',
+        JOB_TIMEOUT_MINUTES: '5',
         MAX_TOKENS: '32000',
         PR_URL: 'https://github.com/o/r/pull/1',
         RUN_REVIEW: 'true',
       },
     });
     const env = result.stdout.toString();
-    expect(env).toContain('CONFIG__AI_TIMEOUT=600\n');
+    expect(env).toContain('CONFIG__AI_TIMEOUT=240\n');
     expect(env).toContain('CONFIG__RETRY_SAME_MODEL_ON_TIMEOUT=false\n');
     expect(env).toContain('CONFIG__NUM_RETRIES=0\n');
   } finally {

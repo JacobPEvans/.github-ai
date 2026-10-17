@@ -20,7 +20,7 @@ release pull requests, or a provenance footer.
 
 Not advisory. If the router is down or at capacity the job fails, releasing
 the runner: the router admits or refuses at once, and the job is capped
-(`timeout_minutes`, ten by default). The router role's fallback ladder absorbs load. A wrong key,
+(`timeout_minutes`, five by default). The router role's fallback ladder absorbs load. A wrong key,
 base URL or model fails at once. A
 model error fails the job rather than being swallowed: PR-Agent 0.45.0's
 CLI exits 0 either way (`config.propagate_tool_errors` only changes what it
@@ -30,8 +30,8 @@ one request: a timed-out call is not replayed on the same model
 (`config.retry_same_model_on_timeout=false`) and the completion client adds
 no retries of its own (`config.num_retries=0`). The router bounds the
 request and walks the role's ladder; a Gateway Timeout from it is final.
-`config.ai_timeout` is the job cap in seconds, derived from the same
-`timeout_minutes`, so the client never gives up before the job does. It is a
+`config.ai_timeout` is 240 seconds inside the five-minute job cap, leaving a
+60-second margin for setup and PR publication. It is a
 number rather than the settings loader's null token because PR-Agent
 re-reads its environment with casting off once it applies repo settings, and
 the token then reaches the completion client as a literal string.
@@ -66,6 +66,7 @@ request over the API — and the image is pinned by digest in
 | `model` | `medium` | Private repos: router **capability name** (never a vendor id) one `LLM_ROUTER_API_KEY` may call |
 | `oss_model` | `review-oss` | Open-source repos: router capability name one `LLM_ROUTER_OSS_API_KEY` may call |
 | `max_tokens` | `32000` | Input context to assume for the model (`custom_model_max_tokens`) |
+| `timeout_minutes` | `5` | Maximum job time; pull-request runs are capped at five minutes |
 | `review` | `true` | Run the review tool |
 | `improve` | `false` | Run the improve tool |
 | `describe` | `false` | Run the describe tool (rewrites title and body) |

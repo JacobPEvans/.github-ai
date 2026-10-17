@@ -46,14 +46,14 @@ trap 'rm -f "$env_file"' EXIT
   # walks the role's ladder itself; a Gateway Timeout from it is final, and a
   # client-side replay is a second full walk. PR-Agent 0.45.0 replays a
   # timed-out call on the same model unless told not to, and its completion
-  # client retries underneath unless capped. The client deadline is the job
-  # cap itself, derived from the one value the workflow already holds, so the
-  # client never gives up before the job does. It has to be a number: the
+  # client retries underneath unless capped. Reserve 60 seconds:
+  # 5 minutes * 60 seconds - 60 seconds = 240 seconds.
+  # The client deadline has to be a number: the
   # settings loader's null token does not survive PR-Agent's own environment
   # replay (it re-reads the environment with casting off once it applies repo
   # settings), so it reaches the completion client as a literal string and
   # the request fails before it is sent.
-  echo "CONFIG__AI_TIMEOUT=$(( ${JOB_TIMEOUT_MINUTES:?JOB_TIMEOUT_MINUTES is required} * 60 ))"
+  echo "CONFIG__AI_TIMEOUT=$(( ${JOB_TIMEOUT_MINUTES:?JOB_TIMEOUT_MINUTES is required} * 60 - 60 ))"
   echo "CONFIG__RETRY_SAME_MODEL_ON_TIMEOUT=false"
   echo "CONFIG__NUM_RETRIES=0"
   # Without this a tool that fails internally still exits 0, which is the
