@@ -305,7 +305,7 @@ jobs:
       - name: Read CI-fix router key through OpenBao OIDC
         id: router-key
         if: inputs.local_only
-        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: ${{ secrets.OPENBAO_ADDR }}
           method: jwt

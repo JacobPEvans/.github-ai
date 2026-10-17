@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 # Run the requested PR-Agent tools against the router.
 #
-# Configuration reaches PR-Agent through an env file rather than `docker run
-# -e`: the key then never appears in a process listing. Everything here is
-# wiring; the prompts (review checklist, what "simplify" means, ignore rules)
-# come from the target repository's own .pr_agent.toml, which PR-Agent reads
-# over the API. CONFIG__CONFIG_BRANCH points it at the pull request's own head
-# branch, so a change to that file is reviewable in the pull request that makes
-# it instead of only after merge.
+# Credentials reach Docker through environment variable names, not command
+# arguments or files. Non-secret settings use an env file. The review and
+# simplification prompts come from this workflow's central rubric.
 #
-# Env: BASE_URL API_KEY JOB_TOKEN MODEL MAX_TOKENS JOB_TIMEOUT_MINUTES CONFIG_BRANCH
+# Env: BASE_URL API_KEY JOB_TOKEN MODEL MAX_TOKENS JOB_TIMEOUT_MINUTES RUBRIC_FILE
 #      PR_URL RUN_REVIEW RUN_IMPROVE RUN_DESCRIBE
 set -euo pipefail
 
@@ -20,22 +16,24 @@ set -euo pipefail
 : "${BASE_URL:?BASE_URL is required}"
 : "${API_KEY:?API_KEY is required}"
 : "${JOB_TOKEN:?JOB_TOKEN is required}"
+: "${RUBRIC_FILE:?RUBRIC_FILE is required}"
 : "${PR_URL:?PR_URL is required}"
 
 # Pinned by digest as well as tag: the tag is mutable, and a review's behaviour
 # should change only when this line does. Renovate tracks the tag.
 image="pragent/pr-agent:0.45.0@sha256:e6463e802562daa47db51950de84100a5679472844926d77d53911e529398ee5"
 
+reviewer_instructions="$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["pr_reviewer"]["extra_instructions"], end="")' "$RUBRIC_FILE")"
+suggestion_instructions="$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["pr_code_suggestions"]["extra_instructions"], end="")' "$RUBRIC_FILE")"
+export PR_REVIEWER__EXTRA_INSTRUCTIONS="$reviewer_instructions"
+export PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS="$suggestion_instructions"
+
 env_file="$(mktemp)"
-chmod 600 "$env_file"
 trap 'rm -f "$env_file"' EXIT
 
 # --env-file parses KEY=VALUE literally: no quoting, no interpolation, and a
 # quote character would become part of the value.
 {
-  echo "OPENAI__KEY=$API_KEY"
-  echo "OPENAI__API_BASE=$BASE_URL"
-  echo "GITHUB__USER_TOKEN=$JOB_TOKEN"
   echo "CONFIG__MODEL=openai/${MODEL:?MODEL is required}"
   # The built-in fallback list names a vendor model this key cannot reach, so
   # leaving it at its default turns the first model error into an auth error.
@@ -46,14 +44,14 @@ trap 'rm -f "$env_file"' EXIT
   # walks the role's ladder itself; a Gateway Timeout from it is final, and a
   # client-side replay is a second full walk. PR-Agent 0.45.0 replays a
   # timed-out call on the same model unless told not to, and its completion
-  # client retries underneath unless capped. The client deadline is the job
-  # cap itself, derived from the one value the workflow already holds, so the
-  # client never gives up before the job does. It has to be a number: the
+  # client retries underneath unless capped. Reserve 60 seconds:
+  # 5 minutes * 60 seconds - 60 seconds = 240 seconds.
+  # The client deadline has to be a number: the
   # settings loader's null token does not survive PR-Agent's own environment
   # replay (it re-reads the environment with casting off once it applies repo
   # settings), so it reaches the completion client as a literal string and
   # the request fails before it is sent.
-  echo "CONFIG__AI_TIMEOUT=$(( ${JOB_TIMEOUT_MINUTES:?JOB_TIMEOUT_MINUTES is required} * 60 ))"
+  echo "CONFIG__AI_TIMEOUT=$(( ${JOB_TIMEOUT_MINUTES:?JOB_TIMEOUT_MINUTES is required} * 60 - 60 ))"
   echo "CONFIG__RETRY_SAME_MODEL_ON_TIMEOUT=false"
   echo "CONFIG__NUM_RETRIES=0"
   # Without this a tool that fails internally still exits 0, which is the
@@ -63,10 +61,10 @@ trap 'rm -f "$env_file"' EXIT
   # Review labels would need issues: write to create a label that is missing.
   echo "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY=false"
   echo "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT=false"
-  if [ -n "${CONFIG_BRANCH:-}" ]; then
-    echo "CONFIG__CONFIG_BRANCH=$CONFIG_BRANCH"
-  fi
 } > "$env_file"
+export OPENAI__KEY="$API_KEY"
+export OPENAI__API_BASE="$BASE_URL"
+export GITHUB__USER_TOKEN="$JOB_TOKEN"
 
 tools=""
 [ "${RUN_REVIEW:-false}" = "true" ] && tools="${tools} review"
@@ -83,7 +81,11 @@ trap 'rm -f "$env_file" "$log"' EXIT
 
 for tool in $tools; do
   echo "::group::pr-agent $tool"
-  docker run --rm --env-file "$env_file" "$image" --pr_url "$PR_URL" "$tool" 2>&1 | tee "$log"
+  docker run --rm --env-file "$env_file" \
+    --env OPENAI__KEY --env OPENAI__API_BASE --env GITHUB__USER_TOKEN \
+    --env PR_REVIEWER__EXTRA_INSTRUCTIONS \
+    --env PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS \
+    "$image" --pr_url "$PR_URL" "$tool" 2>&1 | tee "$log"
   echo "::endgroup::"
   # PR-Agent 0.45.0 exits 0 whatever happened; a failed request is logged as
   # exactly this line. Fixed upstream in qodo-ai/pr-agent#3368 — drop this

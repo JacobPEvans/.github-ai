@@ -8,7 +8,10 @@ const { join } = require('path');
 // the caller pick the code that runs with the job's token and secrets.
 const dir = join('.github', 'workflows');
 const files = readdirSync(dir).filter((f) => f.endsWith('.yml'));
-const OWN_REF = '${{ job.workflow_sha }}';
+const OWN_REFS = new Set([
+  '${{ job.workflow_sha }}',
+  "${{ fromJSON(toJSON(job))['workflow_sha'] }}",
+]);
 
 test('at least one workflow checks out ai-workflows', () => {
   expect(files.some((f) => readFileSync(join(dir, f), 'utf8').includes('repository: JacobPEvans/.github-ai'))).toBe(true);
@@ -28,7 +31,7 @@ for (const f of files) {
     for (const job of Object.values(doc.jobs ?? {})) {
       for (const step of job.steps ?? []) {
         if (step.with?.repository !== 'JacobPEvans/.github-ai') continue;
-        expect(step.with.ref).toBe(OWN_REF);
+        expect(OWN_REFS.has(step.with.ref)).toBe(true);
       }
     }
   });

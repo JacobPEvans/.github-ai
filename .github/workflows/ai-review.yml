@@ -1,42 +1,16 @@
 # Org-wide AI review of every pull request, enforced via Required Workflows.
 #
-# Referenced by dryvist/tofu-github's github_organization_ruleset
-# (`org-ai-review`), which injects this workflow into the pull requests of
-# EVERY repo in the org — no per-repo `uses:` caller, so a repo cannot opt out
-# by omission. It mirrors markdownlint.yml (the proven required-workflow
-# pattern) and defers the actual review to JacobPEvans/.github-ai' reusable
-# PR-Agent workflow, which reads each repo's own `.pr_agent.toml` for its
-# checklist.
-#
-# Every review runs on the shared self-hosted pool against the org's model
-# router — the only runners that reach it. Repository visibility picks the
-# router key, as data on the one call below, never a second job: a private
-# repo reviews with LLM_ROUTER_API_KEY, an open-source repo with
-# LLM_ROUTER_OSS_API_KEY, a second router key scoped to the open-source role.
-# The reusable workflow picks the matching role (`model` / `oss_model`)
-# from the same expression, and each role carries its own fallback ladder on
-# the router — local models first — so where a diff may travel is decided by
-# the role and the key that may call it, never here. All three router secrets
-# are org secrets synced from the secret manager; the reusable workflow never
-# reads the open-source key on a private repo. GH_APP_CLAUDE_BOT_PRIVATE_KEY
-# mints the token that posts the failure check run after a router failure.
-#
-# A router that is down or at capacity fails the review within seconds —
-# never a green check that reviewed nothing. Whether that failure blocks the
-# merge is the ruleset's enforcement mode (tofu-github), not this file's.
-#
-# No concurrency block here on purpose: the reusable workflow already scopes
-# its group per pull request, and a caller sharing that exact group causes an
-# opaque 0-job startup_failure.
-#
-# `scope` (JacobPEvans/.github-ai' content-aware scope-classify.yml, "Jev")
-# runs unconditionally and gates `pr-agent` on its `ai_review` output. The
-# required workflow itself always completes (`dependency-bot` or `pr-agent`
-# always runs); only whether `pr-agent`'s review job runs is narrowed. A
-# scope failure, or `ai_review` answering anything but `no`, still runs the
-# review - "the classifier is unreachable" behaves like "review everything",
-# never like "skip the review".
+# This entry has no inputs or secrets. It keeps the scope classifier, bot skip,
+# and fork guard, then runs the shared PR-Agent runner with the central rubric.
+# The OpenBao role binds to this workflow's OIDC identity, so its credential
+# lookup lives in this workflow instead of the reusable workflow below.
 name: AI Review
+
+# Each value is a vault-action selector: `<mount>/data/<path> <field>`, readable by the ci-ai-review policy.
+env:
+  OPENBAO_ROUTER_KEY_PATH: "secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key"
+  OPENBAO_ROUTER_OSS_KEY_PATH: "secret/data/apps/github-actions-oss github_actions_oss_llm_router_key"
+  OPENBAO_ROUTER_URL_PATH: "config/data/ci-ai-review base_url"
 
 on:
   pull_request:
@@ -53,23 +27,17 @@ jobs:
       contents: read
       pull-requests: read
     uses: JacobPEvans/.github-ai/.github/workflows/scope-classify.yml@v1
-    secrets:
-      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
 
   # Renovate and release-please pull requests are version bumps and
   # changelog/lockfile edits by construction; a model review of them answers
-  # nothing. For those authors the workflow still runs — this job, on a
-  # GitHub-hosted runner, with no secret and no model — so the required
-  # workflow completes successfully in seconds instead of relying on how a
-  # skipped run is judged. Author, not actor: a reopen or a rebase is
-  # performed by whoever clicked, the author stays the bot.
+  # nothing. This job needs neither credentials nor a model.
   dependency-bot:
     if: >-
       github.event.pull_request.user.login == 'renovate[bot]' ||
       github.event.pull_request.user.login == 'jacobpevans-release-please[bot]'
     runs-on: ubuntu-24.04
     permissions: {}
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    timeout-minutes: 5
     steps:
       - name: Dependency or release pull request
         run: echo "Not reviewed by a model - the author is a dependency or release bot."
@@ -77,26 +45,85 @@ jobs:
   pr-agent:
     needs: scope
     # Deferring only on a definitive scope success saying "no" - a scope
-    # failure or any other answer still runs the review.
+    # failure or any other answer still runs the review. A fork is rejected
+    # before this job can obtain its OIDC token.
     if: >-
       !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'renovate[bot]' &&
       github.event.pull_request.user.login != 'jacobpevans-release-please[bot]' &&
       (needs.scope.result != 'success' || needs.scope.outputs.ai_review != 'no')
+    runs-on: self-hosted
     permissions:
       contents: read
       pull-requests: write
-    uses: JacobPEvans/.github-ai/.github/workflows/pr-agent.yml@v1
-    with:
-      review: true
-      # Open-source repositories request review-oss.
-      oss_model: review-oss
-      # improve stays off: over 84 org-wide runs (2026-09-18/19) it took a
-      # median 62 s of model time per pull request — more than the review
-      # itself — and produced "No code suggestions" three times out of four.
-      # A repository that wants suggestions opts in through its own caller.
-    secrets:
-      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
-      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
-      LLM_ROUTER_OSS_API_KEY: ${{ secrets.LLM_ROUTER_OSS_API_KEY }}
-      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+      id-token: write
+    timeout-minutes: 5
+    steps:
+      # Check out only this workflow's central scripts and rubric. No pull
+      # request branch or code is checked out or executed while credentials exist.
+      - name: Checkout PR-Agent scripts and rubric
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
+          sparse-checkout: |
+            .github/scripts
+            pr-agent/rubric.toml
+          sparse-checkout-cone-mode: false
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Resolve OpenBao address
+        id: bao
+        run: |
+          test -n "${OPENBAO_ADDR:-}" || { echo "::error::OPENBAO_ADDR is not set on this runner" >&2; exit 1; }
+          echo "addr=$OPENBAO_ADDR" >> "$GITHUB_OUTPUT"
+
+      - name: Read PR-Agent router credentials from OpenBao
+        id: router-creds
+        continue-on-error: true
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ steps.bao.outputs.addr }}
+          method: jwt
+          path: github-actions
+          role: ci-ai-review
+          jwtGithubAudience: openbao
+          exportEnv: false
+          exportToken: false
+          secrets: |
+            ${{ env.OPENBAO_ROUTER_KEY_PATH }} | LLM_ROUTER_API_KEY ;
+            ${{ env.OPENBAO_ROUTER_OSS_KEY_PATH }} | LLM_ROUTER_OSS_API_KEY ;
+            ${{ env.OPENBAO_ROUTER_URL_PATH }} | LLM_ROUTER_BASE_URL ;
+
+      - name: Verify PR-Agent router credentials
+        env:
+          LOOKUP_OUTCOME: ${{ steps.router-creds.outcome }}
+          BASE_URL: ${{ steps.router-creds.outputs.LLM_ROUTER_BASE_URL }}
+          PRIVATE_API_KEY: ${{ steps.router-creds.outputs.LLM_ROUTER_API_KEY }}
+          OSS_API_KEY: ${{ steps.router-creds.outputs.LLM_ROUTER_OSS_API_KEY }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          test "$LOOKUP_OUTCOME" = success || { echo "::error::OpenBao could not provide the PR-Agent router credentials" >&2; exit 1; }
+          test -n "$BASE_URL" || { echo "::error::OpenBao did not return LLM_ROUTER_BASE_URL" >&2; exit 1; }
+          if [ "$REPOSITORY_PRIVATE" = "true" ]; then
+            test -n "$PRIVATE_API_KEY" || { echo "::error::OpenBao did not return LLM_ROUTER_API_KEY for a private repository" >&2; exit 1; }
+          else
+            test -n "$OSS_API_KEY" || { echo "::error::OpenBao did not return LLM_ROUTER_OSS_API_KEY for an open-source repository" >&2; exit 1; }
+          fi
+
+      - name: Run PR-Agent review
+        env:
+          BASE_URL: ${{ steps.router-creds.outputs.LLM_ROUTER_BASE_URL }}
+          API_KEY: ${{ github.event.repository.private && steps.router-creds.outputs.LLM_ROUTER_API_KEY || steps.router-creds.outputs.LLM_ROUTER_OSS_API_KEY }}
+          JOB_TOKEN: ${{ github.token }}
+          MODEL: ${{ github.event.repository.private && 'medium' || 'review-oss' }}
+          MAX_TOKENS: 32000
+          JOB_TIMEOUT_MINUTES: 5
+          RUBRIC_FILE: ${{ github.workspace }}/.ai-workflows/pr-agent/rubric.toml
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          RUN_REVIEW: 'true'
+          RUN_IMPROVE: 'false'
+          RUN_DESCRIBE: 'false'
+        run: bash .ai-workflows/.github/scripts/pr-agent/run.sh

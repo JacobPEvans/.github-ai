@@ -4,6 +4,7 @@ const { join } = require('path');
 const { tmpdir } = require('os');
 
 const script = join(process.cwd(), '.github', 'scripts', 'pr-agent', 'run.sh');
+const rubricFile = join(process.cwd(), 'pr-agent', 'rubric.toml');
 
 // run.sh with a stand-in `docker` first on PATH that prints `output` and
 // exits 0, which is what PR-Agent 0.45.0 does whether or not it reviewed.
@@ -22,8 +23,9 @@ function runWithDockerPrinting(output) {
         API_KEY: 'k',
         JOB_TOKEN: 't',
         MODEL: 'medium',
-        JOB_TIMEOUT_MINUTES: '10',
+        JOB_TIMEOUT_MINUTES: '5',
         MAX_TOKENS: '32000',
+        RUBRIC_FILE: rubricFile,
         PR_URL: 'https://github.com/o/r/pull/1',
         RUN_REVIEW: 'true',
       },
@@ -47,7 +49,7 @@ test('run.sh gives PR-Agent exactly one request per model call', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pr-agent-run-'));
   try {
     const docker = join(dir, 'docker');
-    writeFileSync(docker, '#!/usr/bin/env bash\nwhile [ $# -gt 0 ]; do [ "$1" = --env-file ] && cat "$2"; shift; done\n');
+    writeFileSync(docker, '#!/usr/bin/env bash\nwhile [ $# -gt 0 ]; do case "$1" in --env-file) cat "$2"; shift 2 ;; --env) printf "docker-env=%s\\n" "$2"; shift 2 ;; *) shift ;; esac; done\nprintf "reviewer=%s\\n" "$PR_REVIEWER__EXTRA_INSTRUCTIONS"\nprintf "suggestions=%s\\n" "$PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS"\n');
     chmodSync(docker, 0o755);
     const result = Bun.spawnSync(['bash', script], {
       cwd: dir,
@@ -58,16 +60,27 @@ test('run.sh gives PR-Agent exactly one request per model call', () => {
         API_KEY: 'k',
         JOB_TOKEN: 't',
         MODEL: 'medium',
-        JOB_TIMEOUT_MINUTES: '10',
+        JOB_TIMEOUT_MINUTES: '5',
         MAX_TOKENS: '32000',
+        RUBRIC_FILE: rubricFile,
         PR_URL: 'https://github.com/o/r/pull/1',
         RUN_REVIEW: 'true',
       },
     });
     const env = result.stdout.toString();
-    expect(env).toContain('CONFIG__AI_TIMEOUT=600\n');
+    expect(env).toContain('CONFIG__AI_TIMEOUT=240\n');
     expect(env).toContain('CONFIG__RETRY_SAME_MODEL_ON_TIMEOUT=false\n');
     expect(env).toContain('CONFIG__NUM_RETRIES=0\n');
+    expect(env).toContain('docker-env=OPENAI__KEY');
+    expect(env).toContain('docker-env=OPENAI__API_BASE');
+    expect(env).toContain('docker-env=GITHUB__USER_TOKEN');
+    expect(env).not.toContain('OPENAI__KEY=k');
+    expect(env).not.toContain('OPENAI__API_BASE=https://router.invalid/v1');
+    expect(env).not.toContain('GITHUB__USER_TOKEN=t');
+    expect(env).toContain('docker-env=PR_REVIEWER__EXTRA_INSTRUCTIONS');
+    expect(env).toContain('docker-env=PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS');
+    expect(env).toContain('Is every third-party `uses:` pinned to a full commit SHA');
+    expect(env).toContain('Suggest simplifications only:');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

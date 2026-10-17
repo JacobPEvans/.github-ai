@@ -20,7 +20,7 @@ release pull requests, or a provenance footer.
 
 Not advisory. If the router is down or at capacity the job fails, releasing
 the runner: the router admits or refuses at once, and the job is capped
-(`timeout_minutes`, ten by default). The router role's fallback ladder absorbs load. A wrong key,
+(`timeout_minutes`, five by default). The router role's fallback ladder absorbs load. A wrong key,
 base URL or model fails at once. A
 model error fails the job rather than being swallowed: PR-Agent 0.45.0's
 CLI exits 0 either way (`config.propagate_tool_errors` only changes what it
@@ -30,8 +30,8 @@ one request: a timed-out call is not replayed on the same model
 (`config.retry_same_model_on_timeout=false`) and the completion client adds
 no retries of its own (`config.num_retries=0`). The router bounds the
 request and walks the role's ladder; a Gateway Timeout from it is final.
-`config.ai_timeout` is the job cap in seconds, derived from the same
-`timeout_minutes`, so the client never gives up before the job does. It is a
+`config.ai_timeout` is 240 seconds inside the five-minute job cap, leaving a
+60-second margin for setup and PR publication. It is a
 number rather than the settings loader's null token because PR-Agent
 re-reads its environment with casting off once it applies repo settings, and
 the token then reaches the completion client as a literal string.
@@ -64,8 +64,9 @@ request over the API — and the image is pinned by digest in
 | --- | --- | --- |
 | `runner_label` | `self-hosted` | Runner label; must reach the router |
 | `model` | `medium` | Private repos: router **capability name** (never a vendor id) one `LLM_ROUTER_API_KEY` may call |
-| `oss_model` | `medium` | Open-source repos: router capability name one `LLM_ROUTER_OSS_API_KEY` may call |
+| `oss_model` | `review-oss` | Open-source repos: router capability name one `LLM_ROUTER_OSS_API_KEY` may call |
 | `max_tokens` | `32000` | Input context to assume for the model (`custom_model_max_tokens`) |
+| `timeout_minutes` | `5` | Maximum job time; pull-request runs are capped at five minutes |
 | `review` | `true` | Run the review tool |
 | `improve` | `false` | Run the improve tool |
 | `describe` | `false` | Run the describe tool (rewrites title and body) |
@@ -76,36 +77,20 @@ request over the API — and the image is pinned by digest in
 | --- | --- | --- |
 | `LLM_ROUTER_BASE_URL` | Actions **secret** | The router's OpenAI-compatible base URL, ending in `/v1` |
 | `LLM_ROUTER_API_KEY` | Actions **secret** | Scoped router virtual key for private repositories (never the router's master key) |
-| `LLM_ROUTER_OSS_API_KEY` | Actions **secret** | A second router virtual key, scoped to the open-source role; read only on such a repo |
+| `LLM_ROUTER_OSS_API_KEY` | Optional Actions **secret** | A second router virtual key, scoped to the open-source role; read only on such a repo |
 
-The first two are required. The base URL is a secret rather than a variable
-because a run log prints each step's environment verbatim, and these
-repositories are public.
+Reusable-workflow callers pass the base URL and private-repository key, plus the
+open-source key when reviewing public repositories. The required workflow entry
+reads all three values from OpenBao instead of relying on GitHub secrets.
 
-## Prompts live in the consumer repository
+## Central rubric
 
-Everything PR-Agent says is steered by a `.pr_agent.toml` at the root of the
-repository being reviewed — the review checklist under `[pr_reviewer]
-extra_instructions`, what "simplify" means under `[pr_code_suggestions]
-extra_instructions`, and any `ignore` rules. This workflow deliberately sets no
-`extra_instructions` of its own: an environment value would override the file
-and every repository would get the same prompt.
-
-```toml
-[pr_reviewer]
-extra_instructions = """
-Answer each point for this diff, citing the hunk you relied on:
-- Is every third-party action pinned to a commit SHA?
-- Are job permissions explicit and minimal?
-- Does the diff add a credential, token, hostname, or address literal?
-- Does the diff introduce an unevidenced custom script where a native platform
-  feature or tool capability exists?
-"""
-```
-
-The file is read from the pull request's **own head branch**
-(`config.config_branch`), falling back to the default branch. A change to the
-checklist is therefore exercised by the pull request that makes it.
+The workflow checks out `pr-agent/rubric.toml` from the same commit as the
+reusable workflow, then passes its `[pr_reviewer] extra_instructions` and
+`[pr_code_suggestions] extra_instructions` through PR-Agent's environment
+overrides. These values take precedence over matching settings in a consumer's
+`.pr_agent.toml`, so every repository receives the same review and suggestion
+rubric. Consumer settings unrelated to these two prompts can still apply.
 
 ## Calling it
 
@@ -132,14 +117,24 @@ Do **not** give the caller a `concurrency:` block that repeats this workflow's
 own group. A caller sharing the reusable workflow's exact concurrency group
 produces an opaque zero-job `startup_failure` that appears nowhere in the API.
 
+## Required workflow entry
+
+`.github/workflows/ai-review.yml` is the input-free, secretless required entry.
+It retains the scope classifier, dependency-bot skip, and fork rejection, then
+reads the router credentials from OpenBao before its review step reads the pull
+request. The OpenBao role binds to this required workflow's OIDC identity, so
+the required entry runs the shared PR-Agent runner directly. The reusable
+`pr-agent.yml` remains available to existing callers, which continue to pass
+its current router secrets.
+
 ## Security notes
 
 - `pull_request` only, never `pull_request_target`.
-- Same-repo heads only, so a fork never sees the router key. Draft pull
-  requests are skipped.
+- Same-repo heads only, so a fork never receives the OIDC token or router key.
+  Draft pull requests are reviewed too.
 - The job token is read-only on contents and write only on pull requests.
-- Configuration reaches the container through an env file, so the key never
-  appears in a process listing.
+- Credentials reach Docker by environment variable name, so their values do
+  not appear in process arguments or temporary files.
 - The base URL and its bare host are registered with `::add-mask::` before the
   first request: a connection error names the host, and that string is not the
   secret, so Actions would not mask it on its own.

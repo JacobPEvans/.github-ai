@@ -1,0 +1,90 @@
+[pr_reviewer]
+extra_instructions = """
+For each point the diff touches, give one verdict and cite the hunk. Say
+nothing about points it does not touch.
+
+Workflow and repository checks:
+- Is every third-party `uses:` pinned to a full commit SHA with a version comment?
+- Does every `actions/checkout` set `persist-credentials: false`?
+- Do workflows that read a secret run only for same-repository pull request
+  heads, and never on `pull_request_target`?
+- Are job `permissions:` explicit and the minimum the job needs?
+- Does the diff add a credential, token, hostname, or address literal?
+- Does an expression carrying repository content (a branch name, title, or body)
+  reach a `run:` block by interpolation instead of through `env:`?
+- Does new logic duplicate a helper that already exists under
+  `.github/scripts/shared/`?
+- Does the diff introduce a custom script, glue wrapper, daemon, or parsing loop
+  where a native platform feature, tool CLI flag, standard library module, or
+  existing infrastructure (e.g. Cribl Edge file monitoring/pipeline, OTEL
+  collector, systemd/launchd native logging) exists? Flag custom scripts that
+  lack documented justification under the Native-First ladder.
+- Does a workflow report success on a path where it did no work?
+- Does changed behaviour come with the needed README and workflow documentation
+  updates?
+
+Infrastructure checks:
+- Does the change introduce, document, or script a targeted (`-target=...`)
+  apply? A partial apply republishes an incomplete inventory over the full
+  artifact.
+- Does the change add a `check` block for a load-bearing assertion? A failed
+  check only warns, so guards must be pre/postconditions or variable
+  `validation`.
+- Does the change alter a guest's `node_name`? That attribute is ForceNew, so
+  the plan would destroy and recreate a running guest.
+- Does the diff add a literal hostname, IP address, port mapping, or credential?
+  Reach a service by FQDN, never by a literal address, and never commit a secret.
+- Does the change consume a new `deployment.json` attribute without declaring
+  it in the matching variable schema? Undeclared attributes are silently stripped.
+- Does the change set the boot-on-start key for the right guest kind? VMs use
+  `on_boot` and containers use `start_on_boot`; the wrong key is silently
+  stripped and reads back clean.
+- Is every changed `.tf` file `tofu fmt` clean?
+- Are new variables documented with a description, validated where they can be,
+  and marked `sensitive = true` when they carry a secret?
+- Is the pull request title a Conventional Commits subject?
+
+Estate rules — request changes on any violation, citing the hunk:
+- No custom scripts: flag any new `.sh`/script file, or growth of an existing
+  script/helper (new subcommands, code paths, wrappers, aliases). Prefer stock
+  CLIs, Nix/IaC declarations, or native platform features. Allow only changes
+  strictly required by an explicit interface contract when no native option
+  can express it, plus short, human-readable zsh/rc/profile login setup that
+  makes the environment ready.
+- No lint/check bypasses: flag new ignore/exclude/disable entries, `# noqa`,
+  `shellcheck disable`, `nolint`-style suppressions, raised thresholds, or
+  skipped checks. Fix the underlying problem instead of silencing it.
+- Public disclosure: flag internal hostnames, IPs, ports, or private topology;
+  a real-value-to-placeholder scrub mapping written out in the PR text; and
+  "why"/roadmap narrative in committed text. Flag any mention of the operator's
+  private screen-recording tool by name; refer to it only as "a private tool".
+- No secrets: flag secrets, tokens, or keys in the diff; `printenv`/`env`/`set`
+  dumps in scripts or CI steps; and secrets written to disk.
+- Git-flow safety: flag a pull request whose head branch is `main` or `develop`.
+  Promotions and back-merges must use a `promote/*` or `backmerge/*` head.
+- Harness parity: in an AI-harness-config repository, flag a change that
+  configures one agent harness without the equivalent change for the other
+  harnesses that support it.
+- Skill descriptions: flag a `SKILL.md` `description` field over 1024 characters.
+- Cost-aware authoring: flag a new always-loaded rule or context file, an
+  oversized `SKILL.md` that should split into `references/`, and unbounded
+  tool output returned from a skill.
+- Secret-backend agnostic: in a reusable repo (shared Nix modules, workflows,
+  plugins, shared roles), flag any reference to a specific secret store by name
+  (OpenBao or Doppler). When an explicit identity contract requires a named
+  backend at the credential boundary, keep that dependency there and keep
+  consumers backend-agnostic. Consume secrets as plain environment variables
+  or inputs so any source works, even a `.env` file. Exempt the operator's own
+  implementation layer: shell rc/profile, host configs, and private repos.
+"""
+
+[pr_code_suggestions]
+extra_instructions = """
+Suggest simplifications only:
+- Prioritize replacing bespoke scripts, manual file watchers, and custom
+  parsing code with native platform features, CLI flags, standard library
+  modules, or existing infrastructure forwarders (e.g. Cribl Edge, OTEL).
+- Reuse an existing helper, collapse a repeated block, delete unreachable code,
+  or shorten equivalent logic. Do not hunt for bugs and do not propose new
+  abstractions.
+"""
