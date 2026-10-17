@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 # Run the requested PR-Agent tools against the router.
 #
-# Configuration reaches PR-Agent through an env file rather than `docker run
-# -e`: the key then never appears in a process listing. Everything here is
-# wiring; the prompts (review checklist, what "simplify" means, ignore rules)
-# come from the target repository's own .pr_agent.toml, which PR-Agent reads
-# over the API. CONFIG__CONFIG_BRANCH points it at the pull request's own head
-# branch, so a change to that file is reviewable in the pull request that makes
-# it instead of only after merge.
+# Credentials reach PR-Agent through a protected env file rather than command
+# arguments. The review and simplification prompts come from the central rubric
+# checked out from this workflow's ref and override consumer configuration.
 #
-# Env: BASE_URL API_KEY JOB_TOKEN MODEL MAX_TOKENS JOB_TIMEOUT_MINUTES CONFIG_BRANCH
+# Env: BASE_URL API_KEY JOB_TOKEN MODEL MAX_TOKENS JOB_TIMEOUT_MINUTES RUBRIC_FILE
 #      PR_URL RUN_REVIEW RUN_IMPROVE RUN_DESCRIBE
 set -euo pipefail
 
@@ -20,11 +16,17 @@ set -euo pipefail
 : "${BASE_URL:?BASE_URL is required}"
 : "${API_KEY:?API_KEY is required}"
 : "${JOB_TOKEN:?JOB_TOKEN is required}"
+: "${RUBRIC_FILE:?RUBRIC_FILE is required}"
 : "${PR_URL:?PR_URL is required}"
 
 # Pinned by digest as well as tag: the tag is mutable, and a review's behaviour
 # should change only when this line does. Renovate tracks the tag.
 image="pragent/pr-agent:0.45.0@sha256:e6463e802562daa47db51950de84100a5679472844926d77d53911e529398ee5"
+
+reviewer_instructions="$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["pr_reviewer"]["extra_instructions"], end="")' "$RUBRIC_FILE")"
+suggestion_instructions="$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["pr_code_suggestions"]["extra_instructions"], end="")' "$RUBRIC_FILE")"
+export PR_REVIEWER__EXTRA_INSTRUCTIONS="$reviewer_instructions"
+export PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS="$suggestion_instructions"
 
 env_file="$(mktemp)"
 chmod 600 "$env_file"
@@ -63,9 +65,6 @@ trap 'rm -f "$env_file"' EXIT
   # Review labels would need issues: write to create a label that is missing.
   echo "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY=false"
   echo "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT=false"
-  if [ -n "${CONFIG_BRANCH:-}" ]; then
-    echo "CONFIG__CONFIG_BRANCH=$CONFIG_BRANCH"
-  fi
 } > "$env_file"
 
 tools=""
@@ -83,7 +82,10 @@ trap 'rm -f "$env_file" "$log"' EXIT
 
 for tool in $tools; do
   echo "::group::pr-agent $tool"
-  docker run --rm --env-file "$env_file" "$image" --pr_url "$PR_URL" "$tool" 2>&1 | tee "$log"
+  docker run --rm --env-file "$env_file" \
+    --env PR_REVIEWER__EXTRA_INSTRUCTIONS \
+    --env PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS \
+    "$image" --pr_url "$PR_URL" "$tool" 2>&1 | tee "$log"
   echo "::endgroup::"
   # PR-Agent 0.45.0 exits 0 whatever happened; a failed request is logged as
   # exactly this line. Fixed upstream in qodo-ai/pr-agent#3368 — drop this

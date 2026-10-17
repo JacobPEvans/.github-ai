@@ -83,30 +83,14 @@ The first two are required. The base URL is a secret rather than a variable
 because a run log prints each step's environment verbatim, and these
 repositories are public.
 
-## Prompts live in the consumer repository
+## Central rubric
 
-Everything PR-Agent says is steered by a `.pr_agent.toml` at the root of the
-repository being reviewed — the review checklist under `[pr_reviewer]
-extra_instructions`, what "simplify" means under `[pr_code_suggestions]
-extra_instructions`, and any `ignore` rules. This workflow deliberately sets no
-`extra_instructions` of its own: an environment value would override the file
-and every repository would get the same prompt.
-
-```toml
-[pr_reviewer]
-extra_instructions = """
-Answer each point for this diff, citing the hunk you relied on:
-- Is every third-party action pinned to a commit SHA?
-- Are job permissions explicit and minimal?
-- Does the diff add a credential, token, hostname, or address literal?
-- Does the diff introduce an unevidenced custom script where a native platform
-  feature or tool capability exists?
-"""
-```
-
-The file is read from the pull request's **own head branch**
-(`config.config_branch`), falling back to the default branch. A change to the
-checklist is therefore exercised by the pull request that makes it.
+The workflow checks out `pr-agent/rubric.toml` from the same commit as the
+reusable workflow, then passes its `[pr_reviewer] extra_instructions` and
+`[pr_code_suggestions] extra_instructions` through PR-Agent's environment
+overrides. These values take precedence over matching settings in a consumer's
+`.pr_agent.toml`, so every repository receives the same review and suggestion
+rubric. Consumer settings unrelated to these two prompts can still apply.
 
 ## Calling it
 

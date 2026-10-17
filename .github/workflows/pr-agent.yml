@@ -7,9 +7,9 @@
 # LLM_ROUTER_OSS_API_KEY with `oss_model`. Each role carries its own
 # fallback ladder on the router, so where a diff may travel is decided by the
 # role and the key that may call it, never here.
-# Per-repository prompt customisation — the review checklist, what "simplify"
-# means here, which files to ignore — lives in the consumer's own
-# `.pr_agent.toml`, so this workflow carries wiring only.
+# The review and simplification rubric is checked out from this workflow's
+# own ref and passed as environment overrides, so consumer `.pr_agent.toml`
+# values cannot replace these instructions.
 #
 # Two contracts worth knowing before you call it:
 #
@@ -157,12 +157,15 @@ jobs:
     # setup and PR publication, with request retries disabled.
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || inputs.timeout_minutes }}
     steps:
-      - name: Checkout ai-workflows scripts
+      - name: Checkout ai-workflows scripts and rubric
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            pr-agent/rubric.toml
+          sparse-checkout-cone-mode: false
           path: .ai-workflows
           persist-credentials: false
 
@@ -174,7 +177,7 @@ jobs:
           MODEL: ${{ github.event.repository.private && inputs.model || inputs.oss_model }}
           MAX_TOKENS: ${{ inputs.max_tokens }}
           JOB_TIMEOUT_MINUTES: ${{ github.event_name == 'pull_request' && 5 || inputs.timeout_minutes }}
-          CONFIG_BRANCH: ${{ github.head_ref }}
+          RUBRIC_FILE: ${{ github.workspace }}/.ai-workflows/pr-agent/rubric.toml
           PR_URL: ${{ github.event.pull_request.html_url }}
           RUN_REVIEW: ${{ inputs.review }}
           RUN_IMPROVE: ${{ inputs.improve }}
