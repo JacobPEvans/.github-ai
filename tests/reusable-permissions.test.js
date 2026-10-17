@@ -69,9 +69,9 @@ test('the input-free AI Review entry fetches OpenBao credentials before running 
   expect(steps[vaultIndex].with.path).toBe('github-actions');
   expect(steps[vaultIndex].with.jwtGithubAudience).toBe('openbao');
   expect(steps[vaultIndex].with.exportEnv).toBe(false);
-  expect(workflow.env.OPENBAO_ROUTER_KEY_PATH).toContain('REPLACE_WITH');
-  expect(workflow.env.OPENBAO_ROUTER_OSS_KEY_PATH).toContain('REPLACE_WITH');
-  expect(workflow.env.OPENBAO_ROUTER_URL_PATH).toContain('REPLACE_WITH');
+  expect(workflow.env.OPENBAO_ROUTER_KEY_PATH).toBe('secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key');
+  expect(workflow.env.OPENBAO_ROUTER_OSS_KEY_PATH).toBe('secret/data/apps/github-actions-oss github_actions_oss_llm_router_key');
+  expect(workflow.env.OPENBAO_ROUTER_URL_PATH).toBe('config/data/ci-ai-review base_url');
 });
 
 test('PR-Agent keeps its existing secret interface and uses the reachable open-source role by default', () => {
