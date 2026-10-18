@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.1](https://github.com/JacobPEvans/.github-ai/compare/v1.3.0...v1.3.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **dep-review:** merge pull request [#9](https://github.com/JacobPEvans/.github-ai/issues/9) from JacobPEvans/fix/dep-review-router-runner ([84970f2](https://github.com/JacobPEvans/.github-ai/commit/84970f26b312a0ce8007cc4de37e4eb9f659215c))
+* **dep-review:** run the review job on the self-hosted pool ([84970f2](https://github.com/JacobPEvans/.github-ai/commit/84970f26b312a0ce8007cc4de37e4eb9f659215c))
+* **dep-review:** run the review job on the self-hosted pool ([bda09e4](https://github.com/JacobPEvans/.github-ai/commit/bda09e43dcec393f746c7d0ae65be40e5e9db530))
+
+
+### CI
+
+* **release:** call the central release workflow ([#8](https://github.com/JacobPEvans/.github-ai/issues/8)) ([19ed2ba](https://github.com/JacobPEvans/.github-ai/commit/19ed2ba6e1cba99a5b1ed70901d7fc2b5b5b3428))
+
 ## [0.49.1](https://github.com/dryvist/ai-workflows/compare/v0.49.0...v0.49.1) (2026-10-13)
 
 
