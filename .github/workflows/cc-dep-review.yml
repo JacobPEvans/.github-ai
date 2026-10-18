@@ -38,6 +38,13 @@ on:
         type: string
         required: false
         default: ubuntu-24.04
+      review_runner_label:
+        description: >-
+          Runner label for the router-calling review job. Must reach the
+          router, which only the self-hosted pool does.
+        type: string
+        required: false
+        default: self-hosted
       model:
         description: "Selected provider model override"
         type: string
@@ -143,7 +150,7 @@ jobs:
     name: Review dependency update
     needs: check-eligibility
     if: needs.check-eligibility.outputs.should_run == 'true'
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.review_runner_label || 'self-hosted' }}
     permissions:
       contents: read
       pull-requests: read
