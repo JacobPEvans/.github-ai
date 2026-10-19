@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.1](https://github.com/JacobPEvans/.github-ai/compare/v1.4.0...v1.4.1) (2026-10-19)
+
+
+### CI
+
+* gate self-hosted dogfood callers on DOGFOOD_SELF_HOSTED ([#16](https://github.com/JacobPEvans/.github-ai/issues/16)) ([71f90bf](https://github.com/JacobPEvans/.github-ai/commit/71f90bf516ee7f0736614289d1940718028b5e2b))
+
 ## [1.4.0](https://github.com/JacobPEvans/.github-ai/compare/v1.3.2...v1.4.0) (2026-10-19)
 
 
