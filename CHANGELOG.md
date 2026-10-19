@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.0](https://github.com/JacobPEvans/.github-ai/compare/v1.3.2...v1.4.0) (2026-10-19)
+
+
+### Features
+
+* **gateway:** classify router budget and 5xx errors; advisory callers warn without an App token ([#12](https://github.com/JacobPEvans/.github-ai/issues/12)) ([b92ee3c](https://github.com/JacobPEvans/.github-ai/commit/b92ee3c8f3cb053b1e7b7433bca6251e38e22924))
+
 ## [1.3.2](https://github.com/JacobPEvans/.github-ai/compare/v1.3.1...v1.3.2) (2026-10-19)
 
 
