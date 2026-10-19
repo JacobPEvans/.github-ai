@@ -8,6 +8,9 @@ permissions:
   pull-requests: write
 jobs:
   docs-drift:
+    # Runs only where a self-hosted runner and the router secrets exist for this
+    # repository: set the repository variable DOGFOOD_SELF_HOSTED to 'true'.
+    if: vars.DOGFOOD_SELF_HOSTED == 'true'
     uses: ./.github/workflows/docs-drift.yml
     secrets:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}

@@ -10,6 +10,9 @@ jobs:
   # what should run. `describe` stays off — the pull request body carries a
   # provenance footer this repository owns.
   pr-agent:
+    # Runs only where a self-hosted runner and the router secrets exist for this
+    # repository: set the repository variable DOGFOOD_SELF_HOSTED to 'true'.
+    if: vars.DOGFOOD_SELF_HOSTED == 'true'
     uses: ./.github/workflows/pr-agent.yml
     with:
       review: true

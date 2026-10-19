@@ -9,6 +9,9 @@ jobs:
   # Local ref on purpose: the pull request's own version of the workflow is
   # what should run, same reason dogfood-pr-agent.yml does it.
   policy-gate:
+    # Runs only where a self-hosted runner and the router secrets exist for this
+    # repository: set the repository variable DOGFOOD_SELF_HOSTED to 'true'.
+    if: vars.DOGFOOD_SELF_HOSTED == 'true'
     uses: ./.github/workflows/policy-gate.yml
     with:
       model: medium
