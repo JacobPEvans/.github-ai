@@ -47,8 +47,11 @@ jobs:
     # Deferring only on a definitive scope success saying "no" - a scope
     # failure or any other answer still runs the review. A fork is rejected
     # before this job can obtain its OIDC token.
+    # In this repository's own pull requests the job runs only when
+    # DOGFOOD_SELF_HOSTED is 'true'; it has no self-hosted runner otherwise.
     if: >-
       !cancelled() &&
+      (github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true') &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'renovate[bot]' &&
       github.event.pull_request.user.login != 'jacobpevans-release-please[bot]' &&
