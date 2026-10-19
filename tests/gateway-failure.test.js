@@ -72,6 +72,13 @@ describe('gateway failure classification', () => {
     expect(classify('litellm.Timeout: APITimeoutError - Request timed out. timeout value=90.0')).toBe('timeout');
   });
 
+  it('names the OpenRouter budget wording and router 5xx errors', () => {
+    expect(classify('Budget limit exceeded (monthly limit). $25.05 of $25.00 used')).toBe('budget-exceeded');
+    expect(classify('litellm.BadGatewayError: OpenAIException - Error code: 502')).toBe('gateway-error');
+    expect(classify('503 Service Unavailable')).toBe('gateway-error');
+    expect(classify('504 Gateway Timeout')).toBe('gateway-error');
+  });
+
   it('matches the router wording for a model group with no fallback', () => {
     expect(
       classify("model group 'medium' failed with the error above and no fallback model group was found for it"),

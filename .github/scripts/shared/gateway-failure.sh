@@ -25,7 +25,7 @@ set -euo pipefail
 classify() {
   local text
   text="$(cat -- "$1")"
-  if grep -Eqi 'Budget has been exceeded' <<< "$text"; then
+  if grep -Eqi 'Budget (has been|limit) exceeded' <<< "$text"; then
     echo budget-exceeded
   elif grep -Eqi 'No fallback model group (was )?found' <<< "$text"; then
     echo no-fallback-model
@@ -35,6 +35,8 @@ classify() {
     echo connection
   elif grep -Eqi 'APITimeoutError|Request timed out|litellm\.Timeout' <<< "$text"; then
     echo timeout
+  elif grep -Eqi 'BadGatewayError|ServiceUnavailableError|Bad Gateway|Service Unavailable|Gateway Time-?out|Error code: 50[234]' <<< "$text"; then
+    echo gateway-error
   fi
 }
 
