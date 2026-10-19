@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.2](https://github.com/JacobPEvans/.github-ai/compare/v1.3.1...v1.3.2) (2026-10-19)
+
+
+### CI
+
+* run the self-hosted dogfood jobs only when DOGFOOD_SELF_HOSTED is set ([#13](https://github.com/JacobPEvans/.github-ai/issues/13)) ([3f24a11](https://github.com/JacobPEvans/.github-ai/commit/3f24a11b276cf6cddfd328cc8331c4799b517097))
+
 ## [1.3.1](https://github.com/JacobPEvans/.github-ai/compare/v1.3.0...v1.3.1) (2026-10-18)
 
 
