@@ -122,10 +122,18 @@ describe('gateway failure report', () => {
     expect(r.stdout).toContain('Claude bot App needs checks: write');
   });
 
-  it('stays red and names the cause when no App token exists', () => {
+  it('advisory: warns and names the cause when no App token exists, and exits 0', () => {
     const r = report({ GITHUB_TOKEN: '', CHECK_TOKEN_CAUSE: 'GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set' });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('::warning::demo: cannot post the check run: no Claude bot App token (GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set)');
+    expect(r.summary).toBe('AI review not performed: gateway unavailable (rate-limited)\n');
+    expect(r.request).toBeUndefined();
+  });
+
+  it('blocking or required: stays red and names the cause when no App token exists', () => {
+    const r = report({ CONCLUSION: 'failure', GITHUB_TOKEN: '', CHECK_TOKEN_CAUSE: 'GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set' });
     expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain('cannot post the check run: no Claude bot App token (GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set)');
+    expect(r.stdout).toContain('::error::demo: cannot post the check run: no Claude bot App token (GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set)');
     expect(r.request).toBeUndefined();
   });
 

@@ -17,9 +17,10 @@
 #   NTFY_BASE_URL     optional: the alert is skipped when unset
 #   RUN_URL           optional: appended to the alert body
 #
-# Exit status: 1 when the check run cannot be created (no token, or a 403 from
-# the API), and 1 whenever CONCLUSION is failure. A missing token or grant never
-# looks green.
+# Exit status: 1 when the check run cannot be created (a 403 or other API error, or
+# no token on a blocking or required caller), and 1 whenever CONCLUSION is failure.
+# A missing grant never looks green. An advisory caller (CONCLUSION=neutral) with no
+# token warns and exits 0: the summary, annotation and ops alert still carry the reason.
 set -euo pipefail
 
 classify() {
@@ -43,8 +44,13 @@ classify() {
 create_check() {
   local job="$1" reason="$2" conclusion="$3" body response
   if [ -z "${GITHUB_TOKEN:-}" ]; then
-    echo "::error::$job: cannot post the check run: no Claude bot App token (${CHECK_TOKEN_CAUSE:-unknown cause})"
-    return 1
+    if [ "$conclusion" = failure ]; then
+      echo "::error::$job: cannot post the check run: no Claude bot App token (${CHECK_TOKEN_CAUSE:-unknown cause})"
+      return 1
+    fi
+    # Advisory: the summary, annotation and ops alert already carry the reason.
+    echo "::warning::$job: cannot post the check run: no Claude bot App token (${CHECK_TOKEN_CAUSE:-unknown cause})"
+    return 0
   fi
   if [ -z "${CHECK_HEAD_SHA:-}" ] || [ -z "${GITHUB_REPOSITORY:-}" ]; then
     echo "::error::$job: cannot post the check run; CHECK_HEAD_SHA and GITHUB_REPOSITORY must be set"
