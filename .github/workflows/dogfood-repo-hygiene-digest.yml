@@ -9,6 +9,9 @@ permissions:
   actions: read
 jobs:
   repo-hygiene-digest:
+    # Runs only where a self-hosted runner and the router secrets exist for this
+    # repository: set the repository variable DOGFOOD_SELF_HOSTED to 'true'.
+    if: vars.DOGFOOD_SELF_HOSTED == 'true'
     uses: ./.github/workflows/repo-hygiene-digest.yml
     secrets:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}

@@ -13,7 +13,11 @@ on:
 
 jobs:
   highlights:
-    if: startsWith(github.head_ref, 'release-please--')
+    # Runs only where a self-hosted runner and the router secrets exist for this
+    # repository: set the repository variable DOGFOOD_SELF_HOSTED to 'true'.
+    if: >-
+      vars.DOGFOOD_SELF_HOSTED == 'true' &&
+      startsWith(github.head_ref, 'release-please--')
     permissions:
       contents: read
       pull-requests: write
