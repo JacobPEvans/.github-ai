@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.3](https://github.com/JacobPEvans/.github-ai/compare/v1.4.2...v1.4.3) (2026-10-20)
+
+
+### CI
+
+* pass the App ID through the client-id input of create-github-app-token ([#20](https://github.com/JacobPEvans/.github-ai/issues/20)) ([28f843f](https://github.com/JacobPEvans/.github-ai/commit/28f843f834bd07b012679fa7a540bcaa9da05104))
+
 ## [1.4.2](https://github.com/JacobPEvans/.github-ai/compare/v1.4.1...v1.4.2) (2026-10-20)
 
 
