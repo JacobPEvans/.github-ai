@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.2](https://github.com/JacobPEvans/.github-ai/compare/v1.4.1...v1.4.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* **release-notes:** end the job neutrally when the agent hits its deadline ([#18](https://github.com/JacobPEvans/.github-ai/issues/18)) ([20ef46b](https://github.com/JacobPEvans/.github-ai/commit/20ef46b433b6acbf236fe895b13ed8e20ac3dbf4))
+
 ## [1.4.1](https://github.com/JacobPEvans/.github-ai/compare/v1.4.0...v1.4.1) (2026-10-19)
 
 
