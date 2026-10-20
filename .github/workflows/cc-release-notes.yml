@@ -159,8 +159,10 @@ jobs:
       - name: Run AI agent
         id: agent
         # Leaves room inside the job's 5-minute pull_request cap for the report
-        # steps. A step that runs past this bound is a deadline, not a failure.
+        # steps. A step that runs past this bound is a deadline, not a failure:
+        # the unavailable step below fails the job only for other errors.
         timeout-minutes: 3
+        continue-on-error: true
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
           agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
