@@ -139,7 +139,7 @@ steps:
     id: pr-token
     uses: actions/create-github-app-token@v3
     with:
-      app-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+      client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
       private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
   # 3. Open the PR from the agent's edits via the shared helper.
