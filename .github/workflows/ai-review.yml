@@ -35,7 +35,7 @@ jobs:
     if: >-
       github.event.pull_request.user.login == 'renovate[bot]' ||
       github.event.pull_request.user.login == 'jacobpevans-release-please[bot]'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions: {}
     timeout-minutes: 5
     steps:

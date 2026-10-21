@@ -63,7 +63,7 @@ concurrency:
 jobs:
   check-eligibility:
     name: Check eligibility
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
@@ -187,7 +187,7 @@ jobs:
         id: check-token
         if: always() && steps.clock.outcome == 'success' && steps.agent.outcome != 'success'
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
@@ -228,7 +228,7 @@ jobs:
       always() &&
       needs.check-eligibility.outputs.should_run == 'true' &&
       (needs.highlights.result == 'failure' || needs.highlights.result == 'cancelled')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
@@ -242,7 +242,7 @@ jobs:
     name: Publish release highlights
     needs: [check-eligibility, highlights]
     if: needs.highlights.result == 'success' && needs.highlights.outputs.neutral != 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
