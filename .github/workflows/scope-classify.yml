@@ -70,7 +70,7 @@ permissions:
 jobs:
   scope:
     name: Classify CI scope
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     outputs:
       ci: ${{ steps.classify.outputs.ci }}
