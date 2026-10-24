@@ -190,7 +190,8 @@ jobs:
         with:
           agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
           prompt: ${{ steps.prompt.outputs.content }}
-          claude_model: ${{ inputs.model || vars.GH_ACTION_AI_MODEL_REVIEW || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL }}
+          # Public repositories use the open-source router key, which allows review-oss.
+          claude_model: ${{ inputs.model || (github.event.repository.private && (vars.GH_ACTION_AI_MODEL_REVIEW || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL) || 'review-oss') }}
           # Visibility picks the router key; both visibility defaults are medium.
           codex_model: ${{ inputs.model || (github.event.repository.private && (vars.GH_ACTION_AI_CODEX_MODEL || 'medium') || 'medium') }}
           allowed_tools: "Read,Glob,Grep,LS,Write,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api repos/*),WebFetch(domain:github.com)"
