@@ -1,13 +1,18 @@
 # Policy Gate
 #
-# Scores a pull request's diff against a fixed five-check rubric (DRY,
-# native-first, disclosure, missing-test, token-budget) through the org's
-# model router, and posts one sticky PR comment with the verdict.
+# Scores a pull request's diff through the org's model router against one
+# fixed rubric, chosen by the `rubric` input, and posts one sticky PR comment
+# with the verdict. `policy` (the default) is the five-check policy gate (DRY,
+# native-first, disclosure, missing-test, token-budget). `security`, `leak` and
+# `semantic` are advisory reviews of the same diff. Those three also post a
+# check run on the verdict; each rubric has its own check name, comment marker
+# and override label, so one caller can run several on one pull request.
 #
 # Advisory by default: it never fails the job unless the caller passes
-# `blocking: true`. The `policy-gate-override` label skips the router call
-# entirely, posts a neutral comment, and publishes one audit line to the
-# ntfy hub instead - an escape hatch that is visible, not silent.
+# `blocking: true`. The rubric's override label (`policy-gate-override` for
+# `policy`) skips the router call entirely, posts a neutral comment, and
+# publishes one audit line to the ntfy hub instead - an escape hatch that is
+# visible, not silent.
 #
 # Same router contract as docs-drift.yml. A failed router request is not a
 # review finding: the job summary says the review was not performed, a check
@@ -36,6 +41,14 @@ name: Policy Gate
 on:
   workflow_call:
     inputs:
+      rubric:
+        description: >-
+          Which review to run: policy (the default five-check policy gate),
+          security, leak, or semantic. Each has its own check name, comment
+          marker and override label.
+        type: string
+        required: false
+        default: policy
       runner_label:
         description: >-
           Runner label for the job. Must be a runner that can reach the model
@@ -64,7 +77,7 @@ on:
         description: >-
           When false (the default, advisory rollout), a failing check posts
           the comment and still exits 0. When true, a failing check fails
-          the job - unless `policy-gate-override` is on the pull request.
+          the job - unless the rubric's override label is on the pull request.
         type: boolean
         required: false
         default: false
@@ -94,7 +107,7 @@ on:
         required: false
 
 concurrency:
-  group: policy-gate-${{ github.repository }}
+  group: ${{ inputs.rubric == 'policy' && 'policy-gate' || format('{0}-review', inputs.rubric) }}-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -102,7 +115,19 @@ jobs:
     name: Policy gate
     runs-on: ${{ inputs.runner_label || 'self-hosted' }}
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    # Names derived from the rubric. The policy values are the names this
+    # workflow has always used, so the policy path is unchanged.
+    env:
+      REVIEW_NAME: ${{ inputs.rubric == 'policy' && 'policy-gate' || format('{0}-review', inputs.rubric) }}
+      REVIEW_TITLE: ${{ inputs.rubric == 'security' && 'Security review' || inputs.rubric == 'leak' && 'Leak review' || inputs.rubric == 'semantic' && 'Semantic review' || 'Policy gate' }}
+      OVERRIDE_LABEL: ${{ inputs.rubric == 'policy' && 'policy-gate-override' || format('{0}-review-override', inputs.rubric) }}
     steps:
+      - name: Check the rubric name
+        env:
+          RUBRIC: ${{ inputs.rubric }}
+        run: |
+          printf '%s\n' policy security leak semantic | grep -qx -- "$RUBRIC" || { echo "::error::Unknown rubric: $RUBRIC"; exit 1; }
+
       - name: Require the router secrets
         env:
           LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
@@ -131,7 +156,7 @@ jobs:
         id: override
         env:
           HAS_OVERRIDE: >-
-            ${{ contains(github.event.pull_request.labels.*.name, 'policy-gate-override') }}
+            ${{ contains(github.event.pull_request.labels.*.name, env.OVERRIDE_LABEL) }}
         run: |
           echo "has_override=$HAS_OVERRIDE" >> "$GITHUB_OUTPUT"
           if [ "$HAS_OVERRIDE" = "true" ]; then
@@ -146,6 +171,17 @@ jobs:
           MAX_DIFF_KB: ${{ inputs.max_diff_kb }}
         run: bash .ai-workflows/.github/scripts/policy-gate/collect.sh
 
+      # The semantic rubric judges the title and body against the diff, so they
+      # go in front of the diff; its prompt reads them from {{diff}}.
+      - name: Put the pull request title and body in front of the diff
+        if: steps.override.outputs.has_override != 'true' && inputs.rubric == 'semantic'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf 'PULL REQUEST TITLE: %s\n\nPULL REQUEST BODY (first 8 KiB):\n%s\n\n----- end of pull request text; the diff follows -----\n' "$PR_TITLE" "${PR_BODY:0:8192}" | cat - diff.txt > diff.with-text.txt
+          mv diff.with-text.txt diff.txt
+
       - name: Request the rubric verdict
         id: verdict
         if: steps.override.outputs.has_override != 'true'
@@ -158,12 +194,12 @@ jobs:
           model: ${{ inputs.model }}
           max-completion-tokens: ${{ inputs.max_tokens }}
           temperature: "0"
-          prompt-file: .ai-workflows/.github/scripts/policy-gate/policy-gate.prompt.yml
+          prompt-file: .ai-workflows/.github/scripts/policy-gate/${{ env.REVIEW_NAME }}.prompt.yml
           file_input: |
             changed: changed.txt
             sizes: sizes.txt
             diff: diff.txt
-          custom-headers: "x-langfuse-trace-name: policy-gate"
+          custom-headers: "x-langfuse-trace-name: ${{ env.REVIEW_NAME }}"
 
       # A reply that is not a JSON object is reported like a failed request:
       # neutral when advisory, failed when blocking. Never rendered or passed.
@@ -175,11 +211,12 @@ jobs:
           RESPONSE_FILE: ${{ steps.verdict.outputs.response-file }}
         run: jq -e 'type == "object"' "$RESPONSE_FILE" > /dev/null
 
-      # The check run is posted with the Claude bot App token, minted only on
-      # this path. A failed mint is named by the report step, which then fails.
+      # The check run is posted with the Claude bot App token. The policy gate
+      # mints it only on the gateway-failure path; the other rubrics also mint it
+      # for their verdict check run. A failed mint is named by the report step.
       - name: Mint the check-run token
         id: check-token
-        if: steps.override.outputs.has_override != 'true' && (steps.verdict.outcome == 'failure' || steps.valid.outcome == 'failure')
+        if: steps.override.outputs.has_override != 'true' && (steps.verdict.outcome == 'failure' || steps.valid.outcome == 'failure' || inputs.rubric != 'policy')
         continue-on-error: true
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
@@ -202,9 +239,9 @@ jobs:
           CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           REASON: ${{ steps.verdict.outcome == 'failure' && 'router-request-failed' || 'invalid-response' }}
         run: |
-          printf '## Policy gate\n\nAI review not performed: gateway unavailable (%s).\n' "$REASON" > policy-gate.md
+          printf '## %s\n\nAI review not performed: gateway unavailable (%s).\n' "$REVIEW_TITLE" "$REASON" > policy-gate.md
           echo 0 > policy-gate.exit
-          bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report policy-gate "$REASON"
+          bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "$REVIEW_NAME" "$REASON"
 
       - name: Render the verdict
         id: render
@@ -220,7 +257,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           BODY_FILE: policy-gate.md
-          MARKER_MATCH: "<!-- policy-gate -->"
+          MARKER_MATCH: "<!-- ${{ env.REVIEW_NAME }} -->"
           PR_NUMBER: ${{ github.event.pull_request.number }}
           WORKFLOW_NAME: ${{ github.workflow }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -246,8 +283,23 @@ jobs:
           host="${BASE_URL#*://}"; host="${host%%/*}"
           [ -n "$host" ] && echo "::add-mask::$host" && echo "::add-mask::${host%%:*}"
           curl -sS --max-time 30 -X POST "${BASE_URL%/}/ai" \
-            -H "Title: policy-gate-override used" \
+            -H "Title: $OVERRIDE_LABEL used" \
             --data "$ACTOR overrode the policy gate on $PR_URL" || true
+
+      # The policy gate stays comment-only. The other rubrics also post a check
+      # run on the verdict: success when clean, neutral when advisory with
+      # findings, failure when blocking with findings. Advisory: a failed post
+      # is a warning, never a failed job.
+      - name: Post the verdict check run
+        if: inputs.rubric != 'policy' && steps.override.outputs.has_override != 'true' && steps.verdict.outcome != 'failure' && steps.valid.outcome != 'failure'
+        continue-on-error: ${{ !inputs.blocking }}
+        env:
+          GH_TOKEN: ${{ steps.check-token.outputs.token }}
+          BLOCKING: ${{ inputs.blocking }}
+          CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          case "$(cat policy-gate.exit):$BLOCKING" in 1:true) c=failure ;; 1:*) c=neutral ;; *) c=success ;; esac
+          jq -cn --arg n "$REVIEW_NAME" --arg s "$CHECK_HEAD_SHA" --arg c "$c" '{name: $n, head_sha: $s, status: "completed", conclusion: $c, output: {title: $n, summary: "AI review verdict. Findings are in the pull request comment."}}' | gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" --input -
 
       - name: Enforce the verdict
         if: inputs.blocking && steps.override.outputs.has_override != 'true' && steps.verdict.outcome != 'failure' && steps.valid.outcome != 'failure'

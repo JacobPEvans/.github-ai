@@ -161,7 +161,8 @@ describe('gateway wiring in the workflows', () => {
     const gateway = step(job, 'Report gateway unavailability');
     expect(gateway.env.CONCLUSION).toContain("inputs.blocking && 'failure'");
     expect(gateway.env.CONCLUSION).toContain("'neutral'");
-    expect(gateway.run).toContain('gateway-failure.sh report policy-gate');
+    expect(gateway.run).toContain('gateway-failure.sh report "$REVIEW_NAME"');
+    expect(job.env.REVIEW_NAME).toContain("'policy-gate'");
     expect(step(job, 'Post sticky comment').if).toContain("steps.gateway.outcome == 'failure'");
     expect(job.permissions).toBeUndefined();
   });

@@ -1,0 +1,23 @@
+name: Dogfood Leak Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  # Local ref on purpose: the pull request's own version of the workflow is
+  # what should run, same reason dogfood-policy-gate.yml does it.
+  leak-review:
+    uses: ./.github/workflows/policy-gate.yml
+    with:
+      rubric: leak
+      model: light
+      # shortcut: the light lane refuses input over ~8k tokens, so only the first
+      # 24 KiB of the diff is scanned; raise it once a local-only long lane exists.
+      max_diff_kb: 24
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
