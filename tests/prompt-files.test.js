@@ -1,6 +1,6 @@
 const { expect, test } = require('bun:test');
 const { readFileSync, readdirSync, statSync } = require('fs');
-const { join } = require('path');
+const { dirname, join } = require('path');
 
 // Every .prompt.yml under .github/scripts is what actions/ai-inference loads:
 // a messages array, a JSON schema when it asks for one, and no model (the
@@ -32,7 +32,12 @@ for (const file of prompts) {
       expect(schema.strict).toBe(true);
       expect(schema.schema.type).toBe('object');
     }
-    const use = workflows.slice(workflows.indexOf(`prompt-file: .ai-workflows/${file}`));
+    // A rubric prompt is chosen by an expression in the workflow, so its literal
+    // path may be absent; the calling step is then found by the directory.
+    const literal = `prompt-file: .ai-workflows/${file}`;
+    const selected = workflows.includes(literal) ? literal : `prompt-file: .ai-workflows/${dirname(file)}/\${{`;
+    expect(workflows.includes(selected)).toBe(true);
+    const use = workflows.slice(workflows.indexOf(selected));
     expect(use.length).toBeGreaterThan(0);
     const mapped = use.slice(0, use.indexOf('custom-headers')).match(/^\s+([a-z]+): [^\n]+$/gm).map((l) => l.trim().split(':')[0]);
     for (const [, name] of text.matchAll(/\{\{([\w.-]+)\}\}/g)) {

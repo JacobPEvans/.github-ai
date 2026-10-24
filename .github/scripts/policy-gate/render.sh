@@ -9,13 +9,15 @@ set -euo pipefail
 
 out=policy-gate.md
 exit_file=policy-gate.exit
+title="${REVIEW_TITLE:-Policy gate}"
+label="${OVERRIDE_LABEL:-policy-gate-override}"
 echo 0 > "$exit_file"
 
 if [ -f override.flag ]; then
   {
-    echo "## Policy gate"
+    echo "## $title"
     echo
-    echo "Skipped: the \`policy-gate-override\` label is set on this pull request."
+    echo "Skipped: the \`$label\` label is set on this pull request."
     echo "An audit line was published to the ntfy hub."
   } > "$out"
   cat "$out"
@@ -23,7 +25,7 @@ if [ -f override.flag ]; then
 fi
 
 {
-  echo "## Policy gate"
+  echo "## $title"
   echo
   printf '%s\n\n' "$(jq -r '.summary // "(no summary)"' "$RESPONSE_FILE")"
   echo "| Check | Result | File | Line | Detail |"

@@ -91,6 +91,20 @@ test('render.sh marks exit 1 when any check fails, and still renders the table',
   });
 });
 
+test('render.sh takes the title and override label from the rubric', () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'override.flag'), '');
+
+    const result = run(dir, 'render.sh', { REVIEW_TITLE: 'Leak review', OVERRIDE_LABEL: 'leak-review-override' });
+
+    expect(result.exitCode).toBe(0);
+    const body = readFileSync(join(dir, 'policy-gate.md'), 'utf8');
+    expect(body).toContain('## Leak review');
+    expect(body).toContain('`leak-review-override`');
+    expect(body).not.toContain('policy-gate-override');
+  });
+});
+
 test('collect.sh requires BASE_SHA and HEAD_SHA', () => {
   withTempDir((dir) => {
     const result = run(dir, 'collect.sh', {});
