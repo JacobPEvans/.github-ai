@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.4](https://github.com/JacobPEvans/.github-ai/compare/v1.4.3...v1.4.4) (2026-10-24)
+
+
+### Bug Fixes
+
+* enforce seven-day Bun package age ([#24](https://github.com/JacobPEvans/.github-ai/issues/24)) ([e1c1628](https://github.com/JacobPEvans/.github-ai/commit/e1c1628da2be853bda539802e0a81bbb6fc947f3))
+
 ## [1.4.3](https://github.com/JacobPEvans/.github-ai/compare/v1.4.2...v1.4.3) (2026-10-20)
 
 
