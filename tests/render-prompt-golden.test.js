@@ -16,7 +16,7 @@ const prompts = {
   'best-practices': 'f04a9e6b3b33c74fbad4eb06ac9e4d79619f4b0dfd58f0305f69dff73fad7adb',
   'ci-fix': '6855c4cf96f7f2d5278f917e4fd4ef281e0075f90f04ff4bd91dc89c3b14ef09',
   'code-simplifier': 'f1362a8665af9adf1e3d1fbfb9b3a22cfec07f8cd9feba2fb424c11d09505030',
-  'dep-review': 'fba25cae768282a745594d25c7f15ec04d8f5849a0eb225e152286f0eb3b36ba',
+  'dep-review': '5883e21e0600a45bf7752ec41c66c3759544a7132178ac41774350e79afc9e2a',
   'issue-resolver': '7fc9ca6e74d471ccedb710bb3fc2dfe6fcd47d44890e0f962f87441b807dc54c',
   'next-steps': '78735a0f182ef1a67e3da626be643eccaaf3591deca880dc768f2fec0f412e3e',
   'post-merge-docs-review': '28b1d70e8f0ec0b2e64dcbfa6d5410bf50f67acf7fa2c32cf6c417d844e759af',
