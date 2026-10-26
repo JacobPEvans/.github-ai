@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0](https://github.com/JacobPEvans/.github-ai/compare/v1.5.1...v1.6.0) (2026-10-26)
+
+
+### Features
+
+* **learning-gate:** add nightly held-out evaluation gate ([#31](https://github.com/JacobPEvans/.github-ai/issues/31)) ([6ca3010](https://github.com/JacobPEvans/.github-ai/commit/6ca3010445191a3383105caaacea768ee057710c))
+
 ## [1.5.1](https://github.com/JacobPEvans/.github-ai/compare/v1.5.0...v1.5.1) (2026-10-24)
 
 
