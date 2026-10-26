@@ -31,6 +31,9 @@ on:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         description: Private key used by policy-gate to publish review checks.
         required: false
+      GITLEAKS_LICENSE_KEY:
+        description: Org gitleaks-action license key; the scan fails closed without it.
+        required: false
 
 concurrency:
   group: ai-merge-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
@@ -58,12 +61,35 @@ jobs:
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE_KEY }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_ENABLE_SUMMARY: "false"
 
+  router:
+    name: Review router availability
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      available: ${{ steps.probe.outputs.available }}
+    steps:
+      - id: probe
+        env:
+          LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+          LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+        run: |
+          if [[ -n "$LLM_ROUTER_BASE_URL" && -n "$LLM_ROUTER_API_KEY" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Router secrets are not passed to this caller; model reviews are skipped and only the secret scan gates."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
   leak:
     name: Leak review
+    needs: router
+    if: needs.router.outputs.available == 'true'
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -82,6 +108,8 @@ jobs:
 
   security:
     name: Security review
+    needs: router
+    if: needs.router.outputs.available == 'true'
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -99,6 +127,8 @@ jobs:
 
   semantic:
     name: Semantic review
+    needs: router
+    if: needs.router.outputs.available == 'true'
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -117,7 +147,7 @@ jobs:
   gate:
     name: AI Merge Gate
     if: always()
-    needs: [gitleaks, leak, security, semantic]
+    needs: [gitleaks, router, leak, security, semantic]
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
@@ -125,6 +155,7 @@ jobs:
       contents: read
     env:
       IS_DRAFT: ${{ github.event.pull_request.draft }}
+      ROUTER_AVAILABLE: ${{ needs.router.outputs.available }}
       GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
       LEAK_RESULT: ${{ needs.leak.result }}
       SECURITY_RESULT: ${{ needs.security.result }}
@@ -159,7 +190,7 @@ jobs:
               success)
                 ;;
               skipped)
-                if [[ "$IS_DRAFT" != "true" ]]; then
+                if [[ "$IS_DRAFT" != "true" && "$ROUTER_AVAILABLE" == "true" ]]; then
                   echo "::error::A required scan or review was skipped for a non-draft pull request."
                   exit 1
                 fi

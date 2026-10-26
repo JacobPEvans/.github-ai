@@ -8,9 +8,9 @@ const workflow = (name) => Bun.YAML.parse(readFileSync(join('.github', 'workflow
 const frontdoor = workflow('ai-merge-gate.yml');
 const gate = workflow('_ai-merge-gate.yml');
 
-test('the public workflow starts the gate for the required pull request events and inherits secrets', () => {
+test('the public workflow starts the gate for the required pull request events and passes named secrets', () => {
   expect(frontdoor.on.pull_request.types).toEqual(fixture.pull_request_types);
-  expect(frontdoor.jobs.gate.secrets).toBe('inherit');
+  expect(Object.keys(frontdoor.jobs.gate.secrets).sort()).toEqual([...fixture.router_secrets, 'GH_APP_CLAUDE_BOT_PRIVATE_KEY', 'GITLEAKS_LICENSE_KEY', 'NTFY_BASE_URL'].sort());
 });
 
 test('the reusable workflow exposes router and check credentials to its caller', () => {

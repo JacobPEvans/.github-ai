@@ -5,7 +5,7 @@
     { "job": "security", "rubric": "security", "model": "critical" },
     { "job": "semantic", "rubric": "semantic", "model": "standard" }
   ],
-  "required_jobs": ["gitleaks", "leak", "security", "semantic"],
+  "required_jobs": ["gitleaks", "router", "leak", "security", "semantic"],
   "router_secrets": ["LLM_ROUTER_BASE_URL", "LLM_ROUTER_API_KEY"],
   "gate_scenarios": [
     {
