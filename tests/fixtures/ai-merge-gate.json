@@ -1,0 +1,48 @@
+{
+  "pull_request_types": ["opened", "ready_for_review", "synchronize", "reopened"],
+  "review_jobs": [
+    { "job": "leak", "rubric": "leak", "model": "light" },
+    { "job": "security", "rubric": "security", "model": "critical" },
+    { "job": "semantic", "rubric": "semantic", "model": "standard" }
+  ],
+  "required_jobs": ["gitleaks", "leak", "security", "semantic"],
+  "router_secrets": ["LLM_ROUTER_BASE_URL", "LLM_ROUTER_API_KEY"],
+  "gate_scenarios": [
+    {
+      "name": "all success",
+      "draft": false,
+      "results": ["success", "success", "success", "success"],
+      "exit_code": 0
+    },
+    {
+      "name": "failure",
+      "draft": false,
+      "results": ["failure", "success", "success", "success"],
+      "exit_code": 1
+    },
+    {
+      "name": "cancellation",
+      "draft": false,
+      "results": ["success", "cancelled", "success", "success"],
+      "exit_code": 1
+    },
+    {
+      "name": "draft skip",
+      "draft": true,
+      "results": ["success", "skipped", "success", "success"],
+      "exit_code": 0
+    },
+    {
+      "name": "non-draft skip",
+      "draft": false,
+      "results": ["success", "skipped", "success", "success"],
+      "exit_code": 1
+    },
+    {
+      "name": "unknown result",
+      "draft": false,
+      "results": ["action_required", "success", "success", "success"],
+      "exit_code": 1
+    }
+  ]
+}

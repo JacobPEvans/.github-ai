@@ -1,7 +1,6 @@
 # Reusable: AI Merge Gate
 #
-# Status aggregator: checks if any Copilot agent runs have failed on this PR.
-# Passes immediately if no failures detected (agents still running = pass).
+# Status aggregator for secret scanning and blocking AI reviews.
 # Branch protection requires only "AI Merge Gate" as the single AI check.
 #
 # Usage:
@@ -19,7 +18,19 @@ on:
         type: string
         required: false
         default: ubuntu-24.04
-  workflow_dispatch:
+    secrets:
+      LLM_ROUTER_BASE_URL:
+        description: OpenAI-compatible base URL for the review router.
+        required: false
+      LLM_ROUTER_API_KEY:
+        description: Scoped virtual key for the review router.
+        required: false
+      NTFY_BASE_URL:
+        description: Optional base URL for policy-gate override audit notices.
+        required: false
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY:
+        description: Private key used by policy-gate to publish review checks.
+        required: false
 
 concurrency:
   group: ai-merge-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
@@ -28,13 +39,96 @@ concurrency:
 permissions:
   checks: read
   contents: read
+  pull-requests: write
 
 jobs:
-  check:
-    name: AI Merge Gate
+  gitleaks:
+    name: Gitleaks secret scan
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_SUMMARY: "false"
+
+  leak:
+    name: Leak review
+    uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      rubric: leak
+      model: light
+      max_diff_kb: 24
+      blocking: true
+      runner_label: ${{ inputs.runner_label }}
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
+  security:
+    name: Security review
+    uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      rubric: security
+      model: critical
+      blocking: true
+      runner_label: ${{ inputs.runner_label }}
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
+  semantic:
+    name: Semantic review
+    uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      rubric: semantic
+      model: standard
+      blocking: true
+      runner_label: ${{ inputs.runner_label }}
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
+  gate:
+    name: AI Merge Gate
+    if: always()
+    needs: [gitleaks, leak, security, semantic]
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    permissions:
+      checks: read
+      contents: read
     env:
+      IS_DRAFT: ${{ github.event.pull_request.draft }}
+      GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
+      LEAK_RESULT: ${{ needs.leak.result }}
+      SECURITY_RESULT: ${{ needs.security.result }}
+      SEMANTIC_RESULT: ${{ needs.semantic.result }}
       GH_TOKEN: ${{ github.token }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -57,3 +151,27 @@ jobs:
             echo "::error::$FAILED Copilot agent check(s) failed"
             exit 1
           fi
+      - name: Enforce scan and review conclusions
+        run: |
+          set -euo pipefail
+          for result in "$GITLEAKS_RESULT" "$LEAK_RESULT" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
+            case "$result" in
+              success)
+                ;;
+              skipped)
+                if [[ "$IS_DRAFT" != "true" ]]; then
+                  echo "::error::A required scan or review was skipped for a non-draft pull request."
+                  exit 1
+                fi
+                ;;
+              failure|cancelled)
+                echo "::error::A required scan or review concluded with $result."
+                exit 1
+                ;;
+              *)
+                echo "::error::A required scan or review has an unexpected conclusion: $result"
+                exit 1
+                ;;
+            esac
+          done
+          echo "All required scans and reviews passed or were skipped on a draft pull request."
