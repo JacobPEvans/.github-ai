@@ -48,7 +48,7 @@ jobs:
   gitleaks:
     name: Gitleaks secret scan
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
