@@ -1,0 +1,218 @@
+name: Nightly learning gate
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Evaluate only, or allow eligible proposals to auto-merge
+        type: choice
+        options: [canary, full]
+        default: canary
+        required: true
+      evals_ref:
+        description: Exact 40-character llm-prompt-evals commit (empty uses current develop)
+        type: string
+        default: ""
+        required: false
+      allowed_paths:
+        description: Comma-separated path globs eligible for auto-merge
+        type: string
+        default: "prompts/**,skills/**"
+        required: false
+  workflow_call:
+    inputs:
+      mode:
+        description: Evaluate only, or allow eligible proposals to auto-merge
+        type: string
+        default: canary
+        required: false
+      evals_ref:
+        description: Exact 40-character llm-prompt-evals commit (empty uses current develop)
+        type: string
+        default: ""
+        required: false
+      allowed_paths:
+        description: Comma-separated path globs eligible for auto-merge
+        type: string
+        default: "prompts/**,skills/**"
+        required: false
+    secrets:
+      LANGFUSE_BASE_URL:
+        required: false
+      LANGFUSE_PUBLIC_KEY:
+        required: false
+      LANGFUSE_SECRET_KEY:
+        required: false
+      OPENROUTER_API_KEY:
+        required: false
+
+concurrency:
+  group: learning-gate-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: self-hosted
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODE: ${{ inputs.mode || 'canary' }}
+      EVALS_REF: ${{ inputs.evals_ref }}
+      ALLOWED_PATHS: ${{ inputs.allowed_paths || 'prompts/**,skills/**' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve immutable evals ref
+        id: evals
+        run: |
+          if [[ -n "$EVALS_REF" ]]; then
+            ref="$EVALS_REF"
+          else
+            ref="$(git ls-remote https://github.com/dryvist/llm-prompt-evals.git refs/heads/develop | awk 'NR == 1 { print $1 }')"
+          fi
+          [[ "$ref" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "evals_ref must resolve to one commit SHA" >&2; exit 2; }
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: dryvist/llm-prompt-evals
+          ref: ${{ steps.evals.outputs.ref }}
+          path: .llm-prompt-evals
+          persist-credentials: false
+
+      - name: Evaluate learning proposals
+        working-directory: .
+        env:
+          EVALS_DIR: ${{ github.workspace }}/.llm-prompt-evals
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -Eeuo pipefail
+          for name in LANGFUSE_BASE_URL LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY OPENROUTER_API_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Secret $name is empty; the held-out suite cannot run"
+              exit 1
+            fi
+          done
+          [[ "$MODE" == canary || "$MODE" == full ]] || { echo "mode must be canary or full" >&2; exit 2; }
+          run_dir="$(mktemp -d "$RUNNER_TEMP/learning-gate.XXXXXX")"
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open --label learning-proposal --limit 1000 --json number --jq '.[].number' > "$run_dir/numbers"
+          while IFS= read -r number; do
+            [[ -n "$number" ]] || continue
+            meta="$run_dir/pr-$number.json"
+            gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json baseRefOid,baseRefName,headRefOid,labels > "$meta"
+            base_sha="$(jq -r '.baseRefOid' "$meta")"
+            base_ref="$(jq -r '.baseRefName' "$meta")"
+            head_sha="$(jq -r '.headRefOid' "$meta")"
+            dataset="$(jq -r '[.labels[].name | select(startswith("dataset:")) | ltrimstr("dataset:") | select(length > 0)] | if length == 1 then .[0] else "" end' "$meta")"
+            needs_review=false
+            compare_failed=false
+            has_eval=false
+            all_allowed=true
+            all_evaluated=true
+            score_lines=""
+            review_reason=""
+            if [[ -z "$dataset" ]]; then
+              needs_review=true
+              review_reason="missing exactly one non-empty dataset:<name> label"
+            else
+              git fetch --no-tags origin "refs/pull/$number/head"
+              fetched_head="$(git rev-parse FETCH_HEAD)"
+              if [[ "$fetched_head" != "$head_sha" ]]; then
+                needs_review=true
+                review_reason="proposal head changed during discovery"
+              else
+                git fetch --no-tags origin "refs/heads/$base_ref"
+                git cat-file -e "$base_sha^{commit}"
+                index=0
+                while IFS= read -r -d '' file; do
+                  ((index += 1))
+                  allowed=false
+                  IFS=',' read -r -a patterns <<< "$ALLOWED_PATHS"
+                  for pattern in "${patterns[@]}"; do
+                    if python3 -I - "$file" "$pattern" <<'PY'
+          import fnmatch, sys
+          def matches(path, pattern):
+              if not pattern: return not path
+              if pattern[0] == "**": return matches(path, pattern[1:]) or bool(path) and matches(path[1:], pattern)
+              return bool(path) and fnmatch.fnmatchcase(path[0], pattern[0]) and matches(path[1:], pattern[1:])
+          sys.exit(0 if matches(sys.argv[1].split("/"), sys.argv[2].split("/")) else 1)
+          PY
+                    then
+                      allowed=true
+                    fi
+                  done
+                  case "$file" in rules/*|.github/*) allowed=false ;; esac
+                  case "/$file/" in */security/*) allowed=false ;; esac
+                  [[ "$allowed" == true ]] || all_allowed=false
+                  if ! git cat-file -e "$base_sha:$file" 2>/dev/null || ! git cat-file -e "$head_sha:$file" 2>/dev/null; then
+                    all_evaluated=false
+                    continue
+                  fi
+                  case "$file" in prompts/*|skills/*|*/prompts/*|*/skills/*) ;; *) all_evaluated=false; continue ;; esac
+                  has_eval=true
+                  baseline="$run_dir/baseline-$number-$index"
+                  candidate="$run_dir/candidate-$number-$index"
+                  result="$run_dir/result-$number-$index.json"
+                  comparison="$run_dir/comparison-$number-$index"
+                  git show "$base_sha:$file" > "$baseline"
+                  git show "$head_sha:$file" > "$candidate"
+                  eval_status=0
+                  if (cd "$EVALS_DIR" && HELDOUT_BASELINE_PROMPT="$baseline" HELDOUT_CANDIDATE_PROMPT="$candidate" LANGFUSE_DATASET_NAME="$dataset" nix develop --command promptfoo eval -c evals/heldout/promptfooconfig.yaml --output "$result" --no-share < /dev/null); then
+                    eval_status=0
+                  else
+                    eval_status=$?
+                  fi
+                  [[ "$eval_status" == 0 || "$eval_status" == 100 ]] || exit "$eval_status"
+                  if (cd "$EVALS_DIR" && nix develop --command python3 evals/heldout/heldout.py compare "$result" < /dev/null) > "$comparison"; then
+                    compare_status=0
+                  else
+                    compare_status=$?
+                  fi
+                  [[ "$compare_status" == 0 || "$compare_status" == 1 ]] || { cat "$comparison" >&2; exit 2; }
+                  score_json="$(sed -n '1p' "$comparison")"
+                  printf -- '- PR #%s %q: %s\n' "$number" "$file" "$score_json" >> "$GITHUB_STEP_SUMMARY"
+                  score_lines+="- $(printf '%q' "$file"): $score_json"$'\n'
+                  if [[ "$compare_status" == 1 ]]; then
+                    compare_failed=true
+                    needs_review=true
+                    review_reason="one or more held-out comparisons were below baseline"
+                  fi
+                done < <(git diff --no-renames --name-only -z "$base_sha" "$head_sha" --)
+                [[ "$all_allowed" == true ]] || { needs_review=true; review_reason="one or more changed paths require human review"; }
+                [[ "$all_evaluated" == true ]] || { needs_review=true; review_reason="one or more changed paths were added, deleted, or are not prompt or skill files"; }
+                [[ "$has_eval" == true ]] || { needs_review=true; review_reason="no changed prompt or skill file was evaluated"; }
+              fi
+            fi
+            if [[ "$MODE" == canary ]]; then
+              printf -- '- PR #%s: canary only; %s.\n' "$number" "${review_reason:-evaluation complete; no labels or merge requested}" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            if [[ "$needs_review" == true ]]; then
+              gh pr edit "$number" --repo "$GITHUB_REPOSITORY" --add-label human:review
+              if [[ "$compare_failed" == true ]]; then
+                gh pr comment "$number" --repo "$GITHUB_REPOSITORY" --body "Held-out comparison scores:"$'\n'"$score_lines"
+              fi
+              printf -- '- PR #%s: labeled human:review; %s.\n' "$number" "$review_reason" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            current="$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json baseRefOid,headRefOid --jq '"\(.baseRefOid) \(.headRefOid)"')"
+            [[ "$current" == "$base_sha $head_sha" ]] || {
+              gh pr edit "$number" --repo "$GITHUB_REPOSITORY" --add-label human:review
+              printf -- '- PR #%s: labeled human:review; proposal refs changed during evaluation.\n' "$number" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            }
+            gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --squash --match-head-commit "$head_sha"
+            printf -- '- PR #%s: auto-merge requested after all comparisons passed.\n' "$number" >> "$GITHUB_STEP_SUMMARY"
+          done < "$run_dir/numbers"

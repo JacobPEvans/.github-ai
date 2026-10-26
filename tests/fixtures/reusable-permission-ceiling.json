@@ -83,6 +83,11 @@
     "contents": "read",
     "issues": "read"
   },
+  "learning-gate.yml": {
+    "contents": "write",
+    "issues": "write",
+    "pull-requests": "write"
+  },
   "policy-gate.yml": {},
   "post-merge-docs-review.yml": {
     "actions": "read",
