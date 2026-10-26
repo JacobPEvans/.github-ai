@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.0](https://github.com/JacobPEvans/.github-ai/compare/v1.6.0...v2.0.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **merge-gate:** require secret scan and blocking leak, security and semantic reviews ([#30](https://github.com/JacobPEvans/.github-ai/issues/30))
+
+### Features
+
+* **merge-gate:** require secret scan and blocking leak, security and semantic reviews ([#30](https://github.com/JacobPEvans/.github-ai/issues/30)) ([1d1d666](https://github.com/JacobPEvans/.github-ai/commit/1d1d66611d923f9c6b1acbab75a1e8d7f45aa73e))
+
 ## [1.6.0](https://github.com/JacobPEvans/.github-ai/compare/v1.5.1...v1.6.0) (2026-10-26)
 
 
