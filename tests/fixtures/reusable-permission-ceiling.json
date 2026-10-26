@@ -1,7 +1,8 @@
 {
   "_ai-merge-gate.yml": {
     "checks": "read",
-    "contents": "read"
+    "contents": "read",
+    "pull-requests": "write"
   },
   "best-practices.yml": {
     "actions": "read",
