@@ -55,7 +55,7 @@ concurrency:
 jobs:
   gate:
     runs-on: self-hosted
-    timeout-minutes: 60
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 60 }}
     permissions:
       contents: write
       issues: write
