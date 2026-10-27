@@ -1,4 +1,15 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>JacobPEvans/.github"]
+  "extends": [
+    "github>JacobPEvans/.github"
+  ],
+  "packageRules": [
+    {
+      "description": "ai-inference v3 is Copilot-only and ignores the endpoint input; the router calls need v2.",
+      "matchPackageNames": [
+        "actions/ai-inference"
+      ],
+      "allowedVersions": "<3"
+    }
+  ]
 }
