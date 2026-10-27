@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.1](https://github.com/JacobPEvans/.github-ai/compare/v2.0.0...v2.0.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **learning-gate:** split evaluate and publish jobs ([#35](https://github.com/JacobPEvans/.github-ai/issues/35)) ([40539cc](https://github.com/JacobPEvans/.github-ai/commit/40539ccb3dacc72b2245345dc1a74de38068e0d6))
+
 ## [2.0.0](https://github.com/JacobPEvans/.github-ai/compare/v1.6.0...v2.0.0) (2026-10-26)
 
 
