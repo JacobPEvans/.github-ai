@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.2](https://github.com/JacobPEvans/.github-ai/compare/v2.0.1...v2.0.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* **deps:** pin actions/ai-inference to v2.1.1 ([#37](https://github.com/JacobPEvans/.github-ai/issues/37)) ([fec0ef9](https://github.com/JacobPEvans/.github-ai/commit/fec0ef95cd5fb0ffefba5d05c143a055a54c2fe3))
+
 ## [2.0.1](https://github.com/JacobPEvans/.github-ai/compare/v2.0.0...v2.0.1) (2026-10-27)
 
 
