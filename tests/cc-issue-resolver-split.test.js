@@ -1,5 +1,7 @@
 const { expect, test } = require('bun:test');
-const { readFileSync } = require('fs');
+const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require('fs');
+const { spawnSync } = require('child_process');
+const { tmpdir } = require('os');
 const { join } = require('path');
 
 // cc-issue-resolver's agent job reads the issue body, which is untrusted text. Only the
@@ -44,4 +46,28 @@ test('the publish job validates the patch before applying it', () => {
   expect(validate).toBeGreaterThanOrEqual(0);
   expect(validate).toBeLessThan(apply);
   expect(steps[validate].run).toContain('.ai-workflows');
+});
+
+// Runs the validate step's script against a patch in a temp dir and returns its exit status.
+const runValidator = (patch) => {
+  const { run } = workflow.jobs.publish.steps[stepIndex(workflow.jobs.publish, 'Validate agent patch')];
+  const dir = mkdtempSync(join(tmpdir(), 'patch-guard-'));
+  try {
+    writeFileSync(join(dir, 'agent.patch'), patch);
+    return spawnSync('bash', ['-e', '-c', run], { cwd: dir, encoding: 'utf8' }).status;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+const patchTouching = (path) => `diff --git ${path} ${path}\n--- ${path}\n+++ ${path}\n@@ -0,0 +1 @@\n+x\n`;
+
+test('the patch guard rejects .ai-workflows paths in every spelling git apply accepts', () => {
+  for (const path of ['a/.ai-workflows/x.sh', 'a//.ai-workflows/x.sh', 'a/./.ai-workflows/x.sh', './.ai-workflows/x.sh']) {
+    expect(runValidator(patchTouching(path)), path).not.toBe(0);
+  }
+});
+
+test('the patch guard allows patches outside .ai-workflows', () => {
+  expect(runValidator(patchTouching('a/src/main.tf'))).toBe(0);
 });

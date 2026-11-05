@@ -226,7 +226,9 @@ jobs:
 
       - name: Validate agent patch
         run: |
-          if [ -s agent.patch ] && grep -qE '^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) )"?([^ /"]+/)?\.ai-workflows/' agent.patch; then
+          # Normalize path headers the way git apply does (collapse repeated slashes, drop ./ segments)
+          # before matching, so a//.ai-workflows/ cannot slip past the guard.
+          if [ -s agent.patch ] && sed -E '/^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) )/{s#//+#/#g;s#/\./#/#g;s#/\./#/#g;s#([ "])\./#\1#g}' agent.patch | grep -E '^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) )"?([^ /"]+/)?\.ai-workflows/' >/dev/null; then
             echo "::error::agent.patch touches the .ai-workflows checkout" >&2
             exit 1
           fi
