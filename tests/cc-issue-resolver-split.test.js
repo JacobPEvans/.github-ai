@@ -63,7 +63,15 @@ const runValidator = (patch) => {
 const patchTouching = (path) => `diff --git ${path} ${path}\n--- ${path}\n+++ ${path}\n@@ -0,0 +1 @@\n+x\n`;
 
 test('the patch guard rejects .ai-workflows paths in every spelling git apply accepts', () => {
-  for (const path of ['a/.ai-workflows/x.sh', 'a//.ai-workflows/x.sh', 'a/./.ai-workflows/x.sh', './.ai-workflows/x.sh', '"a/\\056ai-workflows/x.sh"']) {
+  for (const path of [
+    'a/.ai-workflows/x.sh',
+    'a//.ai-workflows/x.sh',
+    'a/./.ai-workflows/x.sh',
+    'a/./././.ai-workflows/x.sh',
+    'a/x/../.ai-workflows/x.sh',
+    './.ai-workflows/x.sh',
+    '"a/\\056ai-workflows/x.sh"',
+  ]) {
     expect(runValidator(patchTouching(path)), path).not.toBe(0);
   }
 });

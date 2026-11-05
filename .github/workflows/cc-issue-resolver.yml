@@ -226,14 +226,13 @@ jobs:
 
       - name: Validate agent patch
         run: |
-          # Quoted header paths can spell characters as escapes (\056 is "."), so reject any header that uses one.
-          if [ -s agent.patch ] && grep -E '^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) ).*\\' agent.patch >/dev/null; then
-            echo "::error::agent.patch uses escaped path names" >&2
+          # Patches from git diff name paths canonically, so reject any header that is not, rather than
+          # normalizing it: escapes, repeated slashes, and ./ or ../ segments.
+          if [ -s agent.patch ] && grep -E '^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) ).*(\\|//|/\.\.?/|[ "]\.\.?/)' agent.patch >/dev/null; then
+            echo "::error::agent.patch uses a non-canonical path name" >&2
             exit 1
           fi
-          # Normalize path headers the way git apply does (collapse repeated slashes, drop ./ segments)
-          # before matching, so a//.ai-workflows/ cannot slip past the guard.
-          if [ -s agent.patch ] && sed -E '/^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) )/{s#//+#/#g;s#/\./#/#g;s#/\./#/#g;s#([ "])\./#\1#g}' agent.patch | grep -E '^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) )"?([^ /"]+/)?\.ai-workflows/' >/dev/null; then
+          if [ -s agent.patch ] && grep -E '^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) )"?([^ /"]+/)?\.ai-workflows/' agent.patch >/dev/null; then
             echo "::error::agent.patch touches the .ai-workflows checkout" >&2
             exit 1
           fi
