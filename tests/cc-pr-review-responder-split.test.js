@@ -46,3 +46,9 @@ test('the publish job validates the patch before applying it', () => {
   expect(validate).toBeLessThan(apply);
   expect(workflow.jobs.publish.steps[validate].run).toContain('.ai-workflows');
 });
+
+test('the patch check matches the tooling path case-insensitively', () => {
+  // On a case-insensitive filesystem, .AI-WORKFLOWS names the same checkout.
+  const run = workflow.jobs.publish.steps[stepIndex(workflow.jobs.publish, 'Validate agent patch')].run;
+  expect(run).toMatch(/grep -q[a-zA-Z]*i[a-zA-Z]* /);
+});

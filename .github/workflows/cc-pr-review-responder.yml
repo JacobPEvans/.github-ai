@@ -302,7 +302,7 @@ jobs:
       # this job runs with the App token.
       - name: Validate agent patch
         run: |
-          if [ -s agent.patch ] && grep -qE '^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) )"?([^ /"]+/)?\.ai-workflows/' agent.patch; then
+          if [ -s agent.patch ] && grep -qiE '^(diff --git|--- |\+\+\+ |rename (from|to) |copy (from|to) )"?([^ /"]+/)?\.ai-workflows/' agent.patch; then
             echo "::error::agent.patch touches the .ai-workflows checkout" >&2
             exit 1
           fi
