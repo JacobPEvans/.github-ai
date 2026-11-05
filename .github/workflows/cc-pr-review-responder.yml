@@ -106,6 +106,7 @@ jobs:
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts
           path: .ai-workflows
+          persist-credentials: false
 
       - name: Check daily run limit
         id: check
