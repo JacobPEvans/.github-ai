@@ -65,8 +65,17 @@ test('the patch check rejects a tooling path in either operand of a diff header'
     'diff --git a/src/x b/.ai-workflows/x',
     '--- a/.AI-WORKFLOWS/x',
     'rename to .ai-workflows/moved.txt',
+    'diff --git a/src/.AI-WORKFLOWS/x b/src/.AI-WORKFLOWS/x',
+    '--- a/src/.ai-workflows/x',
+    '+++ b/src/.ai-workflows/x',
+    'rename to src/sub/.ai-workflows/x',
   ];
-  const ordinary = ['diff --git a/src/x b/src/x', '+++ b/src/x', 'rename from src/old.txt'];
+  const ordinary = [
+    'diff --git a/src/x b/src/x',
+    '+++ b/src/x',
+    'rename from src/old.txt',
+    'diff --git a/src/x-ai-workflows/y b/src/x-ai-workflows/y',
+  ];
   for (const line of tooling) expect(matches(line), line).toBe(true);
   for (const line of ordinary) expect(matches(line), line).toBe(false);
 });
