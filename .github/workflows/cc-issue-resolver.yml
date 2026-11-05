@@ -121,6 +121,8 @@ jobs:
       issues: read
       pull-requests: read
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    outputs:
+      gateway_class: ${{ steps.agent.outputs.gateway_class }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -160,10 +162,13 @@ jobs:
           TRIGGER_ACTOR: ${{ github.triggering_actor }}
         run: bash .ai-workflows/.github/scripts/render-prompt.sh .ai-llm-prompts/automation/ai-workflows-issue-resolver.md REPO_CONTEXT ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY ISSUE_LABELS ATTEMPT MAX_ATTEMPTS WORKFLOW_NAME RUN_ID RUN_URL EVENT_NAME TRIGGER_ACTOR
 
+      # This job receives no App key: its input is untrusted issue text. The publish
+      # job posts the gateway-failure check run from the gateway_class output.
       # Claude only EDITS files (use_commit_signing: false). An `issues` event gives
       # claude-code-action no reliable, signature-satisfying way to land a branch + PR
       # itself, so the "Open PR" step below creates the branch + verified commit + PR.
       - name: Run AI agent
+        id: agent
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
           agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
@@ -176,8 +181,6 @@ jobs:
           api_key: ${{ secrets.LLM_ROUTER_API_KEY }}
           openai_effort: ${{ vars.GH_ACTION_AI_CODEX_EFFORT }}
           codex_version: ${{ vars.GH_ACTION_AI_CODEX_VERSION }}
-          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
-          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
       - name: Collect agent patch
         run: |
@@ -221,6 +224,13 @@ jobs:
         with:
           name: issue-resolver-${{ github.run_id }}
 
+      - name: Validate agent patch
+        run: |
+          if [ -s agent.patch ] && grep -qE '^(diff --git |--- |\+\+\+ |rename (from|to) |copy (from|to) )"?([^ /"]+/)?\.ai-workflows/' agent.patch; then
+            echo "::error::agent.patch touches the .ai-workflows checkout" >&2
+            exit 1
+          fi
+
       - name: Apply agent patch
         run: |
           if [ -s agent.patch ]; then
@@ -254,6 +264,28 @@ jobs:
           script: |
             const run = require('./.ai-workflows/.github/scripts/issue-resolver/open-pr.js');
             await run({ github, context, core });
+
+      # Mints a check-run token only when the agent job reported a gateway failure.
+      - name: Mint check-run token
+        id: check-token
+        if: always() && needs.resolve.outputs.gateway_class != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+          permission-checks: write
+
+      - name: Report gateway unavailability
+        if: always() && needs.resolve.outputs.gateway_class != ''
+        env:
+          GATEWAY_CLASS: ${{ needs.resolve.outputs.gateway_class }}
+          JOB_NAME: ${{ github.workflow }}
+          CONCLUSION: neutral
+          GITHUB_TOKEN: ${{ steps.check-token.outputs.token }}
+          CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set' || 'the mint step failed' }}
+          CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "$JOB_NAME" "$GATEWAY_CLASS"
 
   notify-failure:
     name: Report resolution failure
