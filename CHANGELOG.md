@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.3](https://github.com/JacobPEvans/.github-ai/compare/v2.0.2...v2.0.3) (2026-11-05)
+
+
+### Bug Fixes
+
+* move the App key out of the review responder and policy gate agent jobs ([#40](https://github.com/JacobPEvans/.github-ai/issues/40)) ([a73166f](https://github.com/JacobPEvans/.github-ai/commit/a73166f8b7cfe8aa4aa526498f99fc7e46298521))
+
 ## [2.0.2](https://github.com/JacobPEvans/.github-ai/compare/v2.0.1...v2.0.2) (2026-10-27)
 
 
