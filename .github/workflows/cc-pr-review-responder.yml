@@ -314,6 +314,11 @@ jobs:
           fi
           rm agent.patch
 
+      # The trusted scripts run from the .ai-workflows checkout with the App token, so the patch
+      # must leave that checkout unchanged. This holds for every spelling of a path in the patch.
+      - name: Verify the tooling checkout is unchanged
+        run: git -C .ai-workflows diff --quiet HEAD && test -z "$(git -C .ai-workflows ls-files --others)" || { echo "::error::The agent patch changed the .ai-workflows checkout"; exit 1; }
+
       # The fresh publisher alone receives the App token.
       - name: Mint commit token
         id: commit-token

@@ -1,5 +1,6 @@
 const { expect, test } = require('bun:test');
-const { readFileSync } = require('fs');
+const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('fs');
+const { tmpdir } = require('os');
 const { join } = require('path');
 
 // cc-pr-review-responder's agent job reads review text, which is untrusted. Only the jobs
@@ -45,6 +46,51 @@ test('the publish job validates the patch before applying it', () => {
   expect(validate).toBeGreaterThanOrEqual(0);
   expect(validate).toBeLessThan(apply);
   expect(workflow.jobs.publish.steps[validate].run).toContain('.ai-workflows');
+});
+
+test('the tooling checkout is unchanged after the patch is applied, and before the App token is minted', () => {
+  const publish = workflow.jobs.publish;
+  const check = stepIndex(publish, 'Verify the tooling checkout is unchanged');
+  expect(check).toBeGreaterThan(stepIndex(publish, 'Apply agent patch'));
+  expect(check).toBeLessThan(stepIndex(publish, 'Mint commit token'));
+  const run = publish.steps[check].run;
+
+  // A nested repository stands in for the .ai-workflows checkout; the patch is a real git patch.
+  const dir = mkdtempSync(join(tmpdir(), 'tooling-checkout-'));
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@t',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@t',
+  };
+  const git = (args, cwd) => Bun.spawnSync(['git', ...args], { cwd, env });
+  const check_ = (cwd) => Bun.spawnSync(['bash', '-e', '-o', 'pipefail', '-c', run], { cwd, env }).exitCode;
+  try {
+    const tooling = join(dir, '.ai-workflows');
+    mkdirSync(join(tooling, '.github'), { recursive: true });
+    writeFileSync(join(tooling, '.github', 'x.js'), 'a\n');
+    git(['init', '-q'], tooling);
+    git(['add', '-A'], tooling);
+    git(['commit', '-qm', 'fix: seed'], tooling);
+    git(['init', '-q'], dir);
+
+    expect(check_(dir)).toBe(0);
+
+    writeFileSync(
+      join(dir, 'agent.patch'),
+      'diff --git a/.ai-workflows/.github/x.js b/.ai-workflows/.github/x.js\n' +
+        '--- a/.ai-workflows/.github/x.js\n' +
+        '+++ b/.ai-workflows/.github/x.js\n' +
+        '@@ -1 +1,2 @@\n a\n+evil\n',
+    );
+    expect(git(['apply', 'agent.patch'], dir).exitCode).toBe(0);
+    expect(check_(dir)).not.toBe(0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the patch check matches the tooling path case-insensitively', () => {
