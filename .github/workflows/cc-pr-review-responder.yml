@@ -106,6 +106,7 @@ jobs:
           ref: ${{ job.workflow_sha }}
           sparse-checkout: .github/scripts
           path: .ai-workflows
+          persist-credentials: false
 
       - name: Check daily run limit
         id: check
@@ -144,6 +145,7 @@ jobs:
       pr_number: ${{ github.event.pull_request.number || steps.pr.outputs.number }}
       head_sha: ${{ github.event.pull_request.head.sha || steps.pr.outputs.sha }}
       head_ref: ${{ github.event.pull_request.head.ref || steps.pr.outputs.ref }}
+      gateway_class: ${{ steps.agent.outputs.gateway_class }}
     steps:
       # workflow_dispatch has no PR event context — resolve the head SHA (a hex OID,
       # no injection surface) from the trusted integer pr_number input. Review-event
@@ -227,9 +229,10 @@ jobs:
           secrets: |
             secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key | LLM_ROUTER_API_KEY
 
-      # The model edits files and writes a typed review-action handoff. It never
-      # receives the App token used by the fresh publisher job.
+      # The model edits files and writes a typed review-action handoff. This job receives
+      # no App key or App id: the publish and gateway-report jobs mint the App token.
       - name: Run AI agent
+        id: agent
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
           agent: ${{ inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude' }}
@@ -246,8 +249,6 @@ jobs:
           openai_effort: ${{ vars.GH_ACTION_AI_CODEX_EFFORT }}
           codex_version: ${{ vars.GH_ACTION_AI_CODEX_VERSION }}
           allowed_bots: "gemini-code-assist,copilot-pull-request-reviewer,github-actions"
-          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
-          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
       - name: Collect agent patch
         run: |
@@ -297,12 +298,26 @@ jobs:
         with:
           name: review-responder-${{ github.run_id }}
 
+      # Rejects a patch that touches the .ai-workflows checkout, which holds the scripts
+      # this job runs with the App token.
+      - name: Validate agent patch
+        run: |
+          if [ -s agent.patch ] && grep -qiE '^(diff --git (.* )?|--- |\+\+\+ |rename (from|to) |copy (from|to) )"?([^ /"]+/)*\.ai-workflows/' agent.patch; then
+            echo "::error::agent.patch touches the .ai-workflows checkout" >&2
+            exit 1
+          fi
+
       - name: Apply agent patch
         run: |
           if [ -s agent.patch ]; then
             git apply agent.patch
           fi
           rm agent.patch
+
+      # The trusted scripts run from the .ai-workflows checkout with the App token, so the patch
+      # must leave that checkout unchanged. This holds for every spelling of a path in the patch.
+      - name: Verify the tooling checkout is unchanged
+        run: git -C .ai-workflows diff --quiet HEAD && test -z "$(git -C .ai-workflows ls-files --others)" || { echo "::error::The agent patch changed the .ai-workflows checkout"; exit 1; }
 
       # The fresh publisher alone receives the App token.
       - name: Mint commit token
@@ -319,6 +334,7 @@ jobs:
         env:
           HEAD_BRANCH: ${{ needs.respond.outputs.head_ref }}
           COMMIT_MESSAGE: "fix: address review feedback (AI responder)"
+          EXTRA_EXCLUDES: .review-actions.json
         with:
           github-token: ${{ steps.commit-token.outputs.token }}
           script: |
@@ -334,3 +350,42 @@ jobs:
           script: |
             const run = require('./.ai-workflows/.github/scripts/pr-review-responder/publish-actions.js');
             await run({ github, context, core });
+
+  # Posts the gateway-failure check run from the agent job's gateway_class output. Runs
+  # even on dry runs, where publish is skipped. Mints the App token here, not in respond.
+  report-gateway:
+    name: Report gateway unavailability
+    needs: respond
+    if: always() && needs.respond.outputs.gateway_class != ''
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout ai-workflows scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Mint check-run token
+        id: check-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+          permission-checks: write
+
+      - name: Report gateway unavailability
+        env:
+          GATEWAY_CLASS: ${{ needs.respond.outputs.gateway_class }}
+          JOB_NAME: ${{ github.workflow }}
+          CONCLUSION: neutral
+          GITHUB_TOKEN: ${{ steps.check-token.outputs.token }}
+          CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set' || 'the mint step failed' }}
+          CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "$JOB_NAME" "$GATEWAY_CLASS"

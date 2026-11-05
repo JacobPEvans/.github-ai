@@ -11,5 +11,7 @@ module.exports = async ({ github, context, core }) => {
     core,
     branch: process.env.HEAD_BRANCH,
     message: process.env.COMMIT_MESSAGE,
+    // Comma-separated workspace paths the caller wrote and must not commit.
+    extraExcludes: (process.env.EXTRA_EXCLUDES || '').split(',').map((p) => p.trim()).filter(Boolean),
   });
 };
