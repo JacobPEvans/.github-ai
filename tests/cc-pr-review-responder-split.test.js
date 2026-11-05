@@ -52,3 +52,21 @@ test('the patch check matches the tooling path case-insensitively', () => {
   const run = workflow.jobs.publish.steps[stepIndex(workflow.jobs.publish, 'Validate agent patch')].run;
   expect(run).toMatch(/grep -q[a-zA-Z]*i[a-zA-Z]* /);
 });
+
+test('the patch check rejects a tooling path in either operand of a diff header', () => {
+  // Runs the pattern the workflow really uses against sample patch header lines.
+  const run = workflow.jobs.publish.steps[stepIndex(workflow.jobs.publish, 'Validate agent patch')].run;
+  const pattern = run.match(/grep -qiE '([^']*)'/)[1];
+  const matches = (line) =>
+    Bun.spawnSync(['grep', '-qiE', pattern], { stdin: Buffer.from(`${line}\n`) }).exitCode === 0;
+  const tooling = [
+    'diff --git a/.ai-workflows/x b/.ai-workflows/x',
+    'diff --git a/.AI-WORKFLOWS/x b/.AI-WORKFLOWS/x',
+    'diff --git a/src/x b/.ai-workflows/x',
+    '--- a/.AI-WORKFLOWS/x',
+    'rename to .ai-workflows/moved.txt',
+  ];
+  const ordinary = ['diff --git a/src/x b/src/x', '+++ b/src/x', 'rename from src/old.txt'];
+  for (const line of tooling) expect(matches(line), line).toBe(true);
+  for (const line of ordinary) expect(matches(line), line).toBe(false);
+});
