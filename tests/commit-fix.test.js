@@ -70,6 +70,23 @@ describe('commit-fix', () => {
     expect(core.getOutput('commit_oid')).toBe('newoid');
   });
 
+  it('leaves the files named in EXTRA_EXCLUDES out of the commit', async () => {
+    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n'); // modify
+    fs.writeFileSync(path.join(dir, '.review-actions.json'), '{"actions":[]}\n'); // handoff, untracked
+    process.env.EXTRA_EXCLUDES = '.review-actions.json';
+    const github = makeGithub();
+
+    try {
+      await runIn(dir, { github, context, core });
+    } finally {
+      delete process.env.EXTRA_EXCLUDES;
+    }
+
+    const input = github.graphql.mock.calls[0][1].input;
+    expect(input.fileChanges.additions.map((a) => a.path)).toEqual(['main.tf']);
+    expect(git(dir, ['status', '--porcelain', '--', '.review-actions.json']).trim()).toBe('?? .review-actions.json');
+  });
+
   it('handles deletions and renames', async () => {
     fs.rmSync(path.join(dir, 'old.tf')); // delete
     fs.renameSync(path.join(dir, 'main.tf'), path.join(dir, 'renamed.tf')); // rename (content identical → R100)

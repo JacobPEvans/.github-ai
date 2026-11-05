@@ -334,6 +334,7 @@ jobs:
         env:
           HEAD_BRANCH: ${{ needs.respond.outputs.head_ref }}
           COMMIT_MESSAGE: "fix: address review feedback (AI responder)"
+          EXTRA_EXCLUDES: .review-actions.json
         with:
           github-token: ${{ steps.commit-token.outputs.token }}
           script: |

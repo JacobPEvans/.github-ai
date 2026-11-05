@@ -93,6 +93,13 @@ test('the tooling checkout is unchanged after the patch is applied, and before t
   }
 });
 
+test('the commit step leaves the review handoff file out of the commit', () => {
+  // The handoff is downloaded into the workspace root before the commit; without an exclude
+  // the commit helper stages it as an untracked file.
+  const commit = workflow.jobs.publish.steps.find((step) => step.name === 'Commit fixes to PR branch');
+  expect(commit.env.EXTRA_EXCLUDES).toBe('.review-actions.json');
+});
+
 test('the patch check matches the tooling path case-insensitively', () => {
   // On a case-insensitive filesystem, .AI-WORKFLOWS names the same checkout.
   const run = workflow.jobs.publish.steps[stepIndex(workflow.jobs.publish, 'Validate agent patch')].run;
