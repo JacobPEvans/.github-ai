@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.0](https://github.com/JacobPEvans/.github-ai/compare/v2.0.3...v2.1.0) (2026-11-06)
+
+
+### Features
+
+* add local_model input to shared AI workflows ([#43](https://github.com/JacobPEvans/.github-ai/issues/43)) ([4606037](https://github.com/JacobPEvans/.github-ai/commit/4606037f0b957019ceb71c192da1e02b38b37b2e))
+* **docs-drift:** support local_model routing ([#44](https://github.com/JacobPEvans/.github-ai/issues/44)) ([6d914a2](https://github.com/JacobPEvans/.github-ai/commit/6d914a28764105555d837733b87dce58468d18aa))
+
 ## [2.0.3](https://github.com/JacobPEvans/.github-ai/compare/v2.0.2...v2.0.3) (2026-11-05)
 
 
