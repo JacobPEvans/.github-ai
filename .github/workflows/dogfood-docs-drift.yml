@@ -12,6 +12,8 @@ jobs:
     # repository: set the repository variable DOGFOOD_SELF_HOSTED to 'true'.
     if: vars.DOGFOOD_SELF_HOSTED == 'true'
     uses: ./.github/workflows/docs-drift.yml
+    with:
+      local_model: review-local
     secrets:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}

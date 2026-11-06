@@ -177,6 +177,7 @@ jobs:
             .github/scripts
             .github/actions/run-ai-agent
             .github/actions/checkout-prompts
+            .github/actions/select-router-model
           path: .ai-workflows
           persist-credentials: false
       - name: Checkout prompt catalog
@@ -229,6 +230,13 @@ jobs:
           secrets: |
             secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key | LLM_ROUTER_API_KEY
 
+      - name: Select router model
+        id: router-model
+        uses: ./.ai-workflows/.github/actions/select-router-model
+        with:
+          model: ${{ vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL }}
+          local_model: ${{ inputs.local_only && inputs.local_model || '' }}
+
       # The model edits files and writes a typed review-action handoff. This job receives
       # no App key or App id: the publish and gateway-report jobs mint the App token.
       - name: Run AI agent
@@ -237,7 +245,7 @@ jobs:
         with:
           agent: ${{ inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude' }}
           prompt: ${{ steps.prompt.outputs.content }}
-          claude_model: ${{ inputs.local_only && inputs.local_model || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL }}
+          claude_model: ${{ steps.router-model.outputs.model }}
           codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}
           allowed_tools: "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git status:*)${{ inputs.extra_tools != '' && format(',{0}', inputs.extra_tools) || '' }}"
           permission_profile: workspace
