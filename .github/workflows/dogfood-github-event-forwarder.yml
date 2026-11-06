@@ -1,0 +1,21 @@
+name: Dogfood GitHub Event Forwarder
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  check_run:
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  forward:
+    if: >-
+      vars.DOGFOOD_SELF_HOSTED == 'true' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    uses: ./.github/workflows/github-event-forwarder.yml
+    with:
+      agent_name: ci-fixer
+      webhook_url_secret_name: DIFY_CI_FIXER_WEBHOOK_URL
+    secrets: inherit

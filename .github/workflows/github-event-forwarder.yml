@@ -1,0 +1,35 @@
+name: GitHub Event Forwarder
+
+on:
+  workflow_call:
+    inputs:
+      agent_name:
+        description: Dify agent receiving the event.
+        type: string
+        required: true
+      webhook_url_secret_name:
+        description: Name of the webhook URL secret passed with secrets inherit.
+        type: string
+        required: true
+      runner_label:
+        description: Runner label for webhook delivery.
+        type: string
+        default: self-hosted
+
+permissions: {}
+
+jobs:
+  forward:
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 2
+    steps:
+      - name: Forward event to Dify
+        shell: bash
+        env:
+          AGENT_NAME: ${{ inputs.agent_name }}
+          WEBHOOK_URL: ${{ secrets[inputs.webhook_url_secret_name] }}
+        run: |
+          set -euo pipefail
+          [[ -n "$WEBHOOK_URL" && -n "$AGENT_NAME" ]]
+          envelope=$(jq -c '{id: env.GITHUB_RUN_ID, source: "github", type: (env.GITHUB_EVENT_NAME + (if .action then "." + .action else "" end)), agent: env.AGENT_NAME, subject: (.pull_request.html_url // .check_run.html_url // .repository.html_url), revision: (.pull_request.head.sha // .check_run.head_sha // env.GITHUB_SHA), actor: env.GITHUB_ACTOR, time: (now | todateiso8601), correlation_id: (env.GITHUB_REPOSITORY + "/" + env.GITHUB_RUN_ID)}' "$GITHUB_EVENT_PATH")
+          curl --fail --silent --show-error --proto '=https' --connect-timeout 10 --max-time 60 --output /dev/null --header 'Content-Type: application/json' --data "$envelope" "$WEBHOOK_URL"

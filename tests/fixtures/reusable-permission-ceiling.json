@@ -60,6 +60,7 @@
     "contents": "read",
     "pull-requests": "write"
   },
+  "github-event-forwarder.yml": {},
   "issue-backlog-sweep.yml": {
     "contents": "read",
     "issues": "write",
