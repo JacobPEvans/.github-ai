@@ -100,8 +100,28 @@ describe('dep-review/check-eligibility', () => {
     expect(core.getOutput('should_run')).toBe('true');
   });
 
-  it('skip: dedup marker already present', async () => {
-    github.paginate.mockResolvedValue([{ body: 'earlier run\n<!-- cc-dep-review -->' }]);
+  it('skips the reviewed head, but reviews a new head', async () => {
+    context.payload.pull_request.head = { sha: 'abc' };
+    github.paginate.mockResolvedValue([{ body: '<!-- cc-dep-review -->\n<!-- cc-dep-review-head:abc -->' }]);
+    await run({ github, context, core });
+    expect(core.getOutput('should_run')).toBe('false');
+    context.payload.pull_request.head.sha = 'def';
+    await run({ github, context, core });
+    expect(core.getOutput('should_run')).toBe('true');
+  });
+
+  it('reviews Dependabot single and grouped version updates', async () => {
+    for (const text of ['Bump thing from 1.0.0 to 2.0.0', 'Bumps [one](url) from 1.2 to 1.3\nBumps [two](url) from 1 to 2']) {
+      context.payload = makePayload({ login: 'dependabot[bot]', body: text });
+      await run({ github, context, core });
+      expect(core.getOutput('should_run')).toBe('true');
+      expect(core.getOutput('update_type')).toBe('major');
+    }
+  });
+
+  it('honors explicit bot restrictions for Dependabot', async () => {
+    process.env.BOT_AUTHORS = 'renovate[bot]';
+    context.payload = makePayload({ login: 'dependabot[bot]', body: 'Bump thing from 1 to 2' });
     await run({ github, context, core });
     expect(core.getOutput('should_run')).toBe('false');
   });
