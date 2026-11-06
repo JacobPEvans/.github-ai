@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.0](https://github.com/JacobPEvans/.github-ai/compare/v2.2.0...v2.3.0) (2026-11-06)
+
+
+### Features
+
+* **github:** forward events to Dify webhooks ([#47](https://github.com/JacobPEvans/.github-ai/issues/47)) ([96cb499](https://github.com/JacobPEvans/.github-ai/commit/96cb4992223522eca9e1e366c94ae660a235ed73))
+
 ## [2.2.0](https://github.com/JacobPEvans/.github-ai/compare/v2.1.0...v2.2.0) (2026-11-06)
 
 
