@@ -36,6 +36,13 @@ on:
         type: string
         required: false
         default: medium
+      local_model:
+        description: >-
+          Existing local-only router role (e.g. review-local). Overrides model
+          when set; the router key must permit this role.
+        type: string
+        required: false
+        default: ""
       docs_globs:
         description: >-
           Comma-separated documentation globs to consider. Only the files that
@@ -113,7 +120,9 @@ jobs:
         with:
           repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/actions/select-router-model
           path: .ai-workflows
           persist-credentials: false
 
@@ -124,6 +133,13 @@ jobs:
           MAX_DOCS_KB: ${{ inputs.max_docs_kb }}
         run: bash .ai-workflows/.github/scripts/docs-drift/collect.sh
 
+      - name: Select router model
+        id: router-model
+        uses: ./.ai-workflows/.github/actions/select-router-model
+        with:
+          model: ${{ inputs.model }}
+          local_model: ${{ inputs.local_model }}
+
       - name: Request drift report
         id: drift
         if: hashFiles('drift.skip') == ''
@@ -133,7 +149,7 @@ jobs:
         with:
           endpoint: ${{ secrets.LLM_ROUTER_BASE_URL }}
           token: ${{ secrets.LLM_ROUTER_API_KEY }}
-          model: ${{ inputs.model }}
+          model: ${{ steps.router-model.outputs.model }}
           max-completion-tokens: ${{ inputs.max_tokens }}
           temperature: "0"
           prompt-file: .ai-workflows/.github/scripts/docs-drift/docs-drift.prompt.yml
@@ -187,7 +203,7 @@ jobs:
         if: steps.drift.outcome != 'failure' && steps.parse.outcome != 'failure'
         env:
           RESPONSE_FILE: ${{ steps.drift.outputs.response-file }}
-          MODEL: ${{ inputs.model }}
+          MODEL: ${{ steps.router-model.outputs.model }}
           COMMIT_SHA: ${{ github.sha }}
         run: bash .ai-workflows/.github/scripts/docs-drift/render.sh
 

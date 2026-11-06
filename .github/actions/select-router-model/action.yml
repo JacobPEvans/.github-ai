@@ -1,0 +1,29 @@
+name: Select router model
+description: Prefer an explicitly configured local router role over the default model.
+inputs:
+  model:
+    description: Default router role or model.
+    required: false
+    default: ""
+  local_model:
+    description: Existing local-only router role; empty preserves the default model.
+    required: false
+    default: ""
+outputs:
+  model:
+    description: Selected router role or model.
+    value: ${{ steps.select.outputs.model }}
+runs:
+  using: composite
+  steps:
+    - name: Select model
+      id: select
+      shell: bash
+      env:
+        MODEL: ${{ inputs.local_model || inputs.model }}
+      run: |
+        if [[ "$MODEL" == *$'\n'* || "$MODEL" == *$'\r'* ]]; then
+          echo "::error::Router model must be a single line"
+          exit 1
+        fi
+        printf 'model=%s\n' "$MODEL" >> "$GITHUB_OUTPUT"

@@ -29,6 +29,7 @@ this a required check — a failure should be visible without blocking a merge.
 | --- | --- | --- |
 | `runner_label` | `self-hosted` | Runner label for the job |
 | `model` | `medium` | Router **role alias** to call — never a vendor model id |
+| `local_model` | empty | Existing local-only router role; overrides `model` when set |
 | `docs_globs` | `README.md,AGENTS.md,CLAUDE.md,docs/**/*.md` | Documentation considered |
 | `max_diff_kb` | `150` | The merged diff is truncated to this many KiB |
 | `max_docs_kb` | `200` | Ceiling on the total size of the documentation sent |
@@ -45,6 +46,14 @@ Both are required. With either missing the job fails immediately, naming the
 one that did not arrive.
 
 ## Which documentation gets sent
+
+To use local models, pass `local_model: review-local` under the calling job's
+`with`. The role must already exist on the configured router, and the scoped
+`LLM_ROUTER_API_KEY` must permit it. Model selection uses the same composite
+action as the PR review responder; credentials still come from the existing
+router secrets, without an additional caller permission. The router role owns
+local-only routing. Omitting `local_model` preserves the `model` input and its
+`medium` default. This repository's dogfood caller selects `review-local`.
 
 Not all of it. Sending the whole documentation tree on every merge would cost
 tokens on each run and bury the signal, so a file is included only when it
