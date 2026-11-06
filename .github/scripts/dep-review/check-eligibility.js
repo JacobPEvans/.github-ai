@@ -5,6 +5,18 @@
 const MARKER = '<!-- cc-dep-review -->';
 const RANK = { major: 3, minor: 2, patch: 1 };
 
+function dependabotTypes(pr) {
+  const types = [];
+  const text = `${pr.title || ''}\n${pr.body || ''}`;
+  for (const match of text.matchAll(/\bfrom\s+`?v?(\d+)(?:\.(\d+))?(?:\.(\d+))?`?\s+to\s+`?v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/gi)) {
+    const old = match.slice(1, 4).map((v) => Number(v || 0));
+    const next = match.slice(4, 7).map((v) => Number(v || 0));
+    const index = old.findIndex((v, i) => v !== next[i]);
+    if (index >= 0) types.push(['major', 'minor', 'patch'][index]);
+  }
+  return types;
+}
+
 // Renovate PR bodies carry a table whose Update column holds the bump type.
 // Only table rows are scanned so prose/release notes can't false-match.
 function parseUpdateTypes(body) {
@@ -30,7 +42,7 @@ module.exports = async ({ github, context, core }) => {
   const pr = context.payload.pull_request;
   if (!pr) return skip('No pull_request payload — skipping');
 
-  const authors = (process.env.BOT_AUTHORS || 'renovate[bot]').split(',').map((s) => s.trim());
+  const authors = (process.env.BOT_AUTHORS || 'renovate[bot],dependabot[bot]').split(',').map((s) => s.trim());
   const login = pr.user && pr.user.login;
   if (!authors.includes(login)) return skip(`PR author "${login}" is not a dependency bot — skipping`);
 
@@ -43,7 +55,7 @@ module.exports = async ({ github, context, core }) => {
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  const found = parseUpdateTypes(pr.body);
+  const found = login === 'dependabot[bot]' ? dependabotTypes(pr) : parseUpdateTypes(pr.body);
   const top = highestSemverType(found);
   if (!top) return skip(`No semver update type in the Renovate table (found: ${found.join(', ') || 'none'}) — skipping`);
   if (!updateTypes.includes(top)) return skip(`Update type "${top}" not in [${updateTypes.join(', ')}] — skipping`);
@@ -55,7 +67,8 @@ module.exports = async ({ github, context, core }) => {
     issue_number: pr.number,
     per_page: 100,
   });
-  if (comments.some((c) => c.body && c.body.includes(MARKER))) {
+  const headMarker = pr.head?.sha && `<!-- cc-dep-review-head:${pr.head.sha} -->`;
+  if (headMarker && comments.some((c) => c.body?.includes(MARKER) && c.body.includes(headMarker))) {
     return skip('cc-dep-review comment already present — skipping');
   }
 
