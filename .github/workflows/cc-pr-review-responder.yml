@@ -176,6 +176,7 @@ jobs:
           sparse-checkout: |
             .github/scripts
             .github/actions/run-ai-agent
+            .github/actions/local-model-setup
             .github/actions/checkout-prompts
           path: .ai-workflows
           persist-credentials: false
@@ -199,35 +200,18 @@ jobs:
           REPO_CONTEXT: ${{ inputs.repo_context || github.event.repository.description }}
         run: bash .ai-workflows/.github/scripts/render-prompt.sh .ai-llm-prompts/automation/ai-workflows-pr-review-responder.md PR_NUMBER REPO_CONTEXT
 
-      - name: Validate local model flow configuration
-        if: inputs.local_only
-        env:
-          LOCAL_MODEL: ${{ inputs.local_model }}
-          LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
-          OPENBAO_ADDR: ${{ secrets.OPENBAO_ADDR }}
-          OTEL_ENDPOINT: ${{ vars.AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT }}
-          DAILY_RUN_LIMIT: ${{ inputs.daily_run_limit }}
-        run: |
-          test -n "$LOCAL_MODEL" || { echo "local_model is required when local_only is true" >&2; exit 1; }
-          test -n "$LLM_ROUTER_BASE_URL" || { echo "LLM_ROUTER_BASE_URL is required when local_only is true" >&2; exit 1; }
-          test -n "$OPENBAO_ADDR" || { echo "OPENBAO_ADDR is required when local_only is true" >&2; exit 1; }
-          test -n "$OTEL_ENDPOINT" || { echo "AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required when local_only is true" >&2; exit 1; }
-          case "$DAILY_RUN_LIMIT" in ''|*[!0-9]*|0) echo "daily_run_limit must be positive" >&2; exit 1 ;; esac
-
-      - name: Read PR-review router key through OpenBao OIDC
+      - name: Set up local-only model flow
         id: router-key
         if: inputs.local_only
-        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        uses: ./.ai-workflows/.github/actions/local-model-setup
         with:
-          url: ${{ secrets.OPENBAO_ADDR }}
-          method: jwt
-          path: github-actions
+          model: ${{ inputs.local_model }}
+          base_url: ${{ secrets.LLM_ROUTER_BASE_URL }}
+          openbao_addr: ${{ secrets.OPENBAO_ADDR }}
+          otel_endpoint: ${{ vars.AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT }}
+          daily_run_limit: ${{ inputs.daily_run_limit }}
           role: github-agent-pr-review
-          jwtGithubAudience: https://github.com/dryvist
-          exportEnv: false
-          exportToken: false
-          secrets: |
-            secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key | LLM_ROUTER_API_KEY
+          key_selector: secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key
 
       # The model edits files and writes a typed review-action handoff. This job receives
       # no App key or App id: the publish and gateway-report jobs mint the App token.

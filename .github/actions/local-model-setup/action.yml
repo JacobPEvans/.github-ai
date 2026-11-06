@@ -1,0 +1,58 @@
+name: Local model setup
+description: Validate local-only flow settings and obtain its scoped router key.
+inputs:
+  model:
+    description: Existing local router role.
+    required: true
+  base_url:
+    description: Router base URL.
+    required: true
+  openbao_addr:
+    description: Credential service URL.
+    required: true
+  otel_endpoint:
+    description: Trace exporter endpoint.
+    required: true
+  daily_run_limit:
+    description: Positive daily run limit.
+    required: true
+  role:
+    description: OIDC role for this workflow.
+    required: true
+  key_selector:
+    description: Vault action selector for the scoped router key.
+    required: true
+outputs:
+  LLM_ROUTER_API_KEY:
+    description: Scoped router key.
+    value: ${{ steps.key.outputs.LLM_ROUTER_API_KEY }}
+runs:
+  using: composite
+  steps:
+    - name: Validate local model flow configuration
+      shell: bash
+      env:
+        LOCAL_MODEL: ${{ inputs.model }}
+        LLM_ROUTER_BASE_URL: ${{ inputs.base_url }}
+        OPENBAO_ADDR: ${{ inputs.openbao_addr }}
+        OTEL_ENDPOINT: ${{ inputs.otel_endpoint }}
+        DAILY_RUN_LIMIT: ${{ inputs.daily_run_limit }}
+      run: |
+        test -n "$LOCAL_MODEL" || { echo "local_model is required when local_only is true" >&2; exit 1; }
+        test -n "$LLM_ROUTER_BASE_URL" || { echo "LLM_ROUTER_BASE_URL is required when local_only is true" >&2; exit 1; }
+        test -n "$OPENBAO_ADDR" || { echo "OPENBAO_ADDR is required when local_only is true" >&2; exit 1; }
+        test -n "$OTEL_ENDPOINT" || { echo "AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required when local_only is true" >&2; exit 1; }
+        case "$DAILY_RUN_LIMIT" in ''|*[!0-9]*|0) echo "daily_run_limit must be positive" >&2; exit 1 ;; esac
+    - name: Read router key through OIDC
+      id: key
+      uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+      with:
+        url: ${{ inputs.openbao_addr }}
+        method: jwt
+        path: github-actions
+        role: ${{ inputs.role }}
+        jwtGithubAudience: https://github.com/dryvist
+        exportEnv: false
+        exportToken: false
+        secrets: |
+          ${{ inputs.key_selector }} | LLM_ROUTER_API_KEY
