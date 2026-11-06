@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.2.0](https://github.com/JacobPEvans/.github-ai/compare/v2.1.0...v2.2.0) (2026-11-06)
+
+
+### Features
+
+* **dep-review:** limit risk notes to dependency update PRs ([#42](https://github.com/JacobPEvans/.github-ai/issues/42)) ([a4097c6](https://github.com/JacobPEvans/.github-ai/commit/a4097c61009e3d0e0404c815ec4d49b369bc04ee))
+
 ## [2.1.0](https://github.com/JacobPEvans/.github-ai/compare/v2.0.3...v2.1.0) (2026-11-06)
 
 
