@@ -12,7 +12,12 @@ max_diff_kb="${MAX_DIFF_KB:-150}"
 
 git diff --name-only "$BASE_SHA...$HEAD_SHA" > changed.txt
 
-git diff "$BASE_SHA...$HEAD_SHA" |
+diff_options=()
+if [ "${RUBRIC:-policy}" = "leak" ]; then
+  diff_options+=(--unified=0)
+fi
+
+git diff "${diff_options[@]}" "$BASE_SHA...$HEAD_SHA" |
   sed -E 's/\$\{\{[[:space:]]*secrets\.([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\}\}/<secret-reference:\1>/g' |
   if [ "${RUBRIC:-policy}" = "leak" ]; then
     sed -E "s/^[+][[:blank:]]*[A-Za-z_][A-Za-z0-9_.-]*[:=][[:blank:]\"']*<secret-reference:[A-Za-z_][A-Za-z0-9_]*>[[:blank:]\"']*$/+<reference-only line>/"
