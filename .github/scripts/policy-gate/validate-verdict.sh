@@ -94,8 +94,9 @@ if [[ -z "$diff_file" ]]; then
   ' "$GITHUB_EVENT_PATH")"
   DIFF_TEMP="$(new_temp)"
   diff_status="$(curl --silent --show-error --fail --max-time 30 --max-filesize 10485760 \
+    --header 'Accept: application/vnd.github.diff' \
     --output "$DIFF_TEMP" --write-out '%{http_code}' \
-    "https://github.com/$GITHUB_REPOSITORY/pull/$pull_number.diff")"
+    "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$pull_number")"
   [[ "$diff_status" == 200 ]] || {
     echo "::error::Could not retrieve the pull request diff for leak validation" >&2
     exit 1
@@ -158,8 +159,6 @@ fi
 
 FILTER_TEMP="$(new_temp)"
 jq --slurpfile patch "$RESULT_TEMP" '
-  def normalize_path:
-    if startswith("b/") then .[2:] else . end;
   def quoted_parts($detail):
     [$detail | scan("\"[^\"\\\\]*\"|`[^`]+`|\u0027[^\u0027]+\u0027") | .[1:-1]];
   def candidates($text):
@@ -183,8 +182,20 @@ jq --slurpfile patch "$RESULT_TEMP" '
       "(?i)^2001:(?:0{0,3}db8)(?::[0-9a-f]{0,4}){1,6}$"
     ];
   def is_exempt:
-    . as $value
-    | any(documentation_values[]; . as $pattern | $value | test($pattern));
+    . as $candidate
+    | (if ($candidate | test("(?i)^[a-z][a-z0-9+.-]{0,20}://")) then
+         [$candidate,
+          ($candidate
+           | sub("(?i)^[a-z][a-z0-9+.-]{0,20}://"; "")
+           | sub("[/?#].*$"; "")
+           | sub("^.*@"; "")
+           | if startswith("[") and contains("]") then split("]")[0][1:]
+             else sub(":([0-9]+)$"; "")
+             end)]
+       else [$candidate]
+       end)
+    | any(.[]; . as $value
+      | any(documentation_values[]; . as $pattern | $value | test($pattern)));
   def real_candidates($text):
     candidates($text) | map(select((is_exempt | not)));
   def grounded($finding; $line):
@@ -197,10 +208,10 @@ jq --slurpfile patch "$RESULT_TEMP" '
           | $line.text | contains($quote))
       end;
   def reason($finding; $diff):
-    ($finding.file | normalize_path) as $path
-    | if ($diff.files | index($path)) == null then "path_not_in_diff"
+    $finding.file as $path
+    | if ([$diff.files[] | select($path == . or $path == ("b/" + .))] | length) == 0 then "path_not_in_diff"
       else
-        ([$diff.added[] | select(.file == $path and .line == $finding.line)] | first) as $line
+        ([$diff.added[] | select(($path == .file or $path == ("b/" + .file)) and .line == $finding.line)] | first) as $line
         | if $line == null then "line_not_added"
           elif grounded($finding; $line) then null
           elif (quoted_parts($finding.detail) | length) == 0 then "no_candidate"

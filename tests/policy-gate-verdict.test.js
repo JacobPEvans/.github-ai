@@ -68,12 +68,12 @@ function leakResult(response, patch) {
   }
 }
 
-function patch(lines, hunk = '@@ -0,0 +1 @@') {
+function patch(lines, hunk = '@@ -0,0 +1 @@', file = 'config.yml') {
   return [
-    'diff --git a/config.yml b/config.yml',
+    `diff --git a/${file} b/${file}`,
     'index 1111111..2222222 100644',
-    '--- a/config.yml',
-    '+++ b/config.yml',
+    `--- a/${file}`,
+    `+++ b/${file}`,
     hunk,
     ...lines,
     '',
@@ -130,7 +130,7 @@ test('validates leak findings against the aggregate GitHub pull-request diff', (
     const diff = join(dir, 'diff.patch');
     const event = join(dir, 'event.json');
     const summary = join(dir, 'summary.md');
-    const url = join(dir, 'curl-url.txt');
+    const request = join(dir, 'curl-request.txt');
     const curl = join(bin, 'curl');
     const finding = makeFinding('private_host_or_ip', 'fail', {
       file: 'config.yml', line: 1, detail: 'Exposes a private host.',
@@ -145,15 +145,17 @@ test('validates leak findings against the aggregate GitHub pull-request diff', (
     writeFileSync(curl, `#!/bin/sh
 output=
 request_url=
+accept_header=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --output) output="$2"; shift 2 ;;
+    --header) accept_header="$2"; shift 2 ;;
     --write-out|--max-time|--max-filesize) shift 2 ;;
     --silent|--show-error|--fail) shift ;;
     *) request_url="$1"; shift ;;
   esac
 done
-printf '%s\\n' "$request_url" > "$CURL_URL_FILE"
+printf '%s\\n%s\\n' "$request_url" "$accept_header" > "$CURL_REQUEST_FILE"
 cat "$DIFF_FIXTURE" > "$output"
 printf 200
 `);
@@ -167,14 +169,17 @@ printf 200
         GITHUB_EVENT_PATH: event,
         GITHUB_REPOSITORY: 'owner/repo',
         GITHUB_STEP_SUMMARY: summary,
-        CURL_URL_FILE: url,
+        CURL_REQUEST_FILE: request,
         DIFF_FIXTURE: diff,
         PATH: `${bin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
       },
     });
 
     expect(validation.exitCode).toBe(0);
-    expect(readFileSync(url, 'utf8').trim()).toBe('https://github.com/owner/repo/pull/12.diff');
+    expect(readFileSync(request, 'utf8').trim().split('\n')).toEqual([
+      'https://api.github.com/repos/owner/repo/pulls/12',
+      'Accept: application/vnd.github.diff',
+    ]);
     expect(JSON.parse(readFileSync(response, 'utf8')).findings).toEqual([finding]);
     expect(readFileSync(summary, 'utf8')).toBe('');
   } finally {
@@ -286,6 +291,8 @@ test('drops a leak finding that cites an unchanged line', () => {
 test.each([
   'https://example.com/private',
   'https://example.test/private',
+  'https://192.0.2.1/private',
+  'https://[2001:db8::1]/private',
   '192.0.2.1',
   '198.51.100.42',
   '203.0.113.254',
@@ -338,6 +345,51 @@ test('keeps a leak finding for an RFC1918 address on an added line', () => {
   const result = leakResult(
     JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
     patch(['+endpoint: 192.168.20.10']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test('keeps a leak finding for an RFC1918 address inside a URL on an added line', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'config.yml', line: 1, detail: 'Exposes a private endpoint.',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+endpoint: https://192.168.20.10/private']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test('keeps a finding for a leak in a real b directory', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'b/config.yml', line: 1, detail: 'Exposes a private host.',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+host: vault.private.lan'], '@@ -0,0 +1 @@', 'b/config.yml'),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test('accepts a verdict path with the diff header b prefix', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'b/config.yml', line: 1, detail: 'Exposes a private host.',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+host: vault.private.lan']),
   );
 
   expect(result.validationExit).toBe(0);
