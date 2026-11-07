@@ -122,7 +122,7 @@ jq -n --rawfile patch "$diff_file" '
          .file = null | .new_line = 0 | .in_hunk = false | .sections += 1
        elif (has("in_hunk") and (.in_hunk | not)) and ($row | startswith("+++ ")) then
          if ($row | startswith("+++ b/")) then
-           ($row[6:]) as $path
+           ($row[6:] | sub("\t$"; "")) as $path
            | .file = $path
            | .new_line = 0
            | .files += [$path]
@@ -170,7 +170,7 @@ jq --slurpfile patch "$RESULT_TEMP" '
   def is_candidate($previous):
     test("(?i)^[a-z][a-z0-9+.-]*://[^/?#]+") or
     test("(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$") or
-    test("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?::[0-9]+|/[0-9]{1,2})?$") or
+    (test("[0-9]") and test("[.:/]")) or
     test("(?i)^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,63}$") or
     ipv6_shape or
     (test("(?i)[a-z]") and (test("[0-9]") or contains("-"))) or

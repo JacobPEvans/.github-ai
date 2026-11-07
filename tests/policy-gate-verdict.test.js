@@ -405,6 +405,7 @@ test.each([
   'peer 10.0.0.5:8080',
   'route 10.0.0.0/8',
   'route ::1/128',
+  'peer ::10.0.0.1',
 ])('keeps a private-host finding for a bare word after a host-like key: %s', (line) => {
   const finding = makeFinding('private_host_or_ip', 'fail', {
     file: 'config.yml', line: 1, detail: '',
@@ -500,6 +501,29 @@ test('keeps an unknown leak check finding on an added prose line', () => {
   expect(JSON.parse(result.response).findings).toEqual([finding]);
   expect(result.renderedExit).toBe('1');
   expect(result.summary).toBe('');
+});
+
+test('keeps a credential finding in a file whose diff header ends in a tab', () => {
+  const finding = makeFinding('credential', 'fail', {
+    file: 'my config.yml', line: 1, detail: '',
+  });
+  const spacedPatch = [
+    'diff --git a/my config.yml b/my config.yml',
+    'index 1111111..2222222 100644',
+    '--- a/my config.yml\t',
+    '+++ b/my config.yml\t',
+    '@@ -0,0 +1 @@',
+    '+password: hunter2',
+    '',
+  ].join('\n');
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    spacedPatch,
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
 });
 
 test('keeps a private-host finding when the added file path is C-quoted Unicode', () => {
