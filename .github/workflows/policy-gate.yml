@@ -169,6 +169,7 @@ jobs:
       - name: Collect the diff and file sizes
         if: steps.override.outputs.has_override != 'true'
         env:
+          RUBRIC: ${{ inputs.rubric }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MAX_DIFF_KB: ${{ inputs.max_diff_kb }}
