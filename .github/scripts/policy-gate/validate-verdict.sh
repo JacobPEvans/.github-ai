@@ -162,7 +162,7 @@ fi
 FILTER_TEMP="$(new_temp)"
 jq --slurpfile patch "$RESULT_TEMP" '
   def ipv6_shape:
-    test("(?i)^(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}$");
+    test("(?i)^(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?:/[0-9]{1,3})?$");
   def tokens($text):
     ($text | gsub("[[:space:]\";,()\\[\\]{}<> =]+"; " ") | gsub("\u0027"; " ") | gsub("\u0060"; " ") | split(" ") | map(select(length > 0)))
     | map(if ipv6_shape then . else sub("[.,:;!?]+$"; "") end | select(length > 0));
@@ -170,7 +170,7 @@ jq --slurpfile patch "$RESULT_TEMP" '
   def is_candidate($previous):
     test("(?i)^[a-z][a-z0-9+.-]*://[^/?#]+") or
     test("(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$") or
-    test("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$") or
+    test("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?::[0-9]+|/[0-9]{1,2})?$") or
     test("(?i)^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,63}$") or
     ipv6_shape or
     (test("(?i)[a-z]") and (test("[0-9]") or contains("-"))) or
