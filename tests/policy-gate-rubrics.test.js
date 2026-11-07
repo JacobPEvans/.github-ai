@@ -49,6 +49,12 @@ test('security: required first-party caller permissions pass while broader grant
   expect(content).toContain("Permissions beyond that workflow's needs, write-all, or a new write scope on an unrelated job still fail.");
 });
 
+test('semantic: promotion aggregates pass omissions while non-promotions and mismatches remain checked', () => {
+  const content = prompt('semantic').messages.find(({ role }) => role === 'system').content;
+  expect(content).toContain('For a develop-to-main promotion PR (for example, chore: promote develop to main), omitted_behavior passes for aggregated changes from already-reviewed merged PRs without requiring an itemized list.');
+  expect(content).toContain('A non-promotion PR that omits a changed behavior still fails omitted_behavior, and claim_mismatch still applies to every PR.');
+});
+
 for (const [rubric, spec] of Object.entries(rubrics)) {
   test(`${rubric}: its prompt file has the expected checks`, () => {
     const promptPath = join('.github', 'scripts', 'policy-gate', `${spec.prompt}.prompt.yml`);
