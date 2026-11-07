@@ -43,6 +43,12 @@ test('leak: secret references alone pass credential while actual values still fa
   expect(content).toContain('An actual credential value in an added line still fails, including alongside such a reference.');
 });
 
+test('security: required first-party caller permissions pass while broader grants still fail', () => {
+  const content = prompt('security').messages.find(({ role }) => role === 'system').content;
+  expect(content).toContain('A caller job granting only the permissions required by a called first-party reusable workflow passes permission_widening (for example, pull-requests: write for a workflow that comments on and merges pull requests).');
+  expect(content).toContain("Permissions beyond that workflow's needs, write-all, or a new write scope on an unrelated job still fail.");
+});
+
 for (const [rubric, spec] of Object.entries(rubrics)) {
   test(`${rubric}: its prompt file has the expected checks`, () => {
     const promptPath = join('.github', 'scripts', 'policy-gate', `${spec.prompt}.prompt.yml`);
