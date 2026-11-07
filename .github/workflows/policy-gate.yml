@@ -283,6 +283,7 @@ jobs:
         if: needs.review.outputs.verdict_status == 'ok'
         continue-on-error: true
         env:
+          GH_TOKEN: ${{ github.token }}
           RUBRIC: ${{ inputs.rubric }}
           RESPONSE_FILE: handoff/verdict.json
         run: bash .ai-workflows/.github/scripts/policy-gate/validate-verdict.sh
