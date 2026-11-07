@@ -328,6 +328,7 @@ test.each([
   '198.51.100.42',
   '203.0.113.254',
   '2001:db8::1',
+  '2001:db8::',
   '2001:0db8:0000:0000:0000:0000:0000:0001',
 ])(
   'drops a leak finding for a rubric documentation value: %s',
@@ -408,6 +409,36 @@ test.each([
   const result = leakResult(
     JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
     patch([`+${line}`]),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test('keeps a bare host after a quoted host-like key', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+"host": "mercury"']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test('judges a host token independently beside an exempt URL', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+db-01 https://example.com/db-01']),
   );
 
   expect(result.validationExit).toBe(0);
@@ -567,6 +598,24 @@ test('accepts a verdict path with the diff header b prefix', () => {
   expect(JSON.parse(result.response).findings).toEqual([finding]);
   expect(result.renderedExit).toBe('1');
   expect(result.summary).toBe('');
+});
+
+test('matches b-prefixed paths to exact files before trying the b/ alias', () => {
+  const configFinding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const nestedFinding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'b/config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'Two suspected leaks.', findings: [configFinding, nestedFinding] }),
+    patch(['+host: node-1']) + patch(['+message: ordinary text'], '@@ -0,0 +1 @@', 'b/config.yml'),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([configFinding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('UNGROUNDED | b/config.yml:1 | no_candidate\n');
 });
 
 test('malformed leak verdict still fails closed', () => {

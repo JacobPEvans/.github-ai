@@ -161,37 +161,21 @@ fi
 
 FILTER_TEMP="$(new_temp)"
 jq --slurpfile patch "$RESULT_TEMP" '
-  def candidates($text):
-    # shortcut: a bare one-word name with no host-like key is not a candidate; the disclosure denylist gate holds known private names, so upgrade only if a real name passes both
-    (
-      [
-        ($text | scan("(?i)[a-z][a-z0-9+.-]{0,20}://[^[:space:]\"<>]+")),
-        ($text | scan("(?i)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?")),
-        ($text | scan("(?<![0-9])[0-9]{1,3}(?:\\.[0-9]{1,3}){3}(?![0-9])")),
-        ($text | scan("(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,63}")),
-        ($text | scan("(?i)(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}"))
-      ]
-      | flatten
-      | map(gsub("[.,;:!?]+$"; "") | gsub("[)\\]}]+$"; ""))
-      | unique
-    ) as $structured
-    | (
-        [
-          $text
-          | scan("(?i)[a-z0-9_-]+")
-          | select(test("[a-z]"; "i") and (test("[0-9]") or contains("-")))
-          | . as $token
-          | select(([$structured[] | select(contains($token))] | length) == 0)
-        ]
-      ) as $tokens
-    | (
-        [
-          $text
-          | scan("(?i)\\b(?:host|hostname|server|node|addr|endpoint|url)[[:space:]]*[:=][[:space:]]*[\"\u0027]?[a-z][a-z0-9_-]*(?=$|[[:space:],;)}\\]\"\u0027])")
-          | sub("(?i)^\\b(?:host|hostname|server|node|addr|endpoint|url)[[:space:]]*[:=][[:space:]]*[\"\u0027]?"; "")
-        ]
-      ) as $key_values
-    | ($structured + $tokens + $key_values) | unique;
+  def ipv6_shape:
+    test("(?i)^(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}$");
+  def tokens($text):
+    ($text | gsub("[[:space:]\";,()\\[\\]{}<> =]+"; " ") | gsub("\u0027"; " ") | gsub("\u0060"; " ") | split(" ") | map(select(length > 0)))
+    | map(if ipv6_shape then . else sub("[.,:;!?]+$"; "") end | select(length > 0));
+  # shortcut: a bare one-word name with no host-like key is not a candidate; the disclosure denylist gate holds known private names, so upgrade only if a real name passes both
+  def is_candidate($previous):
+    test("(?i)^[a-z][a-z0-9+.-]*://[^/?#]+") or
+    test("(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$") or
+    test("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$") or
+    test("(?i)^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,63}$") or
+    ipv6_shape or
+    (test("(?i)[a-z]") and (test("[0-9]") or contains("-"))) or
+    (($previous | test("(?i)^(host|hostname|server|node|addr|endpoint|url):?$")) and
+      test("(?i)^[a-z][a-z0-9_-]*$"));
   # Centralized values named by the leak rubric: example domains, RFC 5737, RFC 3849.
   def documentation_values:
     [
@@ -199,31 +183,38 @@ jq --slurpfile patch "$RESULT_TEMP" '
       "^(?:192\\.0\\.2|198\\.51\\.100|203\\.0\\.113)\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$",
       "(?i)^2001:(?:0{0,3}db8)(?::[0-9a-f]{0,4}){1,6}$"
     ];
+  def matches_documentation: . as $value | any(documentation_values[]; . as $pattern | $value | test($pattern));
   def is_exempt:
-    . as $candidate
-    | (if ($candidate | test("(?i)^[a-z][a-z0-9+.-]{0,20}://")) then
-         if ($candidate | test("(?i)^[a-z][a-z0-9+.-]{0,20}://[^/?#]*@")) then []
-         else
-           [$candidate,
-            ($candidate
-             | sub("(?i)^[a-z][a-z0-9+.-]{0,20}://"; "")
-             | sub("[/?#].*$"; "")
-             | if startswith("[") and contains("]") then split("]")[0][1:]
-               else sub(":([0-9]+)$"; "")
-               end)]
-         end
-       else [$candidate]
-       end)
-    | any(.[]; . as $value
-      | any(documentation_values[]; . as $pattern | $value | test($pattern)));
+    . as $token
+    | if ($token | test("(?i)^[a-z][a-z0-9+.-]*://")) then
+        if ($token | test("(?i)^[a-z][a-z0-9+.-]*://[^/?#]*@")) then false
+        else
+          ($token
+           | sub("(?i)^[a-z][a-z0-9+.-]*://"; "")
+           | sub("[/?#].*$"; "")
+           | sub(":([0-9]+)$"; ""))
+          | matches_documentation
+        end
+      else $token | matches_documentation
+      end;
   def real_candidates($text):
-    candidates($text) | map(select((is_exempt | not)));
+    tokens($text) as $tokens
+    | [range(0; ($tokens | length)) as $index
+       | $tokens[$index] as $token
+       | (if $index == 0 then "" else $tokens[$index - 1] end) as $previous
+       | select($token | is_candidate($previous))
+       | select($token | is_exempt | not)
+       | $token];
+  def real_path($path; $diff):
+    if any($diff.files[]; . == $path) then $path
+    elif ($path | startswith("b/")) and any($diff.files[]; . == $path[2:]) then $path[2:] else null end;
   def reason($finding; $diff):
     $finding.file as $path
-    | if ([$diff.files[] | select($path == . or $path == ("b/" + .))] | length) == 0 then
+    | real_path($path; $diff) as $real_path
+    | if $real_path == null then
         if $diff.unknown_path then null else "path_not_in_diff" end
       else
-        ([$diff.added[] | select(($path == .file or $path == ("b/" + .file)) and .line == $finding.line)] | first) as $line
+        ([$diff.added[] | select(.file == $real_path and .line == $finding.line)] | first) as $line
         | if $line == null then "line_not_added"
           elif $finding.check == "private_host_or_ip" and (real_candidates($line.text) | length) == 0 then "no_candidate"
           else null
