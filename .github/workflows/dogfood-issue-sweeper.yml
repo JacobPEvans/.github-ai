@@ -5,11 +5,12 @@ on:
   # schedule:
   #   - cron: "0 6 * * 0"
   # --- END DISABLED ---
-permissions:
-  contents: read
-  issues: write
-  pull-requests: read
+permissions: {}
 jobs:
   sweep:
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
     uses: JacobPEvans/.github-ai/.github/workflows/issue-sweeper.yml@v2
     secrets: inherit
