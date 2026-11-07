@@ -2,6 +2,7 @@ const { expect, test } = require('bun:test');
 const { mkdtempSync, rmSync, writeFileSync, readFileSync } = require('fs');
 const { join } = require('path');
 const { tmpdir } = require('os');
+const { execFileSync } = require('child_process');
 
 const script = (name) => join('.github', 'scripts', 'policy-gate', name);
 
@@ -19,6 +20,31 @@ function withTempDir(fn) {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+function withCollectedDiff(content, fn, env = {}) {
+  withTempDir((dir) => {
+    const git = (args) => execFileSync('git', args, {
+      cwd: dir,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com',
+        GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com',
+      },
+    }).trim();
+    git(['init', '-q']);
+    const base = git(['commit-tree', git(['write-tree']), '-m', 'base']);
+    writeFileSync(join(dir, 'workflow.yml'), content);
+    git(['add', 'workflow.yml']);
+    const head = git(['commit-tree', git(['write-tree']), '-p', base, '-m', 'head']);
+    const raw = execFileSync('git', ['diff', `${base}...${head}`], { cwd: dir });
+
+    const result = run(dir, 'collect.sh', { MAX_DIFF_KB: '150', ...env, BASE_SHA: base, HEAD_SHA: head });
+
+    expect(result.exitCode).toBe(0);
+    fn(readFileSync(join(dir, 'diff.txt')), raw);
+  });
 }
 
 test('render.sh reports the override notice and exits 0 without calling the router', () => {
@@ -110,4 +136,40 @@ test('collect.sh requires BASE_SHA and HEAD_SHA', () => {
     const result = run(dir, 'collect.sh', {});
     expect(result.exitCode).not.toBe(0);
   });
+});
+
+test('collect.sh marks every secret reference and preserves surrounding diff text', () => {
+  withCollectedDiff('values: [${{ secrets.TOKEN }}, ${{secrets._key2}}, ${{\tsecrets.Mixed_123\t}}]\n', (diff, raw) => {
+    expect(diff.toString()).toBe(raw.toString()
+      .replace('${{ secrets.TOKEN }}', '<secret-reference:TOKEN>')
+      .replace('${{secrets._key2}}', '<secret-reference:_key2>')
+      .replace('${{\tsecrets.Mixed_123\t}}', '<secret-reference:Mixed_123>'));
+  });
+});
+
+test('collect.sh preserves a literal token-like value beside a secret reference', () => {
+  const literal = 'fixture-token-0123456789abcdef';
+  withCollectedDiff(`value: ${literal} ref: \${{ secrets.TOKEN }}\n`, (diff, raw) => {
+    expect(diff.toString()).toBe(raw.toString().replace('${{ secrets.TOKEN }}', '<secret-reference:TOKEN>'));
+    expect(diff.toString()).toContain(`+value: ${literal} ref: <secret-reference:TOKEN>`);
+  });
+});
+
+test('collect.sh leaves a diff without secret references byte-identical', () => {
+  withCollectedDiff('value:\tplain\nlast line without newline', (diff, raw) => {
+    expect(diff).toEqual(raw);
+  });
+});
+
+test('collect.sh leaves expressions outside the secret reference grammar unchanged', () => {
+  withCollectedDiff('values: [${{ secrets.1KEY }}, ${{ secrets.KEY-X }}, ${{ secrets.KEY || "fallback" }}, ${{ vars.KEY }}]\n', (diff, raw) => {
+    expect(diff).toEqual(raw);
+  });
+});
+
+test('collect.sh caps the marked diff and retains the truncation notice', () => {
+  withCollectedDiff('ref: ${{ secrets.TOKEN }}\n' + 'value\n'.repeat(300), (diff, raw) => {
+    const marked = Buffer.from(raw.toString().replace('${{ secrets.TOKEN }}', '<secret-reference:TOKEN>'));
+    expect(diff).toEqual(Buffer.concat([marked.subarray(0, 1024), Buffer.from('\n[diff truncated at 1 KiB]\n')]));
+  }, { MAX_DIFF_KB: '1' });
 });

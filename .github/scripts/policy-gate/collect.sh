@@ -12,7 +12,8 @@ max_diff_kb="${MAX_DIFF_KB:-150}"
 
 git diff --name-only "$BASE_SHA...$HEAD_SHA" > changed.txt
 
-git diff "$BASE_SHA...$HEAD_SHA" > diff.full.txt
+git diff "$BASE_SHA...$HEAD_SHA" |
+  sed -E 's/\$\{\{[[:space:]]*secrets\.([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\}\}/<secret-reference:\1>/g' > diff.full.txt
 head -c "$((max_diff_kb * 1024))" diff.full.txt > diff.txt
 if [ "$(wc -c < diff.full.txt)" -gt "$((max_diff_kb * 1024))" ]; then
   printf '\n[diff truncated at %s KiB]\n' "$max_diff_kb" >> diff.txt
