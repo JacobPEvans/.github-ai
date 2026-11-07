@@ -5,11 +5,14 @@ on:
   # schedule:
   #   - cron: "0 7 * * 0"
   # --- END DISABLED ---
-permissions:
-  contents: read
-  issues: write
-  pull-requests: read
+permissions: {}
 jobs:
   hygiene:
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
     uses: JacobPEvans/.github-ai/.github/workflows/issue-hygiene.yml@v2
+    with:
+      runner_label: review
     secrets: inherit

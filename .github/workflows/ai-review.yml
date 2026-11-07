@@ -27,6 +27,8 @@ jobs:
       contents: read
       pull-requests: read
     uses: JacobPEvans/.github-ai/.github/workflows/scope-classify.yml@v2
+    secrets:
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
 
   # Renovate and release-please pull requests are version bumps and
   # changelog/lockfile edits by construction; a model review of them answers
