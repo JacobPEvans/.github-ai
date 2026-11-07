@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.4](https://github.com/JacobPEvans/.github-ai/compare/v2.3.3...v2.3.4) (2026-11-07)
+
+
+### Bug Fixes
+
+* **policy-gate:** replace reference-only lines for leak review ([b7b4f25](https://github.com/JacobPEvans/.github-ai/commit/b7b4f2537f3f3ac1a0462732638f0b4b0e7c641a))
+* **policy-gate:** show reference-only lines to the leak rubric as a placeholder ([#58](https://github.com/JacobPEvans/.github-ai/issues/58)) ([b7b4f25](https://github.com/JacobPEvans/.github-ai/commit/b7b4f2537f3f3ac1a0462732638f0b4b0e7c641a))
+
 ## [2.3.3](https://github.com/JacobPEvans/.github-ai/compare/v2.3.2...v2.3.3) (2026-11-07)
 
 
