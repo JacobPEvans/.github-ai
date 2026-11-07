@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.1](https://github.com/JacobPEvans/.github-ai/compare/v2.3.0...v2.3.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **policy-gate:** calibrate the leak, security and semantic rubrics ([#52](https://github.com/JacobPEvans/.github-ai/issues/52)) ([5650d72](https://github.com/JacobPEvans/.github-ai/commit/5650d720a7618919321e7107204f349a774b4bf0))
+
 ## [2.3.0](https://github.com/JacobPEvans/.github-ai/compare/v2.2.0...v2.3.0) (2026-11-06)
 
 
