@@ -186,8 +186,7 @@ jq --slurpfile patch "$RESULT_TEMP" '
       else
         any($quotes[];
           . as $quote
-          | ($line.text | contains($quote))
-            and ((real_candidates($quote) | length) > 0))
+          | $line.text | contains($quote))
       end;
   def reason($finding; $diff):
     ($finding.file | normalize_path) as $path
@@ -197,9 +196,7 @@ jq --slurpfile patch "$RESULT_TEMP" '
         | if $line == null then "line_not_added"
           elif grounded($finding; $line) then null
           elif (quoted_parts($finding.detail) | length) == 0 then "no_candidate"
-          elif (any(quoted_parts($finding.detail)[];
-            . as $quote | $line.text | contains($quote)) | not) then "quoted_text_not_on_line"
-          else "quoted_text_has_no_candidate"
+          else "quoted_text_not_on_line"
           end
       end;
   . as $verdict

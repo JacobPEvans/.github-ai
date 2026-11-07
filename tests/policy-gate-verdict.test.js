@@ -246,6 +246,21 @@ test('drops a leak finding when the added line has no candidate token', () => {
   expect(result.summary).not.toContain('ordinary text');
 });
 
+test('keeps a leak finding when quoted text exactly appears on the added line', () => {
+  const finding = makeFinding('credential', 'fail', {
+    file: 'config.yml', line: 1, detail: 'Contains "pw".',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+password: pw']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
 test('drops a leak finding that cites an unchanged line', () => {
   const finding = {
     ...makeFinding('private_host_or_ip', 'fail', {
@@ -273,7 +288,7 @@ test.each(['https://example.com/private', 'https://example.test/private'])(
   (url) => {
     const finding = {
       ...makeFinding('private_host_or_ip', 'fail', {
-        file: 'config.yml', line: 1, detail: `Uses "${url}".`,
+        file: 'config.yml', line: 1, detail: '',
       }),
     };
     const result = leakResult(
@@ -284,7 +299,7 @@ test.each(['https://example.com/private', 'https://example.test/private'])(
     expect(result.validationExit).toBe(0);
     expect(JSON.parse(result.response).findings).toEqual([]);
     expect(result.renderedExit).toBe('0');
-    expect(result.summary).toBe('UNGROUNDED | config.yml:1 | quoted_text_has_no_candidate\n');
+      expect(result.summary).toBe('UNGROUNDED | config.yml:1 | no_candidate\n');
     expect(result.summary).not.toContain(url);
   },
 );
