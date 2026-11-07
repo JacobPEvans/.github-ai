@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.7](https://github.com/JacobPEvans/.github-ai/compare/v2.3.6...v2.3.7) (2026-11-07)
+
+
+### Bug Fixes
+
+* **dep-review:** configure Claude request reasoning ([#66](https://github.com/JacobPEvans/.github-ai/issues/66)) ([fbc7367](https://github.com/JacobPEvans/.github-ai/commit/fbc7367c2acfb72d34e13b1a74e3304764073366))
+
 ## [2.3.6](https://github.com/JacobPEvans/.github-ai/compare/v2.3.5...v2.3.6) (2026-11-07)
 
 
