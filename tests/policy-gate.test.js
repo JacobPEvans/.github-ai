@@ -22,7 +22,7 @@ function withTempDir(fn) {
   }
 }
 
-function withCollectedDiff(content, fn, env = {}) {
+function withCollectedDiff(content, fn, env = {}, baseContent) {
   withTempDir((dir) => {
     const git = (args) => execFileSync('git', args, {
       cwd: dir,
@@ -34,6 +34,10 @@ function withCollectedDiff(content, fn, env = {}) {
       },
     }).trim();
     git(['init', '-q']);
+    if (baseContent !== undefined) {
+      writeFileSync(join(dir, 'workflow.yml'), baseContent);
+      git(['add', 'workflow.yml']);
+    }
     const base = git(['commit-tree', git(['write-tree']), '-m', 'base']);
     writeFileSync(join(dir, 'workflow.yml'), content);
     git(['add', 'workflow.yml']);
@@ -172,4 +176,56 @@ test('collect.sh caps the marked diff and retains the truncation notice', () => 
     const marked = Buffer.from(raw.toString().replace('${{ secrets.TOKEN }}', '<secret-reference:TOKEN>'));
     expect(diff).toEqual(Buffer.concat([marked.subarray(0, 1024), Buffer.from('\n[diff truncated at 1 KiB]\n')]));
   }, { MAX_DIFF_KB: '1' });
+});
+
+test('collect.sh replaces reference-only additions for leak without changing line counts', () => {
+  const content = [
+    '  API_KEY: ${{ secrets.API_KEY }}',
+    'KEY=${{secrets.TOKEN}}',
+    '\tkey.name-2: "${{ secrets._key2 }}"  ',
+    "_KEY='${{ secrets.Mixed_123 }}'",
+    'QUOTED= "<secret-reference:TOKEN>"',
+    "PADDED: ' <secret-reference:TOKEN> '\t",
+  ].join('\n') + '\n';
+  withCollectedDiff(content, (diff, raw) => {
+    const expected = raw.toString().split('\n')
+      .map((line) => line.startsWith('+') && !line.startsWith('+++') ? '+<reference-only line>' : line)
+      .join('\n');
+    expect(diff.toString()).toBe(expected);
+    expect(diff.toString().split('\n')).toHaveLength(raw.toString().split('\n').length);
+    expect(diff.toString()).not.toContain('<secret-reference:');
+  }, { RUBRIC: 'leak' });
+});
+
+test.each(['security', 'semantic', 'policy'])('collect.sh preserves reference-only lines for %s', (rubric) => {
+  withCollectedDiff('  API_KEY: ${{ secrets.API_KEY }}\n', (diff, raw) => {
+    expect(diff.toString()).toBe(raw.toString().replace('${{ secrets.API_KEY }}', '<secret-reference:API_KEY>'));
+  }, { RUBRIC: rubric });
+});
+
+test('collect.sh preserves reference-only context and removals for leak', () => {
+  const context = 'CONTEXT: ${{ secrets.TOKEN }}\n';
+  withCollectedDiff(context + 'ADDED: ${{ secrets.TOKEN }}\n', (diff, raw) => {
+    expect(diff.toString()).toBe(raw.toString()
+      .replaceAll('${{ secrets.TOKEN }}', '<secret-reference:TOKEN>')
+      .replace('+ADDED: <secret-reference:TOKEN>', '+<reference-only line>'));
+    expect(diff.toString()).toContain(' CONTEXT: <secret-reference:TOKEN>');
+    expect(diff.toString()).toContain('-REMOVED: <secret-reference:TOKEN>');
+  }, { RUBRIC: 'leak' }, context + 'REMOVED: ${{ secrets.TOKEN }}\n');
+});
+
+test('collect.sh preserves literal text and non-assignment additions for leak', () => {
+  const content = [
+    'KEY: fixture-token-0123456789abcdef <secret-reference:TOKEN>',
+    'KEY: "<secret-reference:TOKEN>suffix"',
+    'KEY=<secret-reference:TOKEN> # comment',
+    'KEY=<secret-reference:TOKEN><secret-reference:OTHER>',
+    'KEY=${{ secrets.TOKEN }} literal',
+    '1KEY=<secret-reference:TOKEN>',
+    '- KEY: <secret-reference:TOKEN>',
+    '<secret-reference:TOKEN>',
+  ].join('\n') + '\n';
+  withCollectedDiff(content, (diff, raw) => {
+    expect(diff.toString()).toBe(raw.toString().replace('${{ secrets.TOKEN }}', '<secret-reference:TOKEN>'));
+  }, { RUBRIC: 'leak' });
 });

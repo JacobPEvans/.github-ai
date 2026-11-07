@@ -37,6 +37,11 @@ test('policy-gate.yml validates the rubric against every rubric it supports', ()
   expect(text).toContain('printf \'%s\\n\' policy security leak semantic');
 });
 
+test('policy-gate.yml passes the selected rubric to the collector', () => {
+  const collect = workflow('policy-gate.yml').jobs.review.steps.find(({ name }) => name === 'Collect the diff and file sizes');
+  expect(collect.env.RUBRIC).toBe('${{ inputs.rubric }}');
+});
+
 test('leak: secret references alone pass credential while actual values still fail', () => {
   const content = prompt('leak').messages.find(({ role }) => role === 'system').content;
   expect(content).toContain('Each GitHub Actions secret expression arrives already rewritten as <secret-reference:NAME>.');
