@@ -1,5 +1,5 @@
 const { expect, test } = require('bun:test');
-const { mkdtempSync, rmSync, writeFileSync, readFileSync } = require('fs');
+const { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } = require('fs');
 const { join } = require('path');
 const { tmpdir } = require('os');
 
@@ -120,6 +120,66 @@ test('accepts a leak verdict with several findings in one category', () => {
     ],
   };
   expect(exitCodeFor('leak', JSON.stringify(verdict))).toBe(0);
+});
+
+test('validates leak findings against the aggregate GitHub pull-request diff', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'policy-leak-aggregate-diff-'));
+  try {
+    const bin = join(dir, 'bin');
+    const response = join(dir, 'response.json');
+    const diff = join(dir, 'diff.patch');
+    const event = join(dir, 'event.json');
+    const summary = join(dir, 'summary.md');
+    const url = join(dir, 'curl-url.txt');
+    const curl = join(bin, 'curl');
+    const finding = makeFinding('private_host_or_ip', 'fail', {
+      file: 'config.yml', line: 1, detail: 'Exposes a private host.',
+    });
+    writeFileSync(response, JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }));
+    writeFileSync(diff, patch(['+host: vault.private.lan']));
+    writeFileSync(event, JSON.stringify({
+      pull_request: { number: 12, changed_files: 1, additions: 1, deletions: 0 },
+    }));
+    writeFileSync(summary, '');
+    mkdirSync(bin);
+    writeFileSync(curl, `#!/bin/sh
+output=
+request_url=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) output="$2"; shift 2 ;;
+    --write-out|--max-time|--max-filesize) shift 2 ;;
+    --silent|--show-error|--fail) shift ;;
+    *) request_url="$1"; shift ;;
+  esac
+done
+printf '%s\\n' "$request_url" > "$CURL_URL_FILE"
+cat "$DIFF_FIXTURE" > "$output"
+printf 200
+`);
+    chmodSync(curl, 0o755);
+
+    const validation = Bun.spawnSync(['bash', script], {
+      env: {
+        ...process.env,
+        RUBRIC: 'leak',
+        RESPONSE_FILE: response,
+        GITHUB_EVENT_PATH: event,
+        GITHUB_REPOSITORY: 'owner/repo',
+        GITHUB_STEP_SUMMARY: summary,
+        CURL_URL_FILE: url,
+        DIFF_FIXTURE: diff,
+        PATH: `${bin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
+      },
+    });
+
+    expect(validation.exitCode).toBe(0);
+    expect(readFileSync(url, 'utf8').trim()).toBe('https://github.com/owner/repo/pull/12.diff');
+    expect(JSON.parse(readFileSync(response, 'utf8')).findings).toEqual([finding]);
+    expect(readFileSync(summary, 'utf8')).toBe('');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('rejects a policy verdict with no findings, which would skip every check', () => {

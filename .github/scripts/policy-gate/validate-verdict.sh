@@ -51,7 +51,7 @@ if [[ "$RUBRIC" != leak ]]; then
 fi
 
 cleanup() {
-  [[ -z "${PATCH_TEMP:-}" ]] || rm -f -- "$PATCH_TEMP"
+  [[ -z "${DIFF_TEMP:-}" ]] || rm -f -- "$DIFF_TEMP"
   [[ -z "${RESULT_TEMP:-}" ]] || rm -f -- "$RESULT_TEMP"
   [[ -z "${FILTER_TEMP:-}" ]] || rm -f -- "$FILTER_TEMP"
   [[ -z "${RESPONSE_TEMP:-}" ]] || rm -f -- "$RESPONSE_TEMP"
@@ -92,15 +92,15 @@ if [[ -z "$diff_file" ]]; then
     | select($pr.deletions | type == "number" and . >= 0 and floor == .)
     | [$pr.changed_files, $pr.additions, $pr.deletions] | @tsv
   ' "$GITHUB_EVENT_PATH")"
-  PATCH_TEMP="$(new_temp)"
-  patch_status="$(curl --silent --show-error --fail --max-time 30 --max-filesize 10485760 \
-    --output "$PATCH_TEMP" --write-out '%{http_code}' \
-    "https://github.com/$GITHUB_REPOSITORY/pull/$pull_number.patch")"
-  [[ "$patch_status" == 200 ]] || {
-    echo "::error::Could not retrieve the pull request patch for leak validation" >&2
+  DIFF_TEMP="$(new_temp)"
+  diff_status="$(curl --silent --show-error --fail --max-time 30 --max-filesize 10485760 \
+    --output "$DIFF_TEMP" --write-out '%{http_code}' \
+    "https://github.com/$GITHUB_REPOSITORY/pull/$pull_number.diff")"
+  [[ "$diff_status" == 200 ]] || {
+    echo "::error::Could not retrieve the pull request diff for leak validation" >&2
     exit 1
   }
-  diff_file="$PATCH_TEMP"
+  diff_file="$DIFF_TEMP"
 fi
 
 [[ -r "$diff_file" ]] || {
@@ -151,7 +151,7 @@ jq -n --rawfile patch "$diff_file" '
 parsed_counts="$(jq -r '[.sections, .added_count, .removed_count] | @tsv' "$RESULT_TEMP")"
 if [[ -n "$expected_counts" ]]; then
   [[ "$parsed_counts" == "$expected_counts" ]] || {
-    echo "::error::The pull request patch is incomplete" >&2
+    echo "::error::The pull request diff is incomplete" >&2
     exit 1
   }
 fi
