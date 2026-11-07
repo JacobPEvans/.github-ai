@@ -1,15 +1,21 @@
 const { expect, test } = require('bun:test');
-const { readFileSync, readdirSync, statSync } = require('fs');
-const { dirname, join } = require('path');
+const { readFileSync, readdirSync } = require('fs');
+const { join } = require('path');
 
-// Every .prompt.yml under .github/scripts is what actions/ai-inference loads:
+// Every .prompt.yml in the catalog is what actions/ai-inference loads:
 // a messages array, a JSON schema when it asks for one, and no model (the
 // workflow's `model` input, a router role alias, supplies it). Each {{var}}
 // must be one the calling workflow maps in `file_input`.
-const scripts = join('.github', 'scripts');
-const prompts = readdirSync(scripts)
-  .filter((d) => statSync(join(scripts, d)).isDirectory())
-  .flatMap((d) => readdirSync(join(scripts, d)).filter((f) => f.endsWith('.prompt.yml')).map((f) => join(scripts, d, f)));
+const catalog = join('.ai-llm-prompts', 'automation');
+const prompts = readdirSync(catalog)
+  .filter((f) => f.startsWith('ai-workflows-') && f.endsWith('.prompt.yml'))
+  .map((f) => join(catalog, f));
+
+test('workflow prompts live only in the catalog', () => {
+  const localPrompts = readdirSync(join('.github', 'scripts'), { recursive: true })
+    .filter((file) => file.endsWith('.prompt.yml'));
+  expect(localPrompts).toEqual([]);
+});
 
 const workflows = readdirSync(join('.github', 'workflows'))
   .map((f) => readFileSync(join('.github', 'workflows', f), 'utf8'))
@@ -32,10 +38,9 @@ for (const file of prompts) {
       expect(schema.strict).toBe(true);
       expect(schema.schema.type).toBe('object');
     }
-    // A rubric prompt is chosen by an expression in the workflow, so its literal
-    // path may be absent; the calling step is then found by the directory.
-    const literal = `prompt-file: .ai-workflows/${file}`;
-    const selected = workflows.includes(literal) ? literal : `prompt-file: .ai-workflows/${dirname(file)}/\${{`;
+    // A rubric prompt is selected by the review name in the workflow.
+    const literal = `prompt-file: ${file}`;
+    const selected = workflows.includes(literal) ? literal : 'prompt-file: .ai-llm-prompts/automation/ai-workflows-${{';
     expect(workflows.includes(selected)).toBe(true);
     const use = workflows.slice(workflows.indexOf(selected));
     expect(use.length).toBeGreaterThan(0);
@@ -44,4 +49,22 @@ for (const file of prompts) {
       expect(mapped).toContain(name);
     }
   });
+}
+
+for (const name of readdirSync(join('.github', 'workflows'))) {
+  const config = Bun.YAML.parse(readFileSync(join('.github', 'workflows', name), 'utf8'));
+  for (const [jobName, job] of Object.entries(config.jobs ?? {})) {
+    const steps = job.steps ?? [];
+    for (const [index, step] of steps.entries()) {
+      if (!step.with?.['prompt-file']?.startsWith('.ai-llm-prompts/')) continue;
+      test(`${name}: ${jobName} checks out the inference prompt before reading it`, () => {
+        const checkoutIndex = steps.findIndex((s) => s.uses === './.ai-workflows/.github/actions/checkout-prompts');
+        expect(checkoutIndex).toBeGreaterThanOrEqual(0);
+        expect(checkoutIndex).toBeLessThan(index);
+        expect(steps[checkoutIndex].with['sparse-checkout']).toBe(step.with['prompt-file'].replace('.ai-llm-prompts/', ''));
+        const scriptsCheckout = steps.find((s) => s.with?.path === '.ai-workflows');
+        expect(scriptsCheckout.with['sparse-checkout']).toContain('.github/actions/checkout-prompts');
+      });
+    }
+  }
 }

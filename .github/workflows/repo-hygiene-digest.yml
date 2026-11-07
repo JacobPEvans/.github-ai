@@ -92,9 +92,16 @@ jobs:
         with:
           repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/actions/checkout-prompts
           path: .ai-workflows
           persist-credentials: false
+
+      - name: Checkout prompt catalog
+        uses: ./.ai-workflows/.github/actions/checkout-prompts
+        with:
+          sparse-checkout: automation/ai-workflows-repo-hygiene.prompt.yml
 
       - name: Collect hygiene facts
         env:
@@ -112,7 +119,7 @@ jobs:
           model: ${{ inputs.model }}
           max-completion-tokens: ${{ inputs.max_tokens }}
           temperature: "0"
-          prompt-file: .ai-workflows/.github/scripts/repo-hygiene/repo-hygiene.prompt.yml
+          prompt-file: .ai-llm-prompts/automation/ai-workflows-repo-hygiene.prompt.yml
           file_input: |
             digest: digest.json
           custom-headers: "x-langfuse-trace-name: repo-hygiene-digest"

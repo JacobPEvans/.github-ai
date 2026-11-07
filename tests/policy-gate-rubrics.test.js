@@ -6,7 +6,7 @@ const { join } = require('path');
 // rubric needs a prompt file whose checks are the ones its review names, and
 // one dogfood caller that selects it with the router alias the rubric runs on.
 const workflow = (name) => Bun.YAML.parse(readFileSync(join('.github', 'workflows', name), 'utf8'));
-const prompt = (name) => Bun.YAML.parse(readFileSync(join('.github', 'scripts', 'policy-gate', `${name}-review.prompt.yml`), 'utf8'));
+const prompt = (name) => Bun.YAML.parse(readFileSync(join('.ai-llm-prompts', 'automation', `ai-workflows-${name}-review.prompt.yml`), 'utf8'));
 
 const rubrics = {
   security: {
@@ -63,7 +63,7 @@ test('semantic: promotion aggregates pass omissions while non-promotions and mis
 
 for (const [rubric, spec] of Object.entries(rubrics)) {
   test(`${rubric}: its prompt file has the expected checks`, () => {
-    const promptPath = join('.github', 'scripts', 'policy-gate', `${spec.prompt}.prompt.yml`);
+    const promptPath = join('.ai-llm-prompts', 'automation', `ai-workflows-${spec.prompt}.prompt.yml`);
     expect(existsSync(promptPath)).toBe(true);
     const config = Bun.YAML.parse(readFileSync(promptPath, 'utf8'));
     const schema = JSON.parse(config.jsonSchema);
