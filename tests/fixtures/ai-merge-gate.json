@@ -43,6 +43,34 @@
       "draft": false,
       "results": ["action_required", "success", "success", "success"],
       "exit_code": 1
+    },
+    {
+      "name": "private repo leak skip",
+      "draft": false,
+      "private": true,
+      "results": ["success", "skipped", "success", "success"],
+      "exit_code": 0
+    },
+    {
+      "name": "private repo leak failure",
+      "draft": false,
+      "private": true,
+      "results": ["success", "failure", "success", "success"],
+      "exit_code": 1
+    },
+    {
+      "name": "private repo security skip",
+      "draft": false,
+      "private": true,
+      "results": ["success", "success", "skipped", "success"],
+      "exit_code": 1
+    },
+    {
+      "name": "private repo gitleaks skip",
+      "draft": false,
+      "private": true,
+      "results": ["skipped", "skipped", "success", "success"],
+      "exit_code": 1
     }
   ]
 }

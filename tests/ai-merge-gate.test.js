@@ -45,6 +45,12 @@ test('the deterministic scan is pinned and checks out the full pull request head
   expect(scan.steps.some((step) => step.uses === 'gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e')).toBe(true);
 });
 
+test('the leak review runs on public repos only', () => {
+  expect(gate.jobs.leak.if).toContain('!github.event.repository.private');
+  expect(gate.jobs.gitleaks.if ?? '').not.toContain('private');
+  expect(gate.jobs.gate.env.REPO_PRIVATE).toBe('$' + '{{ github.event.repository.private }}');
+});
+
 test('the final check waits for every required job and only accepts draft skips', () => {
   const final = gate.jobs.gate;
   expect(final.needs).toEqual(fixture.required_jobs);
@@ -62,6 +68,8 @@ test('the final check waits for every required job and only accepts draft skips'
       encoding: 'utf8',
       env: {
         IS_DRAFT: String(scenario.draft),
+        REPO_PRIVATE: String(scenario.private ?? false),
+        ROUTER_AVAILABLE: 'true',
         GITLEAKS_RESULT: gitleaks,
         LEAK_RESULT: leak,
         SECURITY_RESULT: security,
