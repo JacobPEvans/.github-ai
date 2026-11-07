@@ -187,7 +187,7 @@ jq --slurpfile patch "$RESULT_TEMP" '
     | (
         [
           $text
-          | scan("(?i)\\b(?:host|hostname|server|node|addr|endpoint|url)[[:space:]]*[:=][[:space:]]*[\"\u0027]?[a-z][a-z0-9_-]*(?=$|[[:space:],;)}\\]])")
+          | scan("(?i)\\b(?:host|hostname|server|node|addr|endpoint|url)[[:space:]]*[:=][[:space:]]*[\"\u0027]?[a-z][a-z0-9_-]*(?=$|[[:space:],;)}\\]\"\u0027])")
           | sub("(?i)^\\b(?:host|hostname|server|node|addr|endpoint|url)[[:space:]]*[:=][[:space:]]*[\"\u0027]?"; "")
         ]
       ) as $key_values

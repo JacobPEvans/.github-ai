@@ -397,13 +397,17 @@ test('keeps a private-host finding for a token with letters and digits', () => {
   expect(result.summary).toBe('');
 });
 
-test('keeps a private-host finding for a bare word after a host-like key', () => {
+test.each([
+  'host: mercury',
+  'host: "mercury"',
+  "host: 'mercury'",
+])('keeps a private-host finding for a bare word after a host-like key: %s', (line) => {
   const finding = makeFinding('private_host_or_ip', 'fail', {
     file: 'config.yml', line: 1, detail: '',
   });
   const result = leakResult(
     JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
-    patch(['+host: mercury']),
+    patch([`+${line}`]),
   );
 
   expect(result.validationExit).toBe(0);
