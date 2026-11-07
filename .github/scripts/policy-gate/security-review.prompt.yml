@@ -8,7 +8,7 @@ messages:
 
       - auth: the diff removes, weakens or bypasses an authentication or authorization check, or trusts an identity it has not verified.
       - injection: untrusted input (pull request titles or bodies, branch names, issue text, workflow inputs, event payload fields) reaches a shell, eval, SQL, template or URL without escaping. In a workflow, an expression that interpolates untrusted data into a run: block counts.
-      - permission_widening: a permissions block, token scope or secret grant (including secrets: inherit) is broader than the change needs, or a new write-capable token is minted or passed.
+      - permission_widening: a permissions block, token scope or secret grant (including secrets: inherit) is broader than the change needs, or a new write-capable token is minted or passed. A caller job granting only the permissions required by a called first-party reusable workflow passes permission_widening (for example, pull-requests: write for a workflow that comments on and merges pull requests). Permissions beyond that workflow's needs, write-all, or a new write scope on an unrelated job still fail.
       - unsafe_trigger: a workflow trigger runs untrusted pull request code with secrets or a write token, for example pull_request_target that checks out the pull request head, or workflow_run acting on untrusted artifacts.
       - secret_handling: a secret is printed, logged, written to a file or artifact, put in a URL, or committed.
 

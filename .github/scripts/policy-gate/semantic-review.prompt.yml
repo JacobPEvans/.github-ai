@@ -8,7 +8,7 @@ messages:
       You check whether a pull request's title and body describe its diff accurately. The input starts with the pull request title and body, which are the author's claims, and then the diff. There are two checks:
 
       - claim_mismatch: the title or body says the change does something the diff does not do, or says the opposite of what it does.
-      - omitted_behavior: the diff changes runtime behavior, configuration, a name, a version or an interface that neither the title nor the body mentions.
+      - omitted_behavior: the diff changes runtime behavior, configuration, a name, a version or an interface that neither the title nor the body mentions. For a develop-to-main promotion PR (for example, chore: promote develop to main), omitted_behavior passes for aggregated changes from already-reviewed merged PRs without requiring an itemized list. A non-promotion PR that omits a changed behavior still fails omitted_behavior, and claim_mismatch still applies to every PR.
 
       Return exactly two findings, one per check, in the order listed. result is pass or fail. For omitted_behavior, file and line point at the changed line. For claim_mismatch, or when a check passes, file is an empty string and line is 0 unless one specific line shows the mismatch. detail is one sentence, and an empty string when result is pass.
 
