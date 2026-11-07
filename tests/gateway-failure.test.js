@@ -156,6 +156,14 @@ describe('gateway wiring in the workflows', () => {
   const load = (path) => Bun.YAML.parse(readFileSync(join('.github', 'workflows', path), 'utf8'));
   const step = (job, name) => job.steps.find((s) => s.name === name);
 
+  it('sets Claude Code thinking and effort to values accepted by served models', () => {
+    const action = Bun.YAML.parse(readFileSync(join('.github', 'actions', 'run-ai-agent', 'action.yml'), 'utf8'));
+    const claude = action.runs.steps.find((s) => s.name === 'Run Claude Code');
+
+    expect(claude.env.MAX_THINKING_TOKENS).toBe('0');
+    expect(claude.env.CLAUDE_CODE_EFFORT_LEVEL).toBe('medium');
+  });
+
   it('policy-gate: blocking maps to a failure conclusion, and the sticky notice still posts', () => {
     const job = load('policy-gate.yml').jobs.gate;
     const gateway = step(job, 'Report gateway unavailability');
