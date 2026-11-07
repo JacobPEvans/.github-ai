@@ -251,9 +251,25 @@ test('drops a leak finding when the added line has no candidate token', () => {
   expect(result.summary).not.toContain('ordinary text');
 });
 
-test('keeps a leak finding when quoted text exactly appears on the added line', () => {
+test('drops a leak finding when its path is absent from the diff', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'missing.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+host: vault.private.lan']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([]);
+  expect(result.renderedExit).toBe('0');
+  expect(result.summary).toBe('UNGROUNDED | missing.yml:1 | path_not_in_diff\n');
+  expect(result.summary).not.toContain('vault.private.lan');
+});
+
+test('keeps a credential finding for a short password on an added line', () => {
   const finding = makeFinding('credential', 'fail', {
-    file: 'config.yml', line: 1, detail: 'Contains "pw".',
+    file: 'config.yml', line: 1, detail: '',
   });
   const result = leakResult(
     JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
@@ -266,10 +282,25 @@ test('keeps a leak finding when quoted text exactly appears on the added line', 
   expect(result.summary).toBe('');
 });
 
+test('keeps a credential finding for a URL with userinfo on an added line', () => {
+  const finding = makeFinding('credential', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+url: https://user:pw@example.com']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
 test('drops a leak finding that cites an unchanged line', () => {
   const finding = {
     ...makeFinding('private_host_or_ip', 'fail', {
-      file: 'config.yml', line: 1, detail: 'Exposes "vault.private.lan".',
+      file: 'config.yml', line: 1, detail: 'Exposes a private host.',
     }),
   };
   const result = leakResult(
@@ -328,6 +359,142 @@ test('keeps a leak finding for a private host on an added line', () => {
   const result = leakResult(
     JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
     patch(['+host: vault.private.lan']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test('drops a private-host finding for example.com on an added line', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+hostname: example.com']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([]);
+  expect(result.renderedExit).toBe('0');
+  expect(result.summary).toBe('UNGROUNDED | config.yml:1 | no_candidate\n');
+});
+
+test('keeps a private-host finding for a token with letters and digits', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+node: db-01']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test('keeps a private-host finding for a bare word after a host-like key', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+host: mercury']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test.each([
+  'url: https://service.internal/api',
+  'contact: ops@private.internal',
+  'address: fc00::1',
+])('keeps a private-host finding for a URL, email, or IPv6 candidate: %s', (line) => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch([`+${line}`]),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test.each(['internal_topology', 'incident_detail'])(
+  'keeps a %s finding on an added prose line',
+  (check) => {
+    const finding = makeFinding(check, 'fail', {
+      file: 'config.yml', line: 1, detail: '',
+    });
+    const result = leakResult(
+      JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+      patch(['+This is ordinary prose without a host or secret.']),
+    );
+
+    expect(result.validationExit).toBe(0);
+    expect(JSON.parse(result.response).findings).toEqual([finding]);
+    expect(result.renderedExit).toBe('1');
+    expect(result.summary).toBe('');
+  },
+);
+
+test('keeps an unknown leak check finding on an added prose line', () => {
+  const finding = makeFinding('unknown_check', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+This is ordinary prose without a host or secret.']),
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test('keeps a private-host finding when the added file path is C-quoted Unicode', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'café.yml', line: 1, detail: '',
+  });
+  const quotedUnicodePatch = [
+    'diff --git "a/caf\\303\\251.yml" "b/caf\\303\\251.yml"',
+    'index 1111111..2222222 100644',
+    '--- "a/caf\\303\\251.yml"',
+    '+++ "b/caf\\303\\251.yml"',
+    '@@ -0,0 +1 @@',
+    '+message: ordinary prose',
+    '',
+  ].join('\n');
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    quotedUnicodePatch,
+  );
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+  expect(result.summary).toBe('');
+});
+
+test('does not exempt a URL with userinfo from private-host checks', () => {
+  const finding = makeFinding('private_host_or_ip', 'fail', {
+    file: 'config.yml', line: 1, detail: '',
+  });
+  const result = leakResult(
+    JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
+    patch(['+url: https://user:pw@example.com']),
   );
 
   expect(result.validationExit).toBe(0);
@@ -396,29 +563,6 @@ test('accepts a verdict path with the diff header b prefix', () => {
   expect(JSON.parse(result.response).findings).toEqual([finding]);
   expect(result.renderedExit).toBe('1');
   expect(result.summary).toBe('');
-});
-
-test('keeps findings grounded by URLs, email addresses, and secret-like tokens', () => {
-  const cases = [
-    ['private_host_or_ip', 'url: https://service.internal/api'],
-    ['incident_detail', 'contact: ops@private.internal'],
-    ['credential', 'token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'],
-  ];
-
-  for (const [check, line] of cases) {
-    const finding = makeFinding(check, 'fail', {
-      file: 'config.yml', line: 1, detail: 'Contains a candidate token.',
-    });
-    const result = leakResult(
-      JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
-      patch([`+${line}`]),
-    );
-
-    expect(result.validationExit).toBe(0);
-    expect(JSON.parse(result.response).findings).toEqual([finding]);
-    expect(result.renderedExit).toBe('1');
-    expect(result.summary).toBe('');
-  }
 });
 
 test('malformed leak verdict still fails closed', () => {

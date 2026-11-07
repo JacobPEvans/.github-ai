@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Validate a rubric verdict before anything renders it. Exits 0 when RESPONSE_FILE is a
-# verdict for RUBRIC, 1 when it is not, 2 for an unknown rubric. Leak findings that do not
-# match an added line are removed and recorded in GITHUB_STEP_SUMMARY.
+# verdict for RUBRIC, 1 when it is not, 2 for an unknown rubric. Leak findings without a
+# verifiable added line are removed; private-host findings also need a candidate. Unparsed paths
+# stay fail-closed. Dropped findings are recorded in GITHUB_STEP_SUMMARY.
 #
 # The fixed rubrics (policy, security, semantic) return exactly one finding per check, so a
 # verdict must name each of its checks once and no other. The leak rubric returns one finding
@@ -30,7 +31,9 @@ jq -e --arg names "$names" --arg rubric "$RUBRIC" --argjson exact "$exact" '
     type == "object" and
     ((keys - ["check", "result", "file", "line", "detail"]) | length == 0) and
     (.check | type == "string") and
-    (.check as $c | $allowed | any(. == $c)) and
+    (if $rubric == "leak" and .result == "fail" then true
+     else (.check as $c | $allowed | any(. == $c))
+     end) and
     (.result == "pass" or .result == "fail") and
     (.file | type == "string") and
     (.line | type == "number") and
@@ -111,32 +114,31 @@ fi
 
 RESULT_TEMP="$(new_temp)"
 jq -n --rawfile patch "$diff_file" '
-  def path_from_header:
-    if startswith("+++ b/") then .[6:]
-    elif startswith("+++ \"b/") then
-      .[7:-1]
-      | gsub("\\\\\""; "\"")
-      | gsub("\\\\\\\\"; "\\\\")
-    else null
-    end;
   ($patch | split("\n"))
   | reduce .[] as $row
-      ({files: [], added: [], sections: 0, added_count: 0, removed_count: 0,
+      ({files: [], added: [], sections: 0, added_count: 0, removed_count: 0, unknown_path: false,
         file: null, new_line: 0, in_hunk: false};
        if ($row | startswith("diff --git ")) then
          .file = null | .new_line = 0 | .in_hunk = false | .sections += 1
-       elif (has("in_hunk") and (.in_hunk | not)) and
-            (($row | startswith("+++ b/")) or ($row | startswith("+++ \"b/"))) then
-         ($row | path_from_header) as $path
-         | .file = $path
-         | .new_line = 0
-         | if $path == null then . else .files += [$path] end
+       elif (has("in_hunk") and (.in_hunk | not)) and ($row | startswith("+++ ")) then
+         if ($row | startswith("+++ b/")) then
+           ($row[6:]) as $path
+           | .file = $path
+           | .new_line = 0
+           | .files += [$path]
+         elif $row == "+++ /dev/null" then
+           .file = null | .new_line = 0
+         else
+           .file = null | .new_line = 0 | .unknown_path = true
+         end
        elif ($row | startswith("@@ ")) then
          ($row | capture("\\+(?<start>[0-9]+)").start | tonumber) as $start
          | .new_line = $start
          | .in_hunk = true
-       elif .in_hunk and .file != null and ($row | startswith("+")) then
-         .added += [{file: .file, line: .new_line, text: $row[1:]}]
+       elif .in_hunk and ($row | startswith("+")) then
+         (if .file == null then . else
+            .added += [{file: .file, line: .new_line, text: $row[1:]}]
+          end)
          | .new_line += 1
          | .added_count += 1
        elif .in_hunk and ($row | startswith(" ")) then
@@ -146,7 +148,7 @@ jq -n --rawfile patch "$diff_file" '
        else .
        end)
   | {files: (.files | unique), added: .added, sections: .sections,
-     added_count: .added_count, removed_count: .removed_count}
+     added_count: .added_count, removed_count: .removed_count, unknown_path: .unknown_path}
 ' > "$RESULT_TEMP"
 
 parsed_counts="$(jq -r '[.sections, .added_count, .removed_count] | @tsv' "$RESULT_TEMP")"
@@ -159,21 +161,37 @@ fi
 
 FILTER_TEMP="$(new_temp)"
 jq --slurpfile patch "$RESULT_TEMP" '
-  def quoted_parts($detail):
-    [$detail | scan("\"[^\"\\\\]*\"|`[^`]+`|\u0027[^\u0027]+\u0027") | .[1:-1]];
   def candidates($text):
-    [
-      ($text | scan("(?i)[a-z][a-z0-9+.-]{0,20}://[^[:space:]\"<>]+")),
-      ($text | scan("(?i)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?")),
-      ($text | scan("(?<![0-9])[0-9]{1,3}(?:\\.[0-9]{1,3}){3}(?![0-9])")),
-      ($text | scan("(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,63}")),
-      ($text | scan("(?i)(?:gh[pousr]_[a-z0-9_]{20,}|xox[baprs]-[a-z0-9-]{10,}|sk-[a-z0-9_-]{20,}|akia[0-9a-z]{16})")),
-      ($text | scan("(?<![a-zA-Z0-9_-])[a-zA-Z0-9_-]{24,}(?![a-zA-Z0-9_-])")),
-      ($text | scan("(?i)(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}"))
-    ]
-    | flatten
-    | map(gsub("[.,;:!?]+$"; "") | gsub("[)\\]}]+$"; ""))
-    | unique;
+    # shortcut: a bare one-word name with no host-like key is not a candidate; the disclosure denylist gate holds known private names, so upgrade only if a real name passes both
+    (
+      [
+        ($text | scan("(?i)[a-z][a-z0-9+.-]{0,20}://[^[:space:]\"<>]+")),
+        ($text | scan("(?i)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?")),
+        ($text | scan("(?<![0-9])[0-9]{1,3}(?:\\.[0-9]{1,3}){3}(?![0-9])")),
+        ($text | scan("(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,63}")),
+        ($text | scan("(?i)(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}"))
+      ]
+      | flatten
+      | map(gsub("[.,;:!?]+$"; "") | gsub("[)\\]}]+$"; ""))
+      | unique
+    ) as $structured
+    | (
+        [
+          $text
+          | scan("(?i)[a-z0-9_-]+")
+          | select(test("[a-z]"; "i") and (test("[0-9]") or contains("-")))
+          | . as $token
+          | select(([$structured[] | select(contains($token))] | length) == 0)
+        ]
+      ) as $tokens
+    | (
+        [
+          $text
+          | scan("(?i)\\b(?:host|hostname|server|node|addr|endpoint|url)[[:space:]]*[:=][[:space:]]*[\"\u0027]?[a-z][a-z0-9_-]*(?=$|[[:space:],;)}\\]])")
+          | sub("(?i)^\\b(?:host|hostname|server|node|addr|endpoint|url)[[:space:]]*[:=][[:space:]]*[\"\u0027]?"; "")
+        ]
+      ) as $key_values
+    | ($structured + $tokens + $key_values) | unique;
   # Centralized values named by the leak rubric: example domains, RFC 5737, RFC 3849.
   def documentation_values:
     [
@@ -184,38 +202,31 @@ jq --slurpfile patch "$RESULT_TEMP" '
   def is_exempt:
     . as $candidate
     | (if ($candidate | test("(?i)^[a-z][a-z0-9+.-]{0,20}://")) then
-         [$candidate,
-          ($candidate
-           | sub("(?i)^[a-z][a-z0-9+.-]{0,20}://"; "")
-           | sub("[/?#].*$"; "")
-           | sub("^.*@"; "")
-           | if startswith("[") and contains("]") then split("]")[0][1:]
-             else sub(":([0-9]+)$"; "")
-             end)]
+         if ($candidate | test("(?i)^[a-z][a-z0-9+.-]{0,20}://[^/?#]*@")) then []
+         else
+           [$candidate,
+            ($candidate
+             | sub("(?i)^[a-z][a-z0-9+.-]{0,20}://"; "")
+             | sub("[/?#].*$"; "")
+             | if startswith("[") and contains("]") then split("]")[0][1:]
+               else sub(":([0-9]+)$"; "")
+               end)]
+         end
        else [$candidate]
        end)
     | any(.[]; . as $value
       | any(documentation_values[]; . as $pattern | $value | test($pattern)));
   def real_candidates($text):
     candidates($text) | map(select((is_exempt | not)));
-  def grounded($finding; $line):
-    quoted_parts($finding.detail) as $quotes
-    | if ($quotes | length) == 0 then
-        (real_candidates($line.text) | length) > 0
-      else
-        any($quotes[];
-          . as $quote
-          | $line.text | contains($quote))
-      end;
   def reason($finding; $diff):
     $finding.file as $path
-    | if ([$diff.files[] | select($path == . or $path == ("b/" + .))] | length) == 0 then "path_not_in_diff"
+    | if ([$diff.files[] | select($path == . or $path == ("b/" + .))] | length) == 0 then
+        if $diff.unknown_path then null else "path_not_in_diff" end
       else
         ([$diff.added[] | select(($path == .file or $path == ("b/" + .file)) and .line == $finding.line)] | first) as $line
         | if $line == null then "line_not_added"
-          elif grounded($finding; $line) then null
-          elif (quoted_parts($finding.detail) | length) == 0 then "no_candidate"
-          else "quoted_text_not_on_line"
+          elif $finding.check == "private_host_or_ip" and (real_candidates($line.text) | length) == 0 then "no_candidate"
+          else null
           end
       end;
   . as $verdict
