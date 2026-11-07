@@ -137,7 +137,7 @@ jobs:
     if: ${{ inputs.mode == 'full' }}
     # Holds the write token and never reaches the router, so it stays off the
     # self-hosted pool that runs PR-authored prompt text.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 10 }}
     permissions:
       contents: write
