@@ -87,7 +87,9 @@ if [[ -z "$diff_file" ]]; then
     echo "::error::GITHUB_REPOSITORY is not a repository name" >&2
     exit 1
   }
-  pull_number="$(jq -er '.pull_request.number | select(type == "number" and . > 0 and floor == .)' "$GITHUB_EVENT_PATH")"
+  # Read the diff the verdict was made from, so a newer push cannot be judged by an older verdict.
+  base_sha="$(jq -er '.pull_request.base.sha | select(test("^[0-9a-f]{40}$"))' "$GITHUB_EVENT_PATH")"
+  head_sha="$(jq -er '.pull_request.head.sha | select(test("^[0-9a-f]{40}$"))' "$GITHUB_EVENT_PATH")"
   expected_counts="$(jq -er '
     .pull_request as $pr
     | select($pr.changed_files | type == "number" and . >= 0 and floor == .)
@@ -99,7 +101,7 @@ if [[ -z "$diff_file" ]]; then
   diff_status="$(curl --silent --show-error --fail --max-time 30 --max-filesize 10485760 \
     --header 'Accept: application/vnd.github.diff' \
     --output "$DIFF_TEMP" --write-out '%{http_code}' \
-    "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$pull_number")"
+    "https://api.github.com/repos/$GITHUB_REPOSITORY/compare/$base_sha...$head_sha")"
   [[ "$diff_status" == 200 ]] || {
     echo "::error::Could not retrieve the pull request diff for leak validation" >&2
     exit 1

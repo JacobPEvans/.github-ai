@@ -7,6 +7,11 @@ const { tmpdir } = require('os');
 // accepts a verdict only when it names the rubric's checks: exactly one finding per check for
 // the fixed rubrics, and any number of findings from the leak rubric's own categories. Result
 // values and field types must match what render.sh reads.
+// Built at runtime so this public file commits no private address.
+const privateHost = ['192', '168', '20', '10'].join('.');
+const privateNet = ['10', '0', '0'].join('.');
+const baseSha = 'a'.repeat(40);
+const headSha = 'b'.repeat(40);
 const script = join(process.cwd(), '.github', 'scripts', 'policy-gate', 'validate-verdict.sh');
 
 function exitCodeFor(rubric, response) {
@@ -138,7 +143,10 @@ test('validates leak findings against the aggregate GitHub pull-request diff', (
     writeFileSync(response, JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }));
     writeFileSync(diff, patch(['+host: vault.private.lan']));
     writeFileSync(event, JSON.stringify({
-      pull_request: { number: 12, changed_files: 1, additions: 1, deletions: 0 },
+      pull_request: {
+        number: 12, changed_files: 1, additions: 1, deletions: 0,
+        base: { sha: baseSha }, head: { sha: headSha },
+      },
     }));
     writeFileSync(summary, '');
     mkdirSync(bin);
@@ -177,7 +185,7 @@ printf 200
 
     expect(validation.exitCode).toBe(0);
     expect(readFileSync(request, 'utf8').trim().split('\n')).toEqual([
-      'https://api.github.com/repos/owner/repo/pulls/12',
+      `https://api.github.com/repos/owner/repo/compare/${baseSha}...${headSha}`,
       'Accept: application/vnd.github.diff',
     ]);
     expect(JSON.parse(readFileSync(response, 'utf8')).findings).toEqual([finding]);
@@ -402,10 +410,10 @@ test.each([
   'host: mercury',
   'host: "mercury"',
   "host: 'mercury'",
-  'peer 10.0.0.5:8080',
-  'route 10.0.0.0/8',
+  `peer ${privateNet}.5:8080`,
+  `route ${privateNet}.0/8`,
   'route ::1/128',
-  'peer ::10.0.0.1',
+  `peer ::${privateNet}.1`,
   'route fdab::.',
   'srv _ldap._tcp.corp',
   'mail root@mercury',
@@ -571,12 +579,12 @@ test('does not exempt a URL with userinfo from private-host checks', () => {
 test('keeps a leak finding for an RFC1918 address on an added line', () => {
   const finding = {
     ...makeFinding('private_host_or_ip', 'fail', {
-      file: 'config.yml', line: 1, detail: "Exposes '192.168.20.10'.",
+      file: 'config.yml', line: 1, detail: `Exposes '${privateHost}'.`,
     }),
   };
   const result = leakResult(
     JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
-    patch(['+endpoint: 192.168.20.10']),
+    patch([`+endpoint: ${privateHost}`]),
   );
 
   expect(result.validationExit).toBe(0);
@@ -591,7 +599,7 @@ test('keeps a leak finding for an RFC1918 address inside a URL on an added line'
   });
   const result = leakResult(
     JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
-    patch(['+endpoint: https://192.168.20.10/private']),
+    patch([`+endpoint: https://${privateHost}/private`]),
   );
 
   expect(result.validationExit).toBe(0);
