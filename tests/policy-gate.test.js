@@ -42,7 +42,7 @@ function withCollectedDiff(content, fn, env = {}, baseContent) {
     writeFileSync(join(dir, 'workflow.yml'), content);
     git(['add', 'workflow.yml']);
     const head = git(['commit-tree', git(['write-tree']), '-p', base, '-m', 'head']);
-    const raw = execFileSync('git', ['diff', `${base}...${head}`], { cwd: dir });
+    const raw = execFileSync('git', ['diff', ...(env.RUBRIC === 'leak' ? ['--unified=0'] : []), `${base}...${head}`], { cwd: dir });
 
     const result = run(dir, 'collect.sh', { MAX_DIFF_KB: '150', ...env, BASE_SHA: base, HEAD_SHA: head });
 
@@ -203,15 +203,34 @@ test.each(['security', 'semantic', 'policy'])('collect.sh preserves reference-on
   }, { RUBRIC: rubric });
 });
 
-test('collect.sh preserves reference-only context and removals for leak', () => {
+test('collect.sh omits reference-only context and preserves removals for leak', () => {
   const context = 'CONTEXT: ${{ secrets.TOKEN }}\n';
   withCollectedDiff(context + 'ADDED: ${{ secrets.TOKEN }}\n', (diff, raw) => {
     expect(diff.toString()).toBe(raw.toString()
       .replaceAll('${{ secrets.TOKEN }}', '<secret-reference:TOKEN>')
       .replace('+ADDED: <secret-reference:TOKEN>', '+<reference-only line>'));
-    expect(diff.toString()).toContain(' CONTEXT: <secret-reference:TOKEN>');
+    expect(diff.toString()).not.toMatch(/^ /m);
+    expect(diff.toString()).toContain('@@ -2 +2 @@');
     expect(diff.toString()).toContain('-REMOVED: <secret-reference:TOKEN>');
   }, { RUBRIC: 'leak' }, context + 'REMOVED: ${{ secrets.TOKEN }}\n');
+});
+
+test.each(['leak', 'security', 'semantic', 'policy', undefined])('collect.sh selects context for %s and preserves added lines and hunk coordinates', (rubric) => {
+  const before = 'permissions:\n  pull-requests: write\n  uses: example/action@v1\n  env:\n    API_KEY: ${{ secrets.API_KEY }}\n';
+  const after = before.replace('@v1', '@v2');
+  withCollectedDiff(after, (diff, raw) => {
+    expect(diff.toString()).toBe(raw.toString().replace('${{ secrets.API_KEY }}', '<secret-reference:API_KEY>'));
+    expect(diff.toString()).toContain('+  uses: example/action@v2\n');
+    if (rubric === 'leak') {
+      expect(diff.toString()).toContain('@@ -3 +3 @@');
+      expect(diff.toString()).not.toContain('pull-requests: write');
+      expect(diff.toString()).not.toContain('API_KEY');
+    } else {
+      expect(diff.toString()).toContain('@@ -1,5 +1,5 @@');
+      expect(diff.toString()).toContain('   pull-requests: write\n');
+      expect(diff.toString()).toContain('     API_KEY: <secret-reference:API_KEY>\n');
+    }
+  }, { RUBRIC: rubric }, before);
 });
 
 test('collect.sh preserves literal text and non-assignment additions for leak', () => {
