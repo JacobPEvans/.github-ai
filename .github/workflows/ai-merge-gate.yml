@@ -9,8 +9,6 @@ permissions:
 jobs:
   gate:
     uses: ./.github/workflows/_ai-merge-gate.yml
-    with:
-      runner_label: review
     secrets:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}

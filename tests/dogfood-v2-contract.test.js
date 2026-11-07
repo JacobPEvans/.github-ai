@@ -20,9 +20,7 @@ for (const [name, jobName, reusableName] of callers) {
     const call = reusable.on.workflow_call;
     expect(job.uses).toBe(`JacobPEvans/.github-ai/.github/workflows/${reusableName}.yml@v2`);
     expect(job.permissions ?? caller.permissions).toEqual(ceilingOf(reusableName, reusable));
-    if (call.inputs?.runner_label) {
-      expect(job.with.runner_label).toBe('review');
-    }
+    expect(job.with?.runner_label).toBeUndefined();
     if (call.secrets) {
       expect(Object.keys(job.secrets).sort()).toEqual(Object.keys(call.secrets).sort());
       for (const secret of Object.keys(call.secrets)) {

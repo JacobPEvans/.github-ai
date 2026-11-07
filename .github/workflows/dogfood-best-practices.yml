@@ -14,6 +14,4 @@ jobs:
       issues: write
       pull-requests: read
     uses: JacobPEvans/.github-ai/.github/workflows/best-practices.yml@v2
-    with:
-      runner_label: review
     secrets: inherit
