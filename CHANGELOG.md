@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.9](https://github.com/JacobPEvans/.github-ai/compare/v2.3.8...v2.3.9) (2026-11-07)
+
+
+### Bug Fixes
+
+* **merge-gate:** run the leak review on public repositories only ([#72](https://github.com/JacobPEvans/.github-ai/issues/72)) ([94abd42](https://github.com/JacobPEvans/.github-ai/commit/94abd42c76733d2efc73c6e2d360a6693a2fec3c))
+
 ## [2.3.8](https://github.com/JacobPEvans/.github-ai/compare/v2.3.7...v2.3.8) (2026-11-07)
 
 
