@@ -39,7 +39,8 @@ test('policy-gate.yml validates the rubric against every rubric it supports', ()
 
 test('leak: secret references alone pass credential while actual values still fail', () => {
   const content = prompt('leak').messages.find(({ role }) => role === 'system').content;
-  expect(content).toContain('A GitHub Actions expression such as ${{ secrets.NAME }} names a secret without containing its value; the reference alone passes credential.');
+  expect(content).toContain('Each GitHub Actions secret expression arrives already rewritten as <secret-reference:NAME>.');
+  expect(content).toContain('the reference alone passes credential, including on a line such as API_KEY: <secret-reference:API_KEY>.');
   expect(content).toContain('An actual credential value in an added line still fails, including alongside such a reference.');
 });
 
