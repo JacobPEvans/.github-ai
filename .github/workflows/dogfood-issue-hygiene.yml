@@ -13,6 +13,4 @@ jobs:
       issues: write
       pull-requests: read
     uses: JacobPEvans/.github-ai/.github/workflows/issue-hygiene.yml@v2
-    with:
-      runner_label: review
     secrets: inherit
