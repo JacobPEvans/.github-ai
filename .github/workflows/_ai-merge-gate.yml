@@ -86,10 +86,11 @@ jobs:
             echo "available=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # Public repos only. The gitleaks job still scans every repo for secrets.
   leak:
     name: Leak review
     needs: router
-    if: needs.router.outputs.available == 'true'
+    if: needs.router.outputs.available == 'true' && !github.event.repository.private
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -155,6 +156,7 @@ jobs:
       contents: read
     env:
       IS_DRAFT: ${{ github.event.pull_request.draft }}
+      REPO_PRIVATE: ${{ github.event.repository.private }}
       ROUTER_AVAILABLE: ${{ needs.router.outputs.available }}
       GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
       LEAK_RESULT: ${{ needs.leak.result }}
@@ -185,6 +187,9 @@ jobs:
       - name: Enforce scan and review conclusions
         run: |
           set -euo pipefail
+          if [[ "$REPO_PRIVATE" == "true" && "$LEAK_RESULT" == "skipped" ]]; then
+            LEAK_RESULT=success
+          fi
           for result in "$GITLEAKS_RESULT" "$LEAK_RESULT" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
             case "$result" in
               success)
