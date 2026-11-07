@@ -407,6 +407,8 @@ test.each([
   'route ::1/128',
   'peer ::10.0.0.1',
   'route fdab::.',
+  'srv _ldap._tcp.corp',
+  'mail root@mercury',
 ])('keeps a private-host finding for a bare word after a host-like key: %s', (line) => {
   const finding = makeFinding('private_host_or_ip', 'fail', {
     file: 'config.yml', line: 1, detail: '',

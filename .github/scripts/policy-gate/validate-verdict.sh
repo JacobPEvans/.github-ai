@@ -166,16 +166,11 @@ jq --slurpfile patch "$RESULT_TEMP" '
   def tokens($text):
     ($text | gsub("[[:space:]\";,()\\[\\]{}<> =]+"; " ") | gsub("\u0027"; " ") | gsub("\u0060"; " ") | split(" ") | map(select(length > 0)))
     | map(sub("[.,;!?]+$"; "") | if ipv6_shape then . else sub("[.,:;!?]+$"; "") end | select(length > 0));
+  # Everything is a candidate unless it is plainly innocent: a word, a number or bare punctuation.
   # shortcut: a bare one-word name with no host-like key is not a candidate; the disclosure denylist gate holds known private names, so upgrade only if a real name passes both
   def is_candidate($previous):
-    test("(?i)^[a-z][a-z0-9+.-]*://[^/?#]+") or
-    test("(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$") or
-    (test("[0-9]") and test("[.:/]")) or
-    test("(?i)^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,63}$") or
-    ipv6_shape or
-    (test("(?i)[a-z]") and (test("[0-9]") or contains("-"))) or
-    (($previous | test("(?i)^(host|hostname|server|node|addr|endpoint|url):?$")) and
-      test("(?i)^[a-z][a-z0-9_-]*$"));
+    (test("^[A-Za-z_/]+$|^[A-Za-z]+://$|^[0-9]+$|^[^A-Za-z0-9]*$") | not) or
+    (($previous | test("(?i)^(host|hostname|server|node|addr|endpoint|url):?$")) and test("(?i)^[a-z]"));
   # Centralized values named by the leak rubric: example domains, RFC 5737, RFC 3849.
   def documentation_values:
     [
