@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.6](https://github.com/JacobPEvans/.github-ai/compare/v2.3.5...v2.3.6) (2026-11-07)
+
+
+### Bug Fixes
+
+* **workflows:** align v2 dogfood caller contracts ([#64](https://github.com/JacobPEvans/.github-ai/issues/64)) ([f09eb72](https://github.com/JacobPEvans/.github-ai/commit/f09eb725283c67743e074b4bc54bf03430736344))
+
 ## [2.3.5](https://github.com/JacobPEvans/.github-ai/compare/v2.3.4...v2.3.5) (2026-11-07)
 
 
