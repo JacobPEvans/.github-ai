@@ -406,6 +406,7 @@ test.each([
   'route 10.0.0.0/8',
   'route ::1/128',
   'peer ::10.0.0.1',
+  'route fdab::.',
 ])('keeps a private-host finding for a bare word after a host-like key: %s', (line) => {
   const finding = makeFinding('private_host_or_ip', 'fail', {
     file: 'config.yml', line: 1, detail: '',

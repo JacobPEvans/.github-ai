@@ -165,7 +165,7 @@ jq --slurpfile patch "$RESULT_TEMP" '
     test("(?i)^(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?:/[0-9]{1,3})?$");
   def tokens($text):
     ($text | gsub("[[:space:]\";,()\\[\\]{}<> =]+"; " ") | gsub("\u0027"; " ") | gsub("\u0060"; " ") | split(" ") | map(select(length > 0)))
-    | map(if ipv6_shape then . else sub("[.,:;!?]+$"; "") end | select(length > 0));
+    | map(sub("[.,;!?]+$"; "") | if ipv6_shape then . else sub("[.,:;!?]+$"; "") end | select(length > 0));
   # shortcut: a bare one-word name with no host-like key is not a candidate; the disclosure denylist gate holds known private names, so upgrade only if a real name passes both
   def is_candidate($previous):
     test("(?i)^[a-z][a-z0-9+.-]*://[^/?#]+") or
