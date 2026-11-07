@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.2](https://github.com/JacobPEvans/.github-ai/compare/v2.3.1...v2.3.2) (2026-11-07)
+
+
+### Bug Fixes
+
+* **policy-gate:** mark secret references before the rubrics read the diff ([#54](https://github.com/JacobPEvans/.github-ai/issues/54)) ([5addfa2](https://github.com/JacobPEvans/.github-ai/commit/5addfa285e73c42b0237351b571ea162e4bbf141))
+* **policy-gate:** mark secret references in collected diffs ([5addfa2](https://github.com/JacobPEvans/.github-ai/commit/5addfa285e73c42b0237351b571ea162e4bbf141))
+
 ## [2.3.1](https://github.com/JacobPEvans/.github-ai/compare/v2.3.0...v2.3.1) (2026-11-07)
 
 
