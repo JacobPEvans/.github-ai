@@ -11,6 +11,12 @@ const prompts = readdirSync(catalog)
   .filter((f) => f.startsWith('ai-workflows-') && f.endsWith('.prompt.yml'))
   .map((f) => join(catalog, f));
 
+test('workflow prompts live only in the catalog', () => {
+  const localPrompts = readdirSync(join('.github', 'scripts'), { recursive: true })
+    .filter((file) => file.endsWith('.prompt.yml'));
+  expect(localPrompts).toEqual([]);
+});
+
 const workflows = readdirSync(join('.github', 'workflows'))
   .map((f) => readFileSync(join('.github', 'workflows', f), 'utf8'))
   .join('\n');
