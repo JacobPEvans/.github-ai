@@ -175,8 +175,16 @@ jq --slurpfile patch "$RESULT_TEMP" '
     | flatten
     | map(gsub("[.,;:!?]+$"; "") | gsub("[)\\]}]+$"; ""))
     | unique;
+  # Centralized values named by the leak rubric: example domains, RFC 5737, RFC 3849.
+  def documentation_values:
+    [
+      "(?i)^(?:[a-z][a-z0-9+.-]*://)?(?:[a-z0-9._%+-]+@)?(?:[a-z0-9-]+\\.)*example\\.(?:com|test)(?::[0-9]+)?(?:[/#?].*)?$",
+      "^(?:192\\.0\\.2|198\\.51\\.100|203\\.0\\.113)\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$",
+      "(?i)^2001:(?:0{0,3}db8)(?::[0-9a-f]{0,4}){1,6}$"
+    ];
   def is_exempt:
-    test("(?i)^(?:[a-z][a-z0-9+.-]*://)?(?:[a-z0-9._%+-]+@)?(?:[a-z0-9-]+\\.)*example\\.(?:com|test)(?::[0-9]+)?(?:[/#?].*)?$");
+    . as $value
+    | any(documentation_values[]; . as $pattern | $value | test($pattern));
   def real_candidates($text):
     candidates($text) | map(select((is_exempt | not)));
   def grounded($finding; $line):

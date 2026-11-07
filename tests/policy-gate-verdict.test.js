@@ -283,9 +283,17 @@ test('drops a leak finding that cites an unchanged line', () => {
   expect(result.summary).not.toContain('vault.private.lan');
 });
 
-test.each(['https://example.com/private', 'https://example.test/private'])(
-  'drops a leak finding for an exempt URL: %s',
-  (url) => {
+test.each([
+  'https://example.com/private',
+  'https://example.test/private',
+  '192.0.2.1',
+  '198.51.100.42',
+  '203.0.113.254',
+  '2001:db8::1',
+  '2001:0db8:0000:0000:0000:0000:0000:0001',
+])(
+  'drops a leak finding for a rubric documentation value: %s',
+  (value) => {
     const finding = {
       ...makeFinding('private_host_or_ip', 'fail', {
         file: 'config.yml', line: 1, detail: '',
@@ -293,14 +301,14 @@ test.each(['https://example.com/private', 'https://example.test/private'])(
     };
     const result = leakResult(
       JSON.stringify({ summary: 'One suspected leak.', findings: [finding] }),
-      patch([`+url: ${url}`]),
+      patch([`+value: ${value}`]),
     );
 
     expect(result.validationExit).toBe(0);
     expect(JSON.parse(result.response).findings).toEqual([]);
     expect(result.renderedExit).toBe('0');
-      expect(result.summary).toBe('UNGROUNDED | config.yml:1 | no_candidate\n');
-    expect(result.summary).not.toContain(url);
+    expect(result.summary).toBe('UNGROUNDED | config.yml:1 | no_candidate\n');
+    expect(result.summary).not.toContain(value);
   },
 );
 
