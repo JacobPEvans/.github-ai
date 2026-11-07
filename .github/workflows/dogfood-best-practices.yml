@@ -5,12 +5,15 @@ on:
   # schedule:
   #   - cron: "0 3 * * 2,5"
   # --- END DISABLED ---
-permissions:
-  actions: read
-  contents: read
-  issues: write
-  pull-requests: read
+permissions: {}
 jobs:
   best-practices:
-    uses: JacobPEvans/.github-ai/.github/workflows/best-practices.yml@v1
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: read
+    uses: JacobPEvans/.github-ai/.github/workflows/best-practices.yml@v2
+    with:
+      runner_label: review
     secrets: inherit

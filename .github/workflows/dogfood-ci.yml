@@ -6,11 +6,7 @@ on:
     workflows: ["Tests"]
     types: [completed]
 
-permissions:
-  actions: read
-  contents: write
-  issues: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: ai-ci-${{ github.event.workflow_run.head_branch }}
@@ -18,9 +14,18 @@ concurrency:
 
 jobs:
   ci-suite:
-    uses: JacobPEvans/.github-ai/.github/workflows/suite-ci.yml@v1
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: JacobPEvans/.github-ai/.github/workflows/suite-ci.yml@v2
     with:
+      runner_label: review
       repo_context: "Reusable GitHub Actions workflows for AI-powered CI/CD automation (prompts, scripts, YAML workflows)"
       ci_structure: "test.yml (bun test for JavaScript scripts)"
       workflow_name: "Tests"
-    secrets: inherit
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
