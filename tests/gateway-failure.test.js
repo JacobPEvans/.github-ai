@@ -115,6 +115,13 @@ describe('gateway failure report', () => {
     expect(r.request.output.summary).toBe('gateway unavailable (agent-time-bound)');
   });
 
+  it('uses CHECK_SUMMARY verbatim in the posted check run', () => {
+    const summary = 'time-bound: "no review"\\produced';
+    const r = report({ CHECK_SUMMARY: summary });
+    expect(r.exitCode).toBe(0);
+    expect(r.request.output.summary).toBe(summary);
+  });
+
   it('blocking or required: CONCLUSION=failure posts a failure check run and exits 1', () => {
     const r = report({ CONCLUSION: 'failure' });
     expect(r.exitCode).toBe(1);

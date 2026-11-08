@@ -42,6 +42,7 @@ test('only a missing handoff after the agent deadline is reported neutral', () =
   expect(mint.with.private_key).toBe('${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}');
   expect(report.env.CONCLUSION).toBe('neutral');
   expect(report.env.CHECK_HEAD_SHA).toBe('${{ github.event.pull_request.head.sha }}');
+  expect(report.env.CHECK_SUMMARY).toBe('time-bound: no review produced');
   expect(report.env.NTFY_BASE_URL).toBeUndefined();
   expect(report.env.RUN_URL).toBeUndefined();
   expect(report.run).toContain('gateway-failure.sh report "Review dependency update" agent-time-bound');

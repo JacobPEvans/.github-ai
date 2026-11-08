@@ -13,6 +13,7 @@
 #                     the caller. The callee's own GITHUB_TOKEN is never used for this.
 #   CHECK_TOKEN_CAUSE why no token exists (key not set, mint failed); named in the error
 #   CHECK_HEAD_SHA    commit the check run attaches to (required)
+#   CHECK_SUMMARY     optional: overrides the check-run summary
 #   GITHUB_REPOSITORY owner/repo, set by the runner
 #   NTFY_BASE_URL     optional: the alert is skipped when unset
 #   RUN_URL           optional: appended to the alert body
@@ -42,7 +43,7 @@ classify() {
 }
 
 create_check() {
-  local job="$1" reason="$2" conclusion="$3" body response
+  local job="$1" reason="$2" conclusion="$3" summary body response
   if [ -z "${GITHUB_TOKEN:-}" ]; then
     if [ "$conclusion" = failure ]; then
       echo "::error::$job: cannot post the check run: no Claude bot App token (${CHECK_TOKEN_CAUSE:-unknown cause})"
@@ -56,8 +57,17 @@ create_check() {
     echo "::error::$job: cannot post the check run; CHECK_HEAD_SHA and GITHUB_REPOSITORY must be set"
     return 1
   fi
-  body="$(printf '{"name":"%s: AI review not performed","head_sha":"%s","status":"completed","conclusion":"%s","output":{"title":"AI review not performed","summary":"gateway unavailable (%s)"}}' \
-    "$job" "$CHECK_HEAD_SHA" "$conclusion" "$reason")"
+  if [[ ${CHECK_SUMMARY+x} ]]; then
+    summary="$CHECK_SUMMARY"
+  else
+    summary="gateway unavailable ($reason)"
+  fi
+  body="$(jq -n \
+    --arg name "$job: AI review not performed" \
+    --arg head_sha "$CHECK_HEAD_SHA" \
+    --arg conclusion "$conclusion" \
+    --arg summary "$summary" \
+    '{name: $name, head_sha: $head_sha, status: "completed", conclusion: $conclusion, output: {title: "AI review not performed", summary: $summary}}')"
   if response="$(GH_TOKEN="$GITHUB_TOKEN" gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" --input - <<< "$body" 2>&1)"; then
     return 0
   fi
