@@ -84,7 +84,11 @@ describe('gateway failure classification', () => {
   });
 
   it('classifies the router model-key scope refusal', () => {
-    expect(classify("403 The requested model 'review-oss' is not available for this API key")).toBe('router-refused');
+    expect(classify("Failed to authenticate. API Error: 403 The requested model 'review-oss' is not available for this API key")).toBe('router-refused');
+  });
+
+  it('leaves the key-scope wording unclassified outside the client error line', () => {
+    expect(classify("Tool output: The requested model 'review-oss' is not available for this API key")).toBe('');
   });
 
   it('classifies LiteLLM authentication and permission refusals', () => {
