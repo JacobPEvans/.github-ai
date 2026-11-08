@@ -228,11 +228,20 @@ jobs:
         env:
           STARTED: ${{ steps.agent_clock.outputs.started }}
           GATEWAY_CLASS: ${{ steps.agent.outputs.gateway_class }}
+          EXECUTION_FILE: ${{ steps.agent.outputs.execution_file }}
         run: |
-          if [ -n "$GATEWAY_CLASS" ] || [ -f .claude-dep-review.md ] || [ $(( $(date +%s) - STARTED )) -lt 180 ]; then
+          if [ -n "$GATEWAY_CLASS" ] || [ -f .claude-dep-review.md ]; then
             echo "time_bound=false" >> "$GITHUB_OUTPUT"
-          else
+          elif [ -n "$EXECUTION_FILE" ] && [ -r "$EXECUTION_FILE" ] && [ "$(jq -r '[.[] | select(.type == "result")][-1].subtype // empty' "$EXECUTION_FILE" 2>/dev/null || true)" = 'error_max_turns' ]; then
             echo "time_bound=true" >> "$GITHUB_OUTPUT"
+            echo "deadline_class=agent-max-turns" >> "$GITHUB_OUTPUT"
+            echo "check_summary=bound reached (max turns): no review produced" >> "$GITHUB_OUTPUT"
+          elif [ $(( $(date +%s) - STARTED )) -ge 180 ]; then
+            echo "time_bound=true" >> "$GITHUB_OUTPUT"
+            echo "deadline_class=agent-time-bound" >> "$GITHUB_OUTPUT"
+            echo "check_summary=time-bound: no review produced" >> "$GITHUB_OUTPUT"
+          else
+            echo "time_bound=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Mint the check-run token for the agent deadline
@@ -251,8 +260,9 @@ jobs:
           GITHUB_TOKEN: ${{ steps.deadline_token.outputs.token }}
           CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'claude_bot_private_key input is not set (the caller must pass GH_APP_CLAUDE_BOT_PRIVATE_KEY)' || 'the mint step failed' }}
           CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          CHECK_SUMMARY: "time-bound: no review produced"
-        run: bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "Review dependency update" agent-time-bound
+          CHECK_SUMMARY: ${{ steps.deadline.outputs.check_summary }}
+          DEADLINE_CLASS: ${{ steps.deadline.outputs.deadline_class }}
+        run: bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "Review dependency update" "$DEADLINE_CLASS"
 
       - name: Fail on non-deadline agent errors
         if: always() && steps.agent.outcome == 'failure' && steps.deadline.outputs.time_bound != 'true'
