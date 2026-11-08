@@ -81,6 +81,19 @@ describe('dep-review/check-eligibility', () => {
     expect(core.getOutput('should_run')).toBe('false');
   });
 
+  it('reviews non-semver update types only when callers opt in', async () => {
+    const updateTypes = ['digest', 'pin', 'pinDigest', 'lockFileMaintenance'];
+    process.env.UPDATE_TYPES = updateTypes.join(',');
+
+    for (const updateType of updateTypes) {
+      core = createMockCore();
+      context.payload = makePayload({ body: renovateBody(updateType) });
+      await run({ github, context, core });
+      expect(core.getOutput('should_run')).toBe('true');
+      expect(core.getOutput('update_type')).toBe(updateType);
+    }
+  });
+
   it('honors a custom update_types list', async () => {
     process.env.UPDATE_TYPES = 'major,minor,patch';
     context.payload = makePayload({ body: renovateBody('patch') });

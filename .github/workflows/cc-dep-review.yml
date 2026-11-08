@@ -21,10 +21,10 @@
 #      posts the comment itself.
 #
 # Cost bounds are structural: consumer callers trigger on `pull_request: [opened]`
-# only, check-eligibility skips digest pins / lock-file maintenance / out-of-scope
-# bump types, and a dedup marker guarantees at most one Claude run per PR. No
-# check-daily-limit job (actions:read under cross-repo workflow_call causes
-# startup_failure — see issue-backlog-sweep history).
+# only, check-eligibility skips digest pins / lock-file maintenance by default and
+# all out-of-scope bump types, and a dedup marker guarantees at most one Claude run
+# per PR. No check-daily-limit job (actions:read under cross-repo workflow_call
+# causes startup_failure — see issue-backlog-sweep history).
 
 name: CC Dep Review
 
@@ -191,7 +191,7 @@ jobs:
           agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
           prompt: ${{ steps.prompt.outputs.content }}
           # Public repositories use the open-source router key, which allows review-oss.
-          claude_model: ${{ inputs.model || (github.event.repository.private && (vars.GH_ACTION_AI_MODEL_REVIEW || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL) || 'review-oss') }}
+          claude_model: ${{ inputs.model || (contains(fromJSON('["digest","pin","pinDigest","lockFileMaintenance"]'), needs.check-eligibility.outputs.update_type) && vars.GH_ACTION_AI_MODEL_CHEAP) || (github.event.repository.private && (vars.GH_ACTION_AI_MODEL_REVIEW || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL) || 'review-oss') }}
           # Visibility picks the router key; both visibility defaults are medium.
           codex_model: ${{ inputs.model || (github.event.repository.private && (vars.GH_ACTION_AI_CODEX_MODEL || 'medium') || 'medium') }}
           allowed_tools: "Read,Glob,Grep,LS,Write,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api repos/*),WebFetch(domain:github.com)"

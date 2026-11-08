@@ -1,7 +1,7 @@
 // Gate for cc-dep-review: run Claude once per Renovate dependency PR whose
-// highest semver update type is in UPDATE_TYPES. Digest pins, lock-file
-// maintenance, and anything already reviewed (dedup marker) never reach the
-// paid Claude job.
+// highest semver update type is in UPDATE_TYPES. A non-semver update type can
+// run only when the caller explicitly includes it in UPDATE_TYPES. Anything
+// already reviewed (dedup marker) never reaches the paid Claude job.
 const MARKER = '<!-- cc-dep-review -->';
 const RANK = { major: 3, minor: 2, patch: 1 };
 
@@ -33,6 +33,10 @@ function highestSemverType(types) {
   return types.filter((t) => RANK[t]).sort((a, b) => RANK[b] - RANK[a])[0] || null;
 }
 
+function canonicalUpdateType(type) {
+  return { pindigest: 'pinDigest', lockfilemaintenance: 'lockFileMaintenance' }[type] || type;
+}
+
 module.exports = async ({ github, context, core }) => {
   const skip = (message) => {
     core.setOutput('should_run', 'false');
@@ -56,9 +60,9 @@ module.exports = async ({ github, context, core }) => {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   const found = login === 'dependabot[bot]' ? dependabotTypes(pr) : parseUpdateTypes(pr.body);
-  const top = highestSemverType(found);
-  if (!top) return skip(`No semver update type in the Renovate table (found: ${found.join(', ') || 'none'}) — skipping`);
-  if (!updateTypes.includes(top)) return skip(`Update type "${top}" not in [${updateTypes.join(', ')}] — skipping`);
+  const updateType = highestSemverType(found) || found.find((type) => updateTypes.includes(type));
+  if (!updateType) return skip(`No supported update type in the Renovate table (found: ${found.join(', ') || 'none'}) — skipping`);
+  if (!updateTypes.includes(updateType)) return skip(`Update type "${updateType}" not in [${updateTypes.join(', ')}] — skipping`);
 
   const { owner, repo } = context.repo;
   const comments = await github.paginate(github.rest.issues.listComments, {
@@ -74,8 +78,8 @@ module.exports = async ({ github, context, core }) => {
 
   core.setOutput('should_run', 'true');
   core.setOutput('pr_number', String(pr.number));
-  core.setOutput('update_type', top);
-  core.info(`PR #${pr.number} eligible — update_type=${top}`);
+  core.setOutput('update_type', canonicalUpdateType(updateType));
+  core.info(`PR #${pr.number} eligible — update_type=${updateType}`);
 };
 
 module.exports.parseUpdateTypes = parseUpdateTypes;
