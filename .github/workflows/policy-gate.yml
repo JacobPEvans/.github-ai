@@ -14,11 +14,11 @@
 # publishes one audit line to the ntfy hub instead - an escape hatch that is
 # visible, not silent.
 #
-# Same router contract as docs-drift.yml. A failed router request is not a
-# review finding: the job summary says the review was not performed, a check
-# run is posted with conclusion neutral, and one ops alert is sent to ntfy.
-# Advisory (blocking: false) ends with a neutral check run, which is not a pass.
-# Blocking (true) fails closed: the same signals are written, then the job exits 1.
+# Same router contract as docs-drift.yml. Every rubric uses one stable check
+# run on the head commit. A failed router request is not a review finding: the
+# check run stays neutral and its summary names the error class. A rerun after
+# recovery updates that same run. Blocking callers still fail closed on gateway
+# errors; neutral never means pass.
 # It needs a runner that can reach the router. Never make it a required
 # check while `blocking` is false - an advisory check has nothing to
 # require.
@@ -307,12 +307,11 @@ jobs:
           fi
           echo "state=$state" >> "$GITHUB_OUTPUT"
 
-      # The check run is posted with the Claude bot App token. The policy gate
-      # mints it only on the gateway-failure path; the other rubrics also mint it
-      # for their verdict check run. A failed mint is named by the report step.
+      # The check run is posted with the Claude bot App token. Mint it whenever
+      # a rubric can publish or update its run. A failed mint is named by the report step.
       - name: Mint the check-run token
         id: check-token
-        if: steps.state.outputs.state != 'override' && (steps.state.outputs.state != 'ok' || inputs.rubric != 'policy')
+        if: steps.state.outputs.state != 'override'
         continue-on-error: true
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
@@ -333,6 +332,8 @@ jobs:
           GITHUB_TOKEN: ${{ steps.check-token.outputs.token }}
           CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set' || 'the mint step failed' }}
           CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CHECK_NAME: ${{ env.REVIEW_NAME }}
+          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
           REASON: ${{ steps.state.outputs.state }}
         run: |
           printf '## %s\n\nAI review not performed: gateway unavailable (%s).\n' "$REVIEW_TITLE" "$REASON" > policy-gate.md
@@ -382,20 +383,33 @@ jobs:
             -H "Title: $OVERRIDE_LABEL used" \
             --data "$ACTOR overrode the policy gate on $PR_URL" || true
 
-      # The policy gate stays comment-only. The other rubrics also post a check
-      # run on the verdict: success when clean, neutral when advisory with
-      # findings, failure when blocking with findings. Advisory: a failed post
-      # is a warning, never a failed job.
+      # Policy stays comment-only and only updates an existing gateway run.
+      # Other rubrics upsert their stable run with the validated verdict.
       - name: Post the verdict check run
-        if: inputs.rubric != 'policy' && steps.state.outputs.state == 'ok'
+        if: steps.state.outputs.state == 'ok'
         continue-on-error: ${{ !inputs.blocking }}
         env:
           GH_TOKEN: ${{ steps.check-token.outputs.token }}
+          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
           BLOCKING: ${{ inputs.blocking }}
           CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          if [ "$REVIEW_NAME" = policy-gate ] && [ -z "$GH_TOKEN" ]; then
+            echo "::warning::policy-gate: cannot update the check run without an App token"
+            exit 0
+          fi
           case "$(cat policy-gate.exit):$BLOCKING" in 1:true) c=failure ;; 1:*) c=neutral ;; *) c=success ;; esac
-          jq -cn --arg n "$REVIEW_NAME" --arg s "$CHECK_HEAD_SHA" --arg c "$c" '{name: $n, head_sha: $s, status: "completed", conclusion: $c, output: {title: $n, summary: "AI review verdict. Findings are in the pull request comment."}}' | gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" --input -
+          if [ "$REVIEW_NAME" = policy-gate ]; then
+            # Best effort: the policy gate is comment-only, so a failed update must not fail it.
+            bash .ai-workflows/.github/scripts/shared/check-run.sh update \
+              "$REVIEW_NAME" "$c" "$REVIEW_TITLE" \
+              "AI review verdict. Findings are in the pull request comment." \
+              || echo "::warning::policy-gate: could not update the earlier check run"
+          else
+            bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
+              "$REVIEW_NAME" "$c" "$REVIEW_TITLE" \
+              "AI review verdict. Findings are in the pull request comment."
+          fi
 
       - name: Enforce the verdict
         if: inputs.blocking && steps.state.outputs.state == 'ok'
