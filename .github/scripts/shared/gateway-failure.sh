@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # Router refusals, gateway and budget failures are not review findings. A job that hits
-# one says so four ways: a job-summary line, an annotation, a check run on the
-# head commit with the reason in its output, and an optional ntfy ops alert.
-# Advisory callers end neutral. Blocking and required callers end failed.
+# one says so four ways: a job-summary line, an annotation, a neutral check run on the
+# head commit with the reason in its output, and an optional ntfy ops alert. A blocking
+# or required caller still fails closed; the check run itself always stays neutral.
 #
 #   gateway-failure.sh classify <file|->      print the reason class, or nothing
 #   gateway-failure.sh report <job> <class>   write the four signals; exit 1 when failed
 #
 # report reads:
-#   CONCLUSION        neutral (default, advisory) or failure (blocking or required)
+#   CONCLUSION        neutral (default) or failure (blocking or required; job exit only)
 #   GITHUB_TOKEN      Claude bot App installation token with checks: write, minted by
 #                     the caller. The callee's own GITHUB_TOKEN is never used for this.
 #   CHECK_TOKEN_CAUSE why no token exists (key not set, mint failed); named in the error
 #   CHECK_HEAD_SHA    commit the check run attaches to (required)
+#   CHECK_APP_SLUG    app slug used to select an existing check run (optional)
+#   CHECK_NAME        optional: overrides the default check-run name
 #   CHECK_SUMMARY     optional: overrides the check-run summary
 #   GITHUB_REPOSITORY owner/repo, set by the runner
 #   NTFY_BASE_URL     optional: the alert is skipped when unset
@@ -45,7 +47,7 @@ classify() {
 }
 
 create_check() {
-  local job="$1" reason="$2" conclusion="$3" summary body response
+  local job="$1" reason="$2" conclusion="$3" summary check_name response
   if [ -z "${GITHUB_TOKEN:-}" ]; then
     if [ "$conclusion" = failure ]; then
       echo "::error::$job: cannot post the check run: no Claude bot App token (${CHECK_TOKEN_CAUSE:-unknown cause})"
@@ -64,13 +66,16 @@ create_check() {
   else
     summary="gateway unavailable ($reason)"
   fi
-  body="$(jq -n \
-    --arg name "$job: AI review not performed" \
-    --arg head_sha "$CHECK_HEAD_SHA" \
-    --arg conclusion "$conclusion" \
-    --arg summary "$summary" \
-    '{name: $name, head_sha: $head_sha, status: "completed", conclusion: $conclusion, output: {title: "AI review not performed", summary: $summary}}')"
-  if response="$(GH_TOKEN="$GITHUB_TOKEN" gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" --input - <<< "$body" 2>&1)"; then
+  check_name="${CHECK_NAME:-$job: AI review not performed}"
+  if response="$(GH_TOKEN="$GITHUB_TOKEN" \
+    GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+    CHECK_HEAD_SHA="$CHECK_HEAD_SHA" \
+    CHECK_APP_SLUG="${CHECK_APP_SLUG:-}" \
+    bash "$(dirname -- "${BASH_SOURCE[0]}")/check-run.sh" \
+      upsert "$check_name" neutral "AI review not performed" "$summary" 2>&1)"; then
+    if [ -n "$response" ]; then
+      printf '%s\n' "$response"
+    fi
     return 0
   fi
   if grep -qiE 'HTTP 403|not accessible by integration' <<< "$response"; then

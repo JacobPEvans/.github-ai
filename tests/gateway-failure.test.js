@@ -8,6 +8,22 @@ const script = join('.github', 'scripts', 'shared', 'gateway-failure.sh');
 // A stand-in for gh: records the request body and answers the check-run POST.
 // FAKE_GH_MODE=403 reproduces a job that lacks the checks: write grant.
 const fakeGh = `#!/usr/bin/env bash
+if [ "$1" != api ]; then
+  echo "unexpected gh command" >&2
+  exit 2
+fi
+shift
+method=GET
+if [ "$1" = "-X" ] || [ "$1" = "--method" ]; then
+  method="$2"
+  shift 2
+fi
+path="$1"
+shift
+if [ "$method" = GET ]; then
+  echo '{"check_runs":[]}'
+  exit 0
+fi
 cat > "$FAKE_GH_RECORD"
 if [ "\${FAKE_GH_MODE:-ok}" = "403" ]; then
   echo "gh: Resource not accessible by integration (HTTP 403)" >&2
@@ -45,6 +61,7 @@ function report(env, { mode = 'ok', job = 'demo', reason = 'rate-limited' } = {}
       GITHUB_REPOSITORY: 'dryvist/example',
       GITHUB_TOKEN: 'token-for-test',
       CHECK_HEAD_SHA: 'abc123',
+      CHECK_APP_SLUG: 'review-bot',
       ...env,
     },
   });
@@ -132,6 +149,12 @@ describe('gateway failure report', () => {
     expect(r.request.output.summary).toBe('gateway unavailable (rate-limited)');
   });
 
+  it('uses CHECK_NAME when the caller supplies a stable name', () => {
+    const r = report({ CHECK_NAME: 'security-review' });
+    expect(r.exitCode).toBe(0);
+    expect(r.request.name).toBe('security-review');
+  });
+
   it('advisory: reports an agent time bound as a neutral check run', () => {
     const r = report({}, { reason: 'agent-time-bound' });
     expect(r.exitCode).toBe(0);
@@ -147,10 +170,10 @@ describe('gateway failure report', () => {
     expect(r.request.output.summary).toBe(summary);
   });
 
-  it('blocking or required: CONCLUSION=failure posts a failure check run and exits 1', () => {
+  it('blocking or required: CONCLUSION=failure posts a neutral check run and exits 1', () => {
     const r = report({ CONCLUSION: 'failure' });
     expect(r.exitCode).toBe(1);
-    expect(r.request.conclusion).toBe('failure');
+    expect(r.request.conclusion).toBe('neutral');
     expect(r.stdout).toContain('::error::demo: AI review not performed');
     expect(r.stdout).toContain('failing closed on a gateway failure');
   });
@@ -207,10 +230,19 @@ describe('gateway wiring in the workflows', () => {
   it('policy-gate: blocking maps to a failure conclusion, and the sticky notice still posts', () => {
     const job = load('policy-gate.yml').jobs.gate;
     const gateway = step(job, 'Report gateway unavailability');
+    const mint = step(job, 'Mint the check-run token');
+    const verdict = step(job, 'Post the verdict check run');
     expect(gateway.env.CONCLUSION).toContain("inputs.blocking && 'failure'");
     expect(gateway.env.CONCLUSION).toContain("'neutral'");
+    expect(gateway.env.CHECK_NAME).toBe('${{ env.REVIEW_NAME }}');
+    expect(gateway.env.CHECK_APP_SLUG).toBe('${{ steps.check-token.outputs.app-slug }}');
     expect(gateway.run).toContain('gateway-failure.sh report "$REVIEW_NAME"');
     expect(job.env.REVIEW_NAME).toContain("'policy-gate'");
+    expect(mint.if).toBe("steps.state.outputs.state != 'override'");
+    expect(verdict.if).toBe("steps.state.outputs.state == 'ok'");
+    expect(verdict.run).toContain('check-run.sh update');
+    expect(verdict.run).toContain('check-run.sh upsert');
+    expect(verdict.run).toContain('policy-gate: cannot update the check run without an App token');
     expect(step(job, 'Post sticky comment').if).toContain("steps.gateway.outcome == 'failure'");
     expect(job.permissions).toBeUndefined();
   });
