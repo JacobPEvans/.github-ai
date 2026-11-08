@@ -298,11 +298,10 @@ runs:
       id: check-token
       if: always() && steps.claude.outcome == 'failure' && steps.report.outputs.gateway_class != ''
       continue-on-error: true
-      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+      uses: ./.ai-workflows/.github/actions/run-ai-agent/mint-check-token
       with:
-        client-id: ${{ inputs.claude_bot_app_id }}
-        private-key: ${{ inputs.claude_bot_private_key }}
-        permission-checks: write
+        client_id: ${{ inputs.claude_bot_app_id }}
+        private_key: ${{ inputs.claude_bot_private_key }}
 
     - name: Report gateway unavailability
       if: always() && steps.claude.outcome == 'failure' && steps.report.outputs.gateway_class != ''

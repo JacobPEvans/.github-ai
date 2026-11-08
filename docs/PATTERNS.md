@@ -399,9 +399,13 @@ patch bump merges after the Merge Gate is green. A minor or major bump is merged
 person. This workflow has no internal auto-merge — it only labels and comments.
 
 A `check-eligibility` job is the inverse gate: it runs the paid Claude review ONLY when the
-PR author is a dependency bot (`bot_authors`), the highest bump type is in scope
-(`update_types`), and no prior review comment exists (dedup marker) — otherwise every
-downstream job skips cleanly (grey, not red).
+PR author is a dependency bot (`bot_authors`), the highest semver bump type is in scope
+(`update_types`) or a non-semver update type is explicitly included there, and no prior
+review comment exists (dedup marker) — otherwise every downstream job skips cleanly (grey,
+not red). Digest, pin, and lock-file-only reviews use the configured cheap model capability
+when one is set. The agent is capped at eight turns, 4,096 output tokens, and a three-minute
+step deadline inside the five-minute pull request job; a deadline without a handoff reports
+a neutral check and skips publishing.
 
 ```js
 // .github/scripts/dep-review/check-eligibility.js
