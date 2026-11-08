@@ -39,7 +39,7 @@ classify() {
     echo timeout
   elif grep -Eqi 'BadGatewayError|ServiceUnavailableError|Bad Gateway|Service Unavailable|Gateway Time-?out|Error code: 50[234]' <<< "$text"; then
     echo gateway-error
-  elif grep -Eqi 'Failed to authenticate|API Error: 40[13]([^0-9]|$)|is not available for this API key|litellm\.(AuthenticationError|PermissionDeniedError)' <<< "$text"; then
+  elif grep -Eqi 'Failed to authenticate\. API Error: 40[13]([^0-9]|$)|is not available for this API key|litellm\.(AuthenticationError|PermissionDeniedError)' <<< "$text"; then
     echo router-refused
   fi
 }

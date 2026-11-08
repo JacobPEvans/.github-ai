@@ -96,6 +96,8 @@ describe('gateway failure classification', () => {
     expect(classify('gh: Resource not accessible by integration (HTTP 403)')).toBe('');
     expect(classify('Tool output: request failed with status 403')).toBe('');
     expect(classify('Tool output: API returned HTTP 403 Forbidden')).toBe('');
+    expect(classify('Tool output: API Error: 403 Forbidden')).toBe('');
+    expect(classify('git: Failed to authenticate with the remote')).toBe('');
   });
 
   it('matches the router wording for a model group with no fallback', () => {
