@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.13](https://github.com/JacobPEvans/.github-ai/compare/v2.3.12...v2.3.13) (2026-11-08)
+
+
+### Bug Fixes
+
+* **dep-review:** end a max-turns stop neutral like the time bound ([#81](https://github.com/JacobPEvans/.github-ai/issues/81)) ([76a967a](https://github.com/JacobPEvans/.github-ai/commit/76a967ad50b191f97049bb3db3d65415de83637e))
+
 ## [2.3.12](https://github.com/JacobPEvans/.github-ai/compare/v2.3.11...v2.3.12) (2026-11-08)
 
 
