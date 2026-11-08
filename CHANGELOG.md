@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.10](https://github.com/JacobPEvans/.github-ai/compare/v2.3.9...v2.3.10) (2026-11-08)
+
+
+### Bug Fixes
+
+* **dep-review:** bound the review agent and end neutral at its time limit ([#74](https://github.com/JacobPEvans/.github-ai/issues/74)) ([527d001](https://github.com/JacobPEvans/.github-ai/commit/527d00147cfafab779ef30b5c10ba677ddd1e455))
+
 ## [2.3.9](https://github.com/JacobPEvans/.github-ai/compare/v2.3.8...v2.3.9) (2026-11-07)
 
 
