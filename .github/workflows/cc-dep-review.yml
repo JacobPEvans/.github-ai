@@ -72,6 +72,9 @@ on:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         description: Claude bot App key; posts the neutral check run on a router failure.
         required: false
+      NTFY_BASE_URL:
+        description: Base URL for the optional AI review operations alert.
+        required: false
       LLM_ROUTER_BASE_URL:
         required: true
       LLM_ROUTER_API_KEY:
@@ -157,6 +160,8 @@ jobs:
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     env:
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: "4096"
+    outputs:
+      handoff: ${{ steps.agent.outcome == 'success' && steps.upload.outcome == 'success' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -185,9 +190,16 @@ jobs:
           UPDATE_TYPE: ${{ needs.check-eligibility.outputs.update_type }}
         run: bash .ai-workflows/.github/scripts/render-prompt.sh .ai-llm-prompts/automation/ai-workflows-dep-review.md PR_NUMBER UPDATE_TYPE
 
+      - name: Mark agent start
+        id: agent_clock
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       # The reviewer writes only local handoff files. A fresh publisher job owns
       # all GitHub mutations.
       - name: Run AI agent
+        id: agent
+        timeout-minutes: 3
+        continue-on-error: true
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
           agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
@@ -206,8 +218,51 @@ jobs:
           claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
           claude_args: --max-turns 8
+          ntfy_base_url: ${{ secrets.NTFY_BASE_URL }}
+
+      - name: Classify agent deadline
+        id: deadline
+        if: always() && steps.agent.outcome == 'failure'
+        shell: bash
+        env:
+          STARTED: ${{ steps.agent_clock.outputs.started }}
+        run: |
+          if [ -f .claude-dep-review.md ] || [ $(( $(date +%s) - STARTED )) -lt 180 ]; then
+            echo "time_bound=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "time_bound=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint the check-run token for the agent deadline
+        id: deadline_token
+        if: always() && steps.deadline.outputs.time_bound == 'true'
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+          permission-checks: write
+
+      - name: Report agent deadline
+        if: always() && steps.deadline.outputs.time_bound == 'true'
+        env:
+          CONCLUSION: neutral
+          GITHUB_TOKEN: ${{ steps.deadline_token.outputs.token }}
+          CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'claude_bot_private_key input is not set (the caller must pass GH_APP_CLAUDE_BOT_PRIVATE_KEY)' || 'the mint step failed' }}
+          CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "Review dependency update" agent-time-bound
+
+      - name: Fail on non-deadline agent errors
+        if: always() && steps.agent.outcome == 'failure' && steps.deadline.outputs.time_bound != 'true'
+        run: |
+          echo "::error::The AI agent failed before its three-minute deadline or left a handoff file."
+          exit 1
 
       - name: Upload review handoff
+        id: upload
+        if: steps.agent.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-review-${{ github.run_id }}
@@ -221,6 +276,7 @@ jobs:
   publish:
     name: Publish dependency review
     needs: [check-eligibility, review]
+    if: needs.review.outputs.handoff == 'true'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:

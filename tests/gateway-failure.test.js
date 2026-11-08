@@ -107,6 +107,14 @@ describe('gateway failure report', () => {
     expect(r.request.output.summary).toBe('gateway unavailable (rate-limited)');
   });
 
+  it('advisory: reports an agent time bound as a neutral check run', () => {
+    const r = report({}, { reason: 'agent-time-bound' });
+    expect(r.exitCode).toBe(0);
+    expect(r.request.head_sha).toBe('abc123');
+    expect(r.request.conclusion).toBe('neutral');
+    expect(r.request.output.summary).toBe('gateway unavailable (agent-time-bound)');
+  });
+
   it('blocking or required: CONCLUSION=failure posts a failure check run and exits 1', () => {
     const r = report({ CONCLUSION: 'failure' });
     expect(r.exitCode).toBe(1);

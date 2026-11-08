@@ -403,7 +403,9 @@ PR author is a dependency bot (`bot_authors`), the highest semver bump type is i
 (`update_types`) or a non-semver update type is explicitly included there, and no prior
 review comment exists (dedup marker) — otherwise every downstream job skips cleanly (grey,
 not red). Digest, pin, and lock-file-only reviews use the configured cheap model capability
-when one is set.
+when one is set. The agent is capped at eight turns, 4,096 output tokens, and a three-minute
+step deadline inside the five-minute pull request job; a deadline without a handoff reports
+a neutral check and skips publishing.
 
 ```js
 // .github/scripts/dep-review/check-eligibility.js
