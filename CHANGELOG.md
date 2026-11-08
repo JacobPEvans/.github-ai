@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.12](https://github.com/JacobPEvans/.github-ai/compare/v2.3.11...v2.3.12) (2026-11-08)
+
+
+### Bug Fixes
+
+* **gateway:** treat router key refusals as gateway errors ([#80](https://github.com/JacobPEvans/.github-ai/issues/80)) ([88ce28a](https://github.com/JacobPEvans/.github-ai/commit/88ce28a6cdfdde85b328a020d3de7c3d18633205))
+
 ## [2.3.11](https://github.com/JacobPEvans/.github-ai/compare/v2.3.10...v2.3.11) (2026-11-08)
 
 
