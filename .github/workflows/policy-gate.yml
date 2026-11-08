@@ -400,9 +400,11 @@ jobs:
           fi
           case "$(cat policy-gate.exit):$BLOCKING" in 1:true) c=failure ;; 1:*) c=neutral ;; *) c=success ;; esac
           if [ "$REVIEW_NAME" = policy-gate ]; then
+            # Best effort: the policy gate is comment-only, so a failed update must not fail it.
             bash .ai-workflows/.github/scripts/shared/check-run.sh update \
               "$REVIEW_NAME" "$c" "$REVIEW_TITLE" \
-              "AI review verdict. Findings are in the pull request comment."
+              "AI review verdict. Findings are in the pull request comment." \
+              || echo "::warning::policy-gate: could not update the earlier check run"
           else
             bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
               "$REVIEW_NAME" "$c" "$REVIEW_TITLE" \

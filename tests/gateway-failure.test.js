@@ -243,6 +243,7 @@ describe('gateway wiring in the workflows', () => {
     expect(verdict.run).toContain('check-run.sh update');
     expect(verdict.run).toContain('check-run.sh upsert');
     expect(verdict.run).toContain('policy-gate: cannot update the check run without an App token');
+    expect(verdict.run).toContain('|| echo "::warning::policy-gate: could not update the earlier check run"');
     expect(step(job, 'Post sticky comment').if).toContain("steps.gateway.outcome == 'failure'");
     expect(job.permissions).toBeUndefined();
   });

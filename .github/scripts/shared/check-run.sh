@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# One check run per name on a head commit, so a rerun replaces the earlier outcome.
+#
+#   check-run.sh upsert <name> <conclusion> <title> <summary>   PATCH the latest run with
+#                       this name from CHECK_APP_SLUG, or POST a new one
+#   check-run.sh update <name> <conclusion> <title> <summary>   PATCH only; no matching run
+#                       writes nothing
+#
+# Reads GH_TOKEN, GITHUB_REPOSITORY, CHECK_HEAD_SHA and CHECK_APP_SLUG. Without
+# CHECK_APP_SLUG, or when the lookup fails, upsert POSTs with a warning and update
+# exits 1. A refused write exits 1.
 set -euo pipefail
 
 usage() {
