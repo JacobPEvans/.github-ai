@@ -18,10 +18,12 @@ release pull requests, or a provenance footer.
 
 ## Failure contract
 
-Not advisory. If the router is down or at capacity the job fails, releasing
-the runner: the router admits or refuses at once, and the job is capped
-(`timeout_minutes`, five by default). The router role's fallback ladder absorbs load. A wrong key,
-base URL or model fails at once. A
+A router, budget or rate-limit failure is not a review finding. When
+`gateway-failure.sh classify` names a class (including `router-refused`, a 401
+or 403 refusal of the router key), the job passes and posts a neutral "AI
+review not performed" check run and an ops alert. The job is capped
+(`timeout_minutes`, five by default), and the router role's fallback ladder
+absorbs load. Any other
 model error fails the job rather than being swallowed: PR-Agent 0.45.0's
 CLI exits 0 either way (`config.propagate_tool_errors` only changes what it
 logs; fixed upstream in qodo-ai/pr-agent#3368, not yet in an image), so
