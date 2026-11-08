@@ -79,6 +79,25 @@ describe('gateway failure classification', () => {
     expect(classify('504 Gateway Timeout')).toBe('gateway-error');
   });
 
+  it('classifies Claude Code router authentication refusals', () => {
+    expect(classify('Failed to authenticate. API Error: 401 Unauthorized')).toBe('router-refused');
+  });
+
+  it('classifies the router model-key scope refusal', () => {
+    expect(classify("403 The requested model 'review-oss' is not available for this API key")).toBe('router-refused');
+  });
+
+  it('classifies LiteLLM authentication and permission refusals', () => {
+    expect(classify('litellm.AuthenticationError: Authentication failed')).toBe('router-refused');
+    expect(classify('litellm.PermissionDeniedError: Permission denied')).toBe('router-refused');
+  });
+
+  it('leaves GitHub and tool-output 403 errors unclassified', () => {
+    expect(classify('gh: Resource not accessible by integration (HTTP 403)')).toBe('');
+    expect(classify('Tool output: request failed with status 403')).toBe('');
+    expect(classify('Tool output: API returned HTTP 403 Forbidden')).toBe('');
+  });
+
   it('matches the router wording for a model group with no fallback', () => {
     expect(
       classify("model group 'medium' failed with the error above and no fallback model group was found for it"),
