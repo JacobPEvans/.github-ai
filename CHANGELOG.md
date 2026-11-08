@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.14](https://github.com/JacobPEvans/.github-ai/compare/v2.3.13...v2.3.14) (2026-11-08)
+
+
+### Bug Fixes
+
+* **policy-gate:** keep one review check run per head and end gateway errors neutral ([#84](https://github.com/JacobPEvans/.github-ai/issues/84)) ([f002d3d](https://github.com/JacobPEvans/.github-ai/commit/f002d3de320f17e2d6e01e5f6164373901aa9412))
+
 ## [2.3.13](https://github.com/JacobPEvans/.github-ai/compare/v2.3.12...v2.3.13) (2026-11-08)
 
 
