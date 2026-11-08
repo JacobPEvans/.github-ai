@@ -220,7 +220,7 @@ jobs:
           claude_args: --max-turns 8
           ntfy_base_url: ${{ secrets.NTFY_BASE_URL }}
 
-      # The clock runs just before the agent, so the window is about a second; misclassified failures still alert with the run link.
+      # The clock starts just before the agent, so a misclassified failure posts a neutral check without an alert.
       - name: Classify agent deadline
         id: deadline
         if: always() && steps.agent.outcome == 'failure'
@@ -251,8 +251,6 @@ jobs:
           GITHUB_TOKEN: ${{ steps.deadline_token.outputs.token }}
           CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'claude_bot_private_key input is not set (the caller must pass GH_APP_CLAUDE_BOT_PRIVATE_KEY)' || 'the mint step failed' }}
           CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "Review dependency update" agent-time-bound
 
       - name: Fail on non-deadline agent errors
