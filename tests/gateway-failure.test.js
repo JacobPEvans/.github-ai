@@ -225,18 +225,27 @@ describe('gateway wiring in the workflows', () => {
   it('every mint of the check-run token uses the pinned App-token action with checks: write', () => {
     const pinned = 'actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510';
     const action = Bun.YAML.parse(readFileSync(join('.github', 'actions', 'run-ai-agent', 'action.yml'), 'utf8'));
-    const mints = [
+    const sharedMintAction = Bun.YAML.parse(readFileSync(join('.github', 'actions', 'run-ai-agent', 'mint-check-token', 'action.yml'), 'utf8'));
+    const directMints = [
       step(load('policy-gate.yml').jobs.gate, 'Mint the check-run token'),
       step(load('docs-drift.yml').jobs.drift, 'Mint the check-run token'),
       step(load('pr-agent.yml').jobs['pr-agent'], 'Mint the check-run token'),
       step(load('cc-release-notes.yml').jobs.highlights, 'Mint the check-run token'),
-      action.runs.steps.find((s) => s.name === 'Mint the check-run token'),
     ];
-    for (const mint of mints) {
+    for (const mint of directMints) {
       expect(mint.uses).toBe(pinned);
       expect(mint['continue-on-error']).toBe(true);
       expect(mint.with['permission-checks']).toBe('write');
     }
+
+    const sharedMint = sharedMintAction.runs.steps.find((s) => s.name === 'Mint check-run token');
+    expect(sharedMint.uses).toBe(pinned);
+    expect(sharedMint.with['permission-checks']).toBe('write');
+
+    const runAiMint = action.runs.steps.find((s) => s.name === 'Mint the check-run token');
+    expect(runAiMint.id).toBe('check-token');
+    expect(runAiMint.uses).toBe('./.ai-workflows/.github/actions/run-ai-agent/mint-check-token');
+    expect(runAiMint['continue-on-error']).toBe(true);
   });
 
   it('the App key is named as the cause when it is absent', () => {

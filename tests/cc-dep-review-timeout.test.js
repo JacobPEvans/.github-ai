@@ -36,10 +36,10 @@ test('only a missing handoff after the agent deadline is reported neutral', () =
   expect(classify.run).toContain(' -lt 180 ');
   expect(classify.env.GATEWAY_CLASS).toBe('${{ steps.agent.outputs.gateway_class }}');
   expect(mint.if).toContain("steps.deadline.outputs.time_bound == 'true'");
-  expect(mint.uses).toBe('actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510');
-  expect(mint.with['permission-checks']).toBe('write');
-  expect(mint.with['client-id']).toBe('${{ vars.GH_APP_CLAUDE_BOT_ID }}');
-  expect(mint.with['private-key']).toBe('${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}');
+  expect(mint.uses).toBe('./.ai-workflows/.github/actions/run-ai-agent/mint-check-token');
+  expect(mint['continue-on-error']).toBe(true);
+  expect(mint.with.client_id).toBe('${{ vars.GH_APP_CLAUDE_BOT_ID }}');
+  expect(mint.with.private_key).toBe('${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}');
   expect(report.env.CONCLUSION).toBe('neutral');
   expect(report.env.CHECK_HEAD_SHA).toBe('${{ github.event.pull_request.head.sha }}');
   expect(report.env.NTFY_BASE_URL).toBe('${{ secrets.NTFY_BASE_URL }}');
@@ -57,4 +57,29 @@ test('gateway responses cannot upload or publish a handoff', () => {
 test('the dogfood caller passes both deadline alert secrets', () => {
   expect(dogfoodWorkflow.jobs.review.secrets.NTFY_BASE_URL).toBe('${{ secrets.NTFY_BASE_URL }}');
   expect(dogfoodWorkflow.jobs.review.secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY).toBe('${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}');
+});
+
+test('run-ai-agent and dependency review share the check-token mint action', () => {
+  const runAiAgentText = readFileSync('.github/actions/run-ai-agent/action.yml', 'utf8');
+  const runAiAgent = Bun.YAML.parse(runAiAgentText);
+  const runAiMint = runAiAgent.runs.steps.find((candidate) => candidate.name === 'Mint the check-run token');
+  const report = runAiAgent.runs.steps.find((candidate) => candidate.name === 'Report gateway unavailability');
+  const workflowText = readFileSync('.github/workflows/cc-dep-review.yml', 'utf8');
+  const mintActionPath = '.github/actions/run-ai-agent/mint-check-token/action.yml';
+  const mintAction = Bun.YAML.parse(readFileSync(mintActionPath, 'utf8'));
+  const mintActionText = readFileSync(mintActionPath, 'utf8');
+
+  expect(runAiMint.id).toBe('check-token');
+  expect(runAiMint.if).toBe("always() && steps.claude.outcome == 'failure' && steps.report.outputs.gateway_class != ''");
+  expect(runAiMint['continue-on-error']).toBe(true);
+  expect(runAiMint.uses).toBe('./.ai-workflows/.github/actions/run-ai-agent/mint-check-token');
+  expect(runAiMint.with.client_id).toBe('${{ inputs.claude_bot_app_id }}');
+  expect(runAiMint.with.private_key).toBe('${{ inputs.claude_bot_private_key }}');
+  expect(report.env.GITHUB_TOKEN).toBe('${{ steps.check-token.outputs.token }}');
+  expect(workflowText).not.toContain('actions/create-github-app-token');
+  expect(runAiAgentText).not.toContain('actions/create-github-app-token');
+  expect(Object.keys(mintAction.inputs).sort()).toEqual(['client_id', 'private_key']);
+  expect(mintAction.outputs.token.value).toBe('${{ steps.mint.outputs.token }}');
+  expect(mintAction.runs.steps[0].uses).toBe('actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510');
+  expect(mintAction.runs.steps[0].with['permission-checks']).toBe('write');
 });

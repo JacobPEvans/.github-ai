@@ -1,0 +1,28 @@
+name: Mint check-run token
+description: Mint the Claude bot App token used to post a check run.
+
+inputs:
+  client_id:
+    description: GitHub App client ID.
+    required: false
+    default: ""
+  private_key:
+    description: GitHub App private key.
+    required: false
+    default: ""
+
+outputs:
+  token:
+    description: GitHub App installation token for posting a check run.
+    value: ${{ steps.mint.outputs.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Mint check-run token
+      id: mint
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+      with:
+        client-id: ${{ inputs.client_id }}
+        private-key: ${{ inputs.private_key }}
+        permission-checks: write
