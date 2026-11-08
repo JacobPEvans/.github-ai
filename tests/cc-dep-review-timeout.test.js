@@ -2,6 +2,7 @@ const { expect, test } = require('bun:test');
 const { readFileSync } = require('node:fs');
 
 const workflow = Bun.YAML.parse(readFileSync('.github/workflows/cc-dep-review.yml', 'utf8'));
+const dogfoodWorkflow = Bun.YAML.parse(readFileSync('.github/workflows/dogfood-dep-review.yml', 'utf8'));
 const review = workflow.jobs.review;
 const agent = review.steps.find((step) => step.name === 'Run AI agent');
 const step = (name) => review.steps.find((candidate) => candidate.name === name);
@@ -51,4 +52,9 @@ test('gateway responses cannot upload or publish a handoff', () => {
   expect(review.outputs.handoff).toBe("${{ steps.agent.outcome == 'success' && steps.agent.outputs.gateway_class == '' && steps.upload.outcome == 'success' }}");
   expect(step('Upload review handoff').if).toBe("steps.agent.outcome == 'success' && steps.agent.outputs.gateway_class == ''");
   expect(workflow.jobs.publish.if).toBe("needs.review.outputs.handoff == 'true'");
+});
+
+test('the dogfood caller passes both deadline alert secrets', () => {
+  expect(dogfoodWorkflow.jobs.review.secrets.NTFY_BASE_URL).toBe('${{ secrets.NTFY_BASE_URL }}');
+  expect(dogfoodWorkflow.jobs.review.secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY).toBe('${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}');
 });
