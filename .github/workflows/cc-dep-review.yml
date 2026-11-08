@@ -161,7 +161,7 @@ jobs:
     env:
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: "4096"
     outputs:
-      handoff: ${{ steps.agent.outcome == 'success' && steps.upload.outcome == 'success' }}
+      handoff: ${{ steps.agent.outcome == 'success' && steps.agent.outputs.gateway_class == '' && steps.upload.outcome == 'success' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -220,6 +220,7 @@ jobs:
           claude_args: --max-turns 8
           ntfy_base_url: ${{ secrets.NTFY_BASE_URL }}
 
+      # The clock runs just before the agent, so the window is about a second; misclassified failures still alert with the run link.
       - name: Classify agent deadline
         id: deadline
         if: always() && steps.agent.outcome == 'failure'
@@ -263,7 +264,7 @@ jobs:
 
       - name: Upload review handoff
         id: upload
-        if: steps.agent.outcome == 'success'
+        if: steps.agent.outcome == 'success' && steps.agent.outputs.gateway_class == ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-review-${{ github.run_id }}

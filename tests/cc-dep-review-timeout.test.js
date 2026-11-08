@@ -47,9 +47,8 @@ test('only a missing handoff after the agent deadline is reported neutral', () =
   expect(fail.if).toContain("steps.deadline.outputs.time_bound != 'true'");
 });
 
-test('publishing requires a successfully uploaded handoff', () => {
-  expect(review.outputs.handoff).toContain("steps.agent.outcome == 'success'");
-  expect(review.outputs.handoff).toContain("steps.upload.outcome == 'success'");
-  expect(step('Upload review handoff').if).toBe("steps.agent.outcome == 'success'");
+test('gateway responses cannot upload or publish a handoff', () => {
+  expect(review.outputs.handoff).toBe("${{ steps.agent.outcome == 'success' && steps.agent.outputs.gateway_class == '' && steps.upload.outcome == 'success' }}");
+  expect(step('Upload review handoff').if).toBe("steps.agent.outcome == 'success' && steps.agent.outputs.gateway_class == ''");
   expect(workflow.jobs.publish.if).toBe("needs.review.outputs.handoff == 'true'");
 });
