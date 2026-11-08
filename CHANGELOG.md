@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.11](https://github.com/JacobPEvans/.github-ai/compare/v2.3.10...v2.3.11) (2026-11-08)
+
+
+### Bug Fixes
+
+* **dep-review:** post the time-bound check without an ops alert ([#78](https://github.com/JacobPEvans/.github-ai/issues/78)) ([7460778](https://github.com/JacobPEvans/.github-ai/commit/7460778888ba83f418912706e4a4f2a3bdbec4b8))
+
 ## [2.3.10](https://github.com/JacobPEvans/.github-ai/compare/v2.3.9...v2.3.10) (2026-11-08)
 
 
