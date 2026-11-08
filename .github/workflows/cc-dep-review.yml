@@ -226,8 +226,9 @@ jobs:
         shell: bash
         env:
           STARTED: ${{ steps.agent_clock.outputs.started }}
+          GATEWAY_CLASS: ${{ steps.agent.outputs.gateway_class }}
         run: |
-          if [ -f .claude-dep-review.md ] || [ $(( $(date +%s) - STARTED )) -lt 180 ]; then
+          if [ -n "$GATEWAY_CLASS" ] || [ -f .claude-dep-review.md ] || [ $(( $(date +%s) - STARTED )) -lt 180 ]; then
             echo "time_bound=false" >> "$GITHUB_OUTPUT"
           else
             echo "time_bound=true" >> "$GITHUB_OUTPUT"

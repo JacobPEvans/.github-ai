@@ -33,6 +33,7 @@ test('only a missing handoff after the agent deadline is reported neutral', () =
   expect(classify.if).toContain("steps.agent.outcome == 'failure'");
   expect(classify.run).toContain('[ -f .claude-dep-review.md ]');
   expect(classify.run).toContain(' -lt 180 ');
+  expect(classify.env.GATEWAY_CLASS).toBe('${{ steps.agent.outputs.gateway_class }}');
   expect(mint.if).toContain("steps.deadline.outputs.time_bound == 'true'");
   expect(mint.uses).toBe('actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510');
   expect(mint.with['permission-checks']).toBe('write');
