@@ -10,3 +10,8 @@ test('dependency reviews use the cheap capability for opted-in non-semver update
   expect(agent.with.claude_model).toContain('vars.GH_ACTION_AI_MODEL_CHEAP');
   expect(agent.with.claude_model).toContain("(github.event.repository.private && (vars.GH_ACTION_AI_MODEL_REVIEW || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL) || 'review-oss')");
 });
+
+test('dependency review agent turn and output budgets are bounded', () => {
+  expect(agent.with.claude_args).toBe('--max-turns 8');
+  expect(review.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe('4096');
+});
