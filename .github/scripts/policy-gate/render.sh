@@ -36,7 +36,12 @@ fi
     "| \(.check | cell) | \(.result | cell) | \(.file | cell) | \(.line | cell) | \(.detail | cell) |"
   ' "$RESPONSE_FILE"
   echo
-  echo "_Advisory only for the first two weeks. Router role \`${MODEL:-?}\`._"
+  if [[ "${RUBRIC:-}" == leak ]]; then
+    printf "_Blocking callers treat findings as advisory before \`%s\` UTC and fail on and after that date. Router role \`%s\`._\n" \
+      "${LEAK_ADVISORY_END_DATE:?LEAK_ADVISORY_END_DATE is required for the leak rubric}" "${MODEL:-?}"
+  else
+    echo "_Router role \`${MODEL:-?}\`._"
+  fi
 } > "$out"
 cat "$out"
 
