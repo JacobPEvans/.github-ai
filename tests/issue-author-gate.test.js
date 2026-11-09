@@ -254,6 +254,35 @@ for (const [filename, jobName] of sweepWorkflows) {
   });
 }
 
+const additionalIssueReaders = [
+  ['issue-linker.yml', 'link-issues'],
+  ['best-practices.yml', 'best-practices'],
+  ['cc-next-steps.yml', 'analyze'],
+];
+
+for (const [filename, jobName] of additionalIssueReaders) {
+  test(`${filename} routes issue reads through the trusted reader`, () => {
+    const job = workflow(filename).jobs[jobName];
+    const prepare = stepIndex(job, 'Prepare trusted issue reader');
+    const agent = stepIndex(job, 'Run AI agent');
+    const checkout = job.steps.find(step => step.name === 'Checkout ai-workflows');
+    const allowedTools = job.steps.map(step => step.with?.allowed_tools || '').join(',');
+    const scripts = job.steps.map(step => [step.run, step.with?.script].filter(Boolean).join('\n')).join('\n');
+
+    expect(prepare).toBeGreaterThanOrEqual(0);
+    expect(prepare).toBeLessThan(agent);
+    expect(job.steps[prepare].uses).toBe('./.ai-workflows/.github/actions/trusted-issue-reader');
+    expect(checkout.with['sparse-checkout']).toContain('.github/actions/trusted-issue-reader');
+    expect(allowedTools).toContain('Bash(gh issue list:*)');
+    expect(allowedTools).toContain('Bash(gh issue view:*)');
+    expect(allowedTools).not.toContain('Bash(gh api');
+    expect(allowedTools).not.toContain('Bash(gh search issues:*)');
+    expect(allowedTools).not.toContain('Bash(gh search:*)');
+    expect(scripts).not.toMatch(/\bgh api\b/i);
+    expect(scripts).not.toMatch(/\bgh search issues\b/i);
+  });
+}
+
 test('trusted issue reads filter issue bodies and comment bodies before tool output', () => {
   const directory = mkdtempSync(join(tmpdir(), 'issue-author-gate-'));
   const issue = issueFixture(1, 'OWNER', 'trusted issue body');
