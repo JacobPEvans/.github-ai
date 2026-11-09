@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.16](https://github.com/JacobPEvans/.github-ai/compare/v2.3.15...v2.3.16) (2026-11-09)
+
+
+### Bug Fixes
+
+* **issue-agents:** pass only trusted authors' issue text to the AI agents ([#91](https://github.com/JacobPEvans/.github-ai/issues/91)) ([852fb79](https://github.com/JacobPEvans/.github-ai/commit/852fb79a26d3f046c4562e2ac4e8f30133a5b1a7))
+
 ## [2.3.15](https://github.com/JacobPEvans/.github-ai/compare/v2.3.14...v2.3.15) (2026-11-09)
 
 
