@@ -221,6 +221,15 @@ for (const [filename, jobName] of genericIssueSearchWorkflows) {
   });
 }
 
+test('cc-dep-review only allows release-by-tag API reads', () => {
+  const agent = workflow('cc-dep-review.yml').jobs.review.steps.find(step => step.name === 'Run AI agent');
+  const allowedTools = agent.with.allowed_tools.split(',');
+  const apiTools = allowedTools.filter(tool => tool.startsWith('Bash(gh api'));
+
+  expect(apiTools).toEqual(['Bash(gh api repos/*/*/releases/tags/*)']);
+  expect(apiTools.some(tool => /issues|comments/i.test(tool))).toBe(false);
+});
+
 test('trusted issue reader composite action runs the shared setup', () => {
   const action = Bun.YAML.parse(readFileSync('.github/actions/trusted-issue-reader/action.yml', 'utf8'));
   const prepare = action.runs.steps[0];
