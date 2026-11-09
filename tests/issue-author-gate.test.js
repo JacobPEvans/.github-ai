@@ -43,6 +43,26 @@ function makeFakeGh(directory) {
   return executable;
 }
 
+function runGh(args, data = { comments: [], issues: [] }, repository = 'test-owner/test-repo') {
+  const directory = mkdtempSync(join(tmpdir(), 'issue-author-gate-'));
+  const fakeGh = makeFakeGh(directory);
+  try {
+    return spawnSync(process.execPath, [
+      '.github/scripts/issue-author-gate/gh', ...args,
+    ], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        FAKE_GH_DATA: JSON.stringify(data),
+        GITHUB_REPOSITORY: repository,
+        GH_REAL_PATH: fakeGh,
+      },
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 test('trusted associations are exactly OWNER, MEMBER, and COLLABORATOR', () => {
   expect(TRUSTED_AUTHOR_ASSOCIATIONS).toEqual(['OWNER', 'MEMBER', 'COLLABORATOR']);
   for (const association of TRUSTED_AUTHOR_ASSOCIATIONS) {
@@ -304,3 +324,24 @@ test('raw issue API and GraphQL routes cannot bypass the trusted issue reader', 
   expect(safeGh.isIssueApiEndpoint('graphql')).toBe(true);
   expect(safeGh.isIssueApiEndpoint('repos/test/test/pulls')).toBe(false);
 });
+
+const rawIssueApiBypasses = [
+  ['query strings', ['api', 'repos/test-owner/test-repo/issues?state=open']],
+  ['fragments', ['api', 'repos/test-owner/test-repo/issues#comments']],
+  ['encoded slashes', ['api', 'repos/test-owner/test-repo%2Fissues']],
+  ['encoded issue names', ['api', 'repos/test-owner/test-repo/%69ssues']],
+  ['trailing slashes', ['api', 'repos/test-owner/test-repo/issues/']],
+  ['mixed case paths', ['api', 'Repos/Test-Owner/Test-Repo/Issues']],
+  ['absolute URLs', ['api', 'https://api.github.com/repos/test-owner/test-repo/issues?state=open']],
+  ['--input arguments', ['api', '--input', 'query.json', 'repos/test-owner/test-repo/issues']],
+  ['-f arguments', ['api', '-f', 'state=open', 'repos/test-owner/test-repo/issues']],
+];
+
+for (const [bypass, args] of rawIssueApiBypasses) {
+  test(`gh api rejects issue reads with ${bypass}`, () => {
+    const result = runGh(args);
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('Issue API reads are restricted');
+  });
+}

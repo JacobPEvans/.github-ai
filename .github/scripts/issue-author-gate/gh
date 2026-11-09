@@ -374,18 +374,31 @@ function apiEndpoint(args) {
 }
 
 function isIssueApiEndpoint(endpoint) {
-  let pathname = endpoint;
+  if (typeof endpoint !== 'string' || !endpoint.trim()) return true;
+
+  let pathname;
+  let parsedUrl;
   try {
-    if (/^https?:\/\//i.test(endpoint)) pathname = new URL(endpoint).pathname;
+    parsedUrl = /^https?:\/\//i.test(endpoint)
+      ? new URL(endpoint)
+      : new URL(endpoint, 'https://api.github.com');
   } catch {
     return true;
   }
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) return true;
+  pathname = parsedUrl.pathname;
+
   try {
-    pathname = decodeURIComponent(pathname);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const decoded = decodeURIComponent(pathname);
+      if (decoded === pathname) break;
+      pathname = decoded;
+      if (attempt === 7 && /%[a-f\d]{2}/i.test(pathname)) return true;
+    }
   } catch {
     return true;
   }
-  const normalized = pathname.replace(/^\/+/, '').toLowerCase();
+  const normalized = pathname.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
   return normalized === 'graphql'
     || /(^|\/)issues?(\/|$)/.test(normalized)
     || /(^|\/)search\/issues(\/|$)/.test(normalized);
