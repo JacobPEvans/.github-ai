@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.15](https://github.com/JacobPEvans/.github-ai/compare/v2.3.14...v2.3.15) (2026-11-09)
+
+
+### Bug Fixes
+
+* **policy-gate:** keep the leak review advisory until its period ends ([#88](https://github.com/JacobPEvans/.github-ai/issues/88)) ([5c1b316](https://github.com/JacobPEvans/.github-ai/commit/5c1b316e05607fa5213de4d4a7e1fac730954094))
+
 ## [2.3.14](https://github.com/JacobPEvans/.github-ai/compare/v2.3.13...v2.3.14) (2026-11-08)
 
 
