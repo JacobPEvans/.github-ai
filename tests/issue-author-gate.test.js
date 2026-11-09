@@ -205,6 +205,22 @@ test('issue-triage agent reads use the trusted issue reader', () => {
   expect(job.steps[agent].with.allowed_tools).not.toContain('Bash(gh search:*)');
 });
 
+const genericIssueSearchWorkflows = [
+  ['cc-code-simplifier.yml', 'simplify'],
+  ['cc-post-merge-docs-review.yml', 'post-merge-docs-review'],
+  ['cc-post-merge-tests.yml', 'post-merge-tests'],
+];
+
+for (const [filename, jobName] of genericIssueSearchWorkflows) {
+  test(`${filename} does not allow generic gh search`, () => {
+    const job = workflow(filename).jobs[jobName];
+    const agent = job.steps.find(step => step.name === 'Run AI agent');
+    const allowedTools = agent.with.allowed_tools.split(',');
+
+    expect(allowedTools.filter(tool => tool.startsWith('Bash(gh search'))).toEqual([]);
+  });
+}
+
 test('trusted issue reader composite action runs the shared setup', () => {
   const action = Bun.YAML.parse(readFileSync('.github/actions/trusted-issue-reader/action.yml', 'utf8'));
   const prepare = action.runs.steps[0];
