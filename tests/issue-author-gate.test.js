@@ -9,6 +9,7 @@ const {
   filterTrustedIssues,
   isTrustedAuthorAssociation,
 } = require('../.github/scripts/issue-author-gate/authors.js');
+const { checkIssueAuthor } = require('../.github/scripts/issue-author-gate/check-issue-author.js');
 
 const workflow = (filename) => Bun.YAML.parse(readFileSync(join('.github', 'workflows', filename), 'utf8'));
 const stepIndex = (job, name) => job.steps.findIndex(step => step.name === name);
@@ -23,12 +24,6 @@ const issueFixture = (number, authorAssociation, body) => ({
   title: `Issue ${number}`,
   user: { login: `author-${number}` },
 });
-
-function trustedAssociationsFrom(expression) {
-  const match = expression.match(/fromJSON\('([^']+)'\)/);
-  expect(match).not.toBeNull();
-  return JSON.parse(match[1]);
-}
 
 function makeFakeGh(directory) {
   const executable = join(directory, 'fake-gh');
@@ -58,21 +53,119 @@ test('trusted associations are exactly OWNER, MEMBER, and COLLABORATOR', () => {
   }
 });
 
-test('issue-triage skips an untrusted trigger before allocating its agent job', () => {
-  const job = workflow('issue-triage.yml').jobs.triage;
-  const associations = trustedAssociationsFrom(job.if);
-  const allowed = (issueAuthor, commentAuthor = null, inputIssue = '0', eventIssue = 5) =>
-    associations.includes(issueAuthor)
-    && (!commentAuthor || associations.includes(commentAuthor))
-    && (inputIssue === '0' || Number(inputIssue) === eventIssue);
+test('workflow_dispatch gates triage on the trusted author read through the API', async () => {
+  const parsed = workflow('issue-triage.yml');
+  const { gate, triage } = parsed.jobs;
+  const eligibilityCheckout = workflow('cc-issue-resolver.yml').jobs['eligibility-check'].steps[0];
+  const calls = [];
+  const outputs = {};
+  const context = { payload: {}, repo: { owner: 'test-owner', repo: 'test-repo' } };
+  const github = {
+    rest: {
+      issues: {
+        get: async (request) => {
+          calls.push(request);
+          return { data: issueFixture(42, 'MEMBER', 'trusted issue body') };
+        },
+      },
+    },
+  };
+  const trusted = await checkIssueAuthor({
+    github,
+    context,
+    core: { setOutput: (name, value) => { outputs[name] = value; } },
+    inputIssueNumber: '42',
+  });
 
-  expect(job.if).toContain('github.event.issue.author_association');
-  expect(job.if).toContain('github.event.comment.author_association');
-  expect(job.if).toContain('inputs.issue_number == github.event.issue.number');
-  expect(allowed('OWNER')).toBe(true);
-  expect(allowed('CONTRIBUTOR')).toBe(false);
-  expect(allowed('OWNER', 'CONTRIBUTOR')).toBe(false);
-  expect(allowed('OWNER', 'MEMBER', '9', 5)).toBe(false);
+  expect(parsed.on.workflow_dispatch.inputs.issue_number.type).toBe('string');
+  expect(parsed.on.workflow_dispatch.inputs.issue_number.default).toBe('0');
+  expect(calls).toEqual([{ owner: 'test-owner', repo: 'test-repo', issue_number: 42 }]);
+  expect(trusted).toBe(true);
+  expect(outputs.trusted).toBe('true');
+  expect(gate.permissions).toEqual({ issues: 'read' });
+  expect(gate.secrets).toBeUndefined();
+  expect(gate.outputs.trusted).toContain('steps.check.outputs.trusted');
+  expect(gate.steps[0].uses).toBe(eligibilityCheckout.uses);
+  expect(gate.steps[0].with).toEqual(eligibilityCheckout.with);
+  expect(gate.steps[1].with.script).toContain('issue-author-gate/check-issue-author.js');
+  expect(triage.needs).toBe('gate');
+  expect(triage.if).toBe("needs.gate.outputs.trusted == 'true'");
+});
+
+test('workflow_dispatch skips triage for an untrusted API issue author', async () => {
+  const calls = [];
+  const outputs = {};
+  const trusted = await checkIssueAuthor({
+    github: {
+      rest: {
+        issues: {
+          get: async (request) => {
+            calls.push(request);
+            return { data: issueFixture(43, 'CONTRIBUTOR', 'untrusted issue body') };
+          },
+        },
+      },
+    },
+    context: { payload: {}, repo: { owner: 'test-owner', repo: 'test-repo' } },
+    core: { setOutput: (name, value) => { outputs[name] = value; } },
+    inputIssueNumber: '43',
+  });
+
+  expect(calls[0].issue_number).toBe(43);
+  expect(trusted).toBe(false);
+  expect(outputs.trusted).toBe('false');
+});
+
+test('an untrusted triggering comment blocks an API-trusted issue author', async () => {
+  const calls = [];
+  const outputs = {};
+  const trusted = await checkIssueAuthor({
+    github: {
+      rest: {
+        issues: {
+          get: async (request) => {
+            calls.push(request);
+            return { data: issueFixture(44, 'OWNER', 'trusted issue body') };
+          },
+        },
+      },
+    },
+    context: {
+      payload: {
+        issue: { number: 44, author_association: 'OWNER' },
+        comment: { author_association: 'CONTRIBUTOR' },
+      },
+      repo: { owner: 'test-owner', repo: 'test-repo' },
+    },
+    core: { setOutput: (name, value) => { outputs[name] = value; } },
+    inputIssueNumber: '0',
+  });
+
+  expect(calls[0].issue_number).toBe(44);
+  expect(trusted).toBe(false);
+  expect(outputs.trusted).toBe('false');
+});
+
+test('an unreadable issue or missing API author association fails closed', async () => {
+  const makeGate = (getIssue) => {
+    const outputs = {};
+    return {
+      outputs,
+      run: checkIssueAuthor({
+        github: { rest: { issues: { get: getIssue } } },
+        context: { payload: {}, repo: { owner: 'test-owner', repo: 'test-repo' } },
+        core: { setOutput: (name, value) => { outputs[name] = value; } },
+        inputIssueNumber: '45',
+      }),
+    };
+  };
+  const unreadable = makeGate(async () => { throw new Error('API unavailable'); });
+  expect(await unreadable.run).toBe(false);
+  expect(unreadable.outputs.trusted).toBe('false');
+
+  const unclassified = makeGate(async () => ({ data: { number: 45 } }));
+  expect(await unclassified.run).toBe(false);
+  expect(unclassified.outputs.trusted).toBe('false');
 });
 
 test('issue-triage agent reads use the trusted issue reader', () => {

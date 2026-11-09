@@ -24,6 +24,12 @@ on:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         required: false
   workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to triage
+        type: string
+        required: false
+        default: "0"
 
 # Workflow-level permissions set the maximum for all jobs.
 # permissions: {} silently skips all jobs in cross-repo calls.
@@ -35,11 +41,36 @@ concurrency:
   group: issue-triage-${{ github.repository }}
 
 jobs:
+  gate:
+    name: Check issue author
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    permissions:
+      issues: read
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    outputs:
+      trusted: ${{ steps.check.outputs.trusted }}
+    steps:
+      - name: Checkout ai-workflows scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+
+      - name: Check issue author
+        id: check
+        env:
+          ISSUE_NUMBER: ${{ inputs.issue_number || '0' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const check = require('./.ai-workflows/.github/scripts/issue-author-gate/check-issue-author.js');
+            await check({ github, context, core, inputIssueNumber: process.env.ISSUE_NUMBER });
+
   triage:
-    if: >-
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
-      (!github.event.comment || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) &&
-      ((inputs.issue_number || '0') == '0' || inputs.issue_number == github.event.issue.number)
+    needs: gate
+    if: needs.gate.outputs.trusted == 'true'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     permissions:
       contents: read
