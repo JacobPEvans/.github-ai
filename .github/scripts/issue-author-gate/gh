@@ -7,6 +7,7 @@ const { spawnSync } = require('node:child_process');
 const { filterTrustedComments, filterTrustedIssues } = require('./authors.js');
 
 const MAX_BUFFER = 64 * 1024 * 1024;
+const WORKFLOW_REPOSITORY_ERROR = 'Issue reads are restricted to the workflow repository.';
 
 function realGhPath() {
   const configFile = path.join(__dirname, 'config.json');
@@ -15,11 +16,27 @@ function realGhPath() {
 }
 
 function parseRepository(value) {
-  const repository = value || process.env.GITHUB_REPOSITORY;
+  const repository = value ?? process.env.GITHUB_REPOSITORY;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || '')) {
     throw new Error('Issue reads require a repository in owner/name form.');
   }
   return repository;
+}
+
+function assertWorkflowRepository(repository) {
+  const workflowRepository = parseRepository(process.env.GITHUB_REPOSITORY);
+  if (process.env.GH_REPO !== undefined
+    && parseRepository(process.env.GH_REPO).toLowerCase() !== workflowRepository.toLowerCase()) {
+    throw new Error(WORKFLOW_REPOSITORY_ERROR);
+  }
+
+  const requestedRepository = repository === null || repository === undefined
+    ? workflowRepository
+    : parseRepository(repository);
+  if (requestedRepository.toLowerCase() !== workflowRepository.toLowerCase()) {
+    throw new Error(WORKFLOW_REPOSITORY_ERROR);
+  }
+  return workflowRepository;
 }
 
 function execute(args) {
@@ -134,7 +151,7 @@ function parseListArguments(args) {
   if (!Number.isInteger(parsed.limit) || parsed.limit < 0) throw new Error('Issue limit must be a non-negative integer.');
   parsed.limit = Math.min(parsed.limit || 30, 100);
   if (!['open', 'closed', 'all'].includes(parsed.state)) throw new Error('Issue state must be open, closed, or all.');
-  parsed.repository = parseRepository(parsed.repository);
+  parsed.repository = assertWorkflowRepository(parsed.repository);
   return parsed;
 }
 
@@ -279,15 +296,9 @@ function parseViewArguments(args) {
   }
 
   parsed.number = number;
-  const requestedRepository = parseRepository(parsed.repository);
-  if (urlRepository) {
-    const currentRepository = parseRepository(process.env.GITHUB_REPOSITORY);
-    if (urlRepository.toLowerCase() !== currentRepository.toLowerCase()
-      || urlRepository.toLowerCase() !== requestedRepository.toLowerCase()) {
-      throw new Error('Issue URL repository does not match the requested repository.');
-    }
-  }
-  parsed.repository = urlRepository || requestedRepository;
+  const requestedRepository = assertWorkflowRepository(parsed.repository);
+  if (urlRepository) assertWorkflowRepository(urlRepository);
+  parsed.repository = requestedRepository;
   return parsed;
 }
 

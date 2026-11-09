@@ -11,6 +11,7 @@ const {
 } = require('../.github/scripts/issue-author-gate/authors.js');
 const { checkIssueAuthor } = require('../.github/scripts/issue-author-gate/check-issue-author.js');
 
+const WORKFLOW_REPOSITORY_ERROR = 'Issue reads are restricted to the workflow repository.';
 const workflow = (filename) => Bun.YAML.parse(readFileSync(join('.github', 'workflows', filename), 'utf8'));
 const stepIndex = (job, name) => job.steps.findIndex(step => step.name === name);
 const issueFixture = (number, authorAssociation, body) => ({
@@ -43,20 +44,23 @@ function makeFakeGh(directory) {
   return executable;
 }
 
-function runGh(args, data = { comments: [], issues: [] }, repository = 'test-owner/test-repo') {
+function runGh(args, data = { comments: [], issues: [] }, repository = 'test-owner/test-repo', extraEnvironment = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'issue-author-gate-'));
   const fakeGh = makeFakeGh(directory);
   try {
+    const env = {
+      ...process.env,
+      ...extraEnvironment,
+      FAKE_GH_DATA: JSON.stringify(data),
+      GITHUB_REPOSITORY: repository,
+      GH_REAL_PATH: fakeGh,
+    };
+    if (!Object.hasOwn(extraEnvironment, 'GH_REPO')) delete env.GH_REPO;
     return spawnSync(process.execPath, [
       '.github/scripts/issue-author-gate/gh', ...args,
     ], {
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        FAKE_GH_DATA: JSON.stringify(data),
-        GITHUB_REPOSITORY: repository,
-        GH_REAL_PATH: fakeGh,
-      },
+      env,
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -401,7 +405,7 @@ test('issue view keeps a URL repository and rejects URLs outside the current rep
   ], fixture);
   expect(otherRepository.status).not.toBe(0);
   expect(otherRepository.stdout).toBe('');
-  expect(otherRepository.stderr).toContain('Issue URL repository does not match');
+  expect(otherRepository.stderr.trim()).toBe(WORKFLOW_REPOSITORY_ERROR);
 
   const explicitlySelectedOtherRepository = runGh([
     'issue', 'view', 'https://github.com/other-owner/other-repo/issues/7',
@@ -409,5 +413,75 @@ test('issue view keeps a URL repository and rejects URLs outside the current rep
   ], fixture);
   expect(explicitlySelectedOtherRepository.status).not.toBe(0);
   expect(explicitlySelectedOtherRepository.stdout).toBe('');
-  expect(explicitlySelectedOtherRepository.stderr).toContain('Issue URL repository does not match');
+  expect(explicitlySelectedOtherRepository.stderr.trim()).toBe(WORKFLOW_REPOSITORY_ERROR);
 });
+
+const repositoryReadFixture = {
+  comments: [],
+  issues: [
+    issueFixture(1, 'OWNER', 'trusted issue body'),
+    issueFixture(2, 'CONTRIBUTOR', 'untrusted issue body'),
+  ],
+};
+
+const alternateRepositoryArguments = [
+  ['--repo', ['--repo', 'other-owner/other-repo']],
+  ['-R', ['-R', 'other-owner/other-repo']],
+];
+
+for (const [option, selection] of alternateRepositoryArguments) {
+  test(`gh issue list and view refuse a different repository through ${option}`, () => {
+    for (const args of [
+      ['issue', 'list', ...selection],
+      ['issue', 'view', '1', ...selection],
+    ]) {
+      const result = runGh(args, repositoryReadFixture);
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).toBe('');
+      expect(result.stderr.trim()).toBe(WORKFLOW_REPOSITORY_ERROR);
+    }
+  });
+}
+
+test('gh issue list and view refuse a different GH_REPO without falling through to native gh', () => {
+  for (const args of [
+    ['issue', 'list'],
+    ['issue', 'view', '1'],
+  ]) {
+    const result = runGh(args, repositoryReadFixture, 'test-owner/test-repo', {
+      GH_REPO: 'other-owner/other-repo',
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr.trim()).toBe(WORKFLOW_REPOSITORY_ERROR);
+  }
+});
+
+const workflowRepositorySelections = [
+  ['--repo', ['--repo', 'test-owner/test-repo'], {}],
+  ['-R', ['-R', 'test-owner/test-repo'], {}],
+  ['GH_REPO', [], { GH_REPO: 'test-owner/test-repo' }],
+];
+
+for (const [selectionName, selection, extraEnvironment] of workflowRepositorySelections) {
+  test(`gh issue list and view keep trusted-author filtering with the workflow ${selectionName}`, () => {
+    const list = runGh([
+      'issue', 'list', '--json', 'number,body', ...selection,
+    ], repositoryReadFixture, 'test-owner/test-repo', extraEnvironment);
+    expect(list.status).toBe(0);
+    expect(list.stdout).toContain('trusted issue body');
+    expect(list.stdout).not.toContain('untrusted issue body');
+
+    const trustedView = runGh([
+      'issue', 'view', '1', ...selection,
+    ], repositoryReadFixture, 'test-owner/test-repo', extraEnvironment);
+    expect(trustedView.status).toBe(0);
+    expect(trustedView.stdout).toContain('trusted issue body');
+
+    const untrustedView = runGh([
+      'issue', 'view', '2', ...selection,
+    ], repositoryReadFixture, 'test-owner/test-repo', extraEnvironment);
+    expect(untrustedView.status).not.toBe(0);
+    expect(untrustedView.stdout).not.toContain('untrusted issue body');
+  });
+}
