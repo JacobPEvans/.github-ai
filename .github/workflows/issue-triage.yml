@@ -36,6 +36,10 @@ concurrency:
 
 jobs:
   triage:
+    if: >-
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
+      (!github.event.comment || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) &&
+      ((inputs.issue_number || '0') == '0' || inputs.issue_number == github.event.issue.number)
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     permissions:
       contents: read
@@ -62,6 +66,12 @@ jobs:
         uses: ./.ai-workflows/.github/actions/checkout-prompts
         with:
           sparse-checkout: automation/ai-workflows-issue-triage.md
+      - name: Prepare trusted issue reader
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const prepare = require('./.ai-workflows/.github/scripts/issue-author-gate/prepare.js');
+            await prepare({ core });
       - name: Render prompt
         id: prompt
         env:
@@ -78,7 +88,7 @@ jobs:
           permission_profile: workspace
           allowed_tools: >-
             Read,Glob,Grep,LS,Write,
-            Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*)
+            Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search prs:*)
           base_url: ${{ secrets.LLM_ROUTER_BASE_URL }}
           api_key: ${{ secrets.LLM_ROUTER_API_KEY }}
           openai_effort: ${{ vars.GH_ACTION_AI_CODEX_EFFORT }}

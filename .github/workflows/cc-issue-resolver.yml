@@ -45,9 +45,9 @@ on:
         type: string
         default: "0"
       allowed_authors:
-        description: "Comma-separated author_association values allowed to trigger resolution"
+        description: "Deprecated and ignored: only OWNER, MEMBER and COLLABORATOR issue and comment authors trigger resolution"
         type: string
-        default: "OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR"
+        default: "OWNER,MEMBER,COLLABORATOR"
       daily_limit:
         description: "Max resolver runs per repo per 24h (0 = disabled)"
         type: string
@@ -102,7 +102,6 @@ jobs:
           EXCLUDED_LABELS: ${{ inputs.excluded_labels }}
           MAX_ATTEMPTS: ${{ inputs.max_attempts }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
-          ALLOWED_AUTHORS: ${{ inputs.allowed_authors }}
           DAILY_LIMIT: ${{ inputs.daily_limit }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
