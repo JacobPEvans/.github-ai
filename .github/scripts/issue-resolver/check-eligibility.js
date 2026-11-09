@@ -1,5 +1,6 @@
 const { PR_DAILY_CEILING } = require('../shared/constants');
 const { get24hWindowStart } = require('../shared/utils');
+const { isTrustedAuthorAssociation } = require('../issue-author-gate/authors');
 
 module.exports = async ({ github, context, core }) => {
   // Gate 1: Issue number — from event payload or ISSUE_NUMBER env var (manual dispatch)
@@ -49,15 +50,16 @@ module.exports = async ({ github, context, core }) => {
 
   const labels = issue.labels.map(l => l.name.toLowerCase());
 
-  // Gate 2: Author association — skip for manual triggers (human explicitly chose this issue)
-  if (!isManualTrigger) {
-    const allowedAuthors = (process.env.ALLOWED_AUTHORS || 'OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR')
-      .split(',').map(a => a.trim().toUpperCase()).filter(Boolean);
-    if (!allowedAuthors.includes(issue.author_association)) {
-      core.setOutput('should_run', 'false');
-      core.info(`Issue #${issueNumber} author_association "${issue.author_association}" not in allowed list`);
-      return;
-    }
+  // Gate 2: Issue and triggering comment text must come from trusted authors.
+  if (!isTrustedAuthorAssociation(issue.author_association)) {
+    core.setOutput('should_run', 'false');
+    core.info(`Issue #${issueNumber} author_association "${issue.author_association}" is not trusted`);
+    return;
+  }
+  if (context.payload.comment && !isTrustedAuthorAssociation(context.payload.comment.author_association)) {
+    core.setOutput('should_run', 'false');
+    core.info(`Triggering comment author_association "${context.payload.comment.author_association}" is not trusted`);
+    return;
   }
 
   // Gates 3-6: Label checks — skip for manual triggers (human judged the issue appropriate)

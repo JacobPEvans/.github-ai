@@ -51,6 +51,7 @@ jobs:
           ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             .github/scripts
+            .github/actions/trusted-issue-reader
             .github/actions/run-ai-agent
             .github/actions/checkout-prompts
           path: .ai-workflows
@@ -59,6 +60,8 @@ jobs:
         uses: ./.ai-workflows/.github/actions/checkout-prompts
         with:
           sparse-checkout: automation/ai-workflows-issue-sweeper.md
+      - name: Prepare trusted issue reader
+        uses: ./.ai-workflows/.github/actions/trusted-issue-reader
       - name: Render prompt
         id: prompt
         run: bash .ai-workflows/.github/scripts/render-prompt.sh .ai-llm-prompts/automation/ai-workflows-issue-sweeper.md
@@ -74,7 +77,7 @@ jobs:
           allowed_tools: >-
             Read,Glob,Grep,LS,Write,
             Bash(gh issue view:*),Bash(gh issue list:*),
-            Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh search:*),
+            Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh search prs:*),
             Bash(gh api --method GET:*)
           base_url: ${{ secrets.LLM_ROUTER_BASE_URL }}
           api_key: ${{ secrets.LLM_ROUTER_API_KEY }}

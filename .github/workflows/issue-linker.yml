@@ -96,6 +96,7 @@ jobs:
           ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             .github/scripts
+            .github/actions/trusted-issue-reader
             .github/actions/run-ai-agent
             .github/actions/checkout-prompts
           path: .ai-workflows
@@ -104,6 +105,8 @@ jobs:
         uses: ./.ai-workflows/.github/actions/checkout-prompts
         with:
           sparse-checkout: automation/ai-workflows-issue-linker.md
+      - name: Prepare trusted issue reader
+        uses: ./.ai-workflows/.github/actions/trusted-issue-reader
       - name: Render prompt
         id: render-prompt
         env:
@@ -128,7 +131,7 @@ jobs:
           codex_model: ${{ inputs.model || vars.GH_ACTION_AI_CODEX_MODEL }}
           prompt: ${{ steps.render-prompt.outputs.content }}
           permission_profile: workspace
-          allowed_tools: "Write,Read,Glob,Grep,LS,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh search issues:*)"
+          allowed_tools: "Write,Read,Glob,Grep,LS,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue list:*),Bash(gh issue view:*)"
           claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 

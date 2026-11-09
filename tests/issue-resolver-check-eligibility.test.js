@@ -27,7 +27,6 @@ describe('check-eligibility', () => {
     context = createMockContext({ payload: { issue: { number: 5 } } });
     github = createMockGithub();
     delete process.env.ISSUE_NUMBER;
-    delete process.env.ALLOWED_AUTHORS;
     delete process.env.EXCLUDED_LABELS;
     delete process.env.MAX_ATTEMPTS;
     delete process.env.DAILY_LIMIT;
@@ -156,14 +155,36 @@ describe('check-eligibility', () => {
     expect(core.infos.some(msg => msg.includes('injection'))).toBe(true);
   });
 
-  it('skips label gates on manual trigger via ISSUE_NUMBER env', async () => {
+  it('rejects an untrusted author on a manual trigger via ISSUE_NUMBER env', async () => {
     context.payload = {};
     process.env.ISSUE_NUMBER = '5';
     github.rest.issues.get.mockResolvedValue({
       data: buildIssue({ labels: [], author_association: 'NONE' }),
     });
     await run({ github, context, core });
+    expect(core.getOutput('should_run')).toBe('false');
+  });
+
+  it('skips label gates on a trusted manual trigger via ISSUE_NUMBER env', async () => {
+    context.payload = {};
+    process.env.ISSUE_NUMBER = '5';
+    github.rest.issues.get.mockResolvedValue({
+      data: buildIssue({ labels: [], author_association: 'OWNER' }),
+    });
+    await run({ github, context, core });
     expect(core.getOutput('should_run')).toBe('true');
+  });
+
+  it('rejects an untrusted triggering comment on a trusted issue', async () => {
+    context.payload = {
+      issue: { number: 5 },
+      comment: { author_association: 'CONTRIBUTOR' },
+    };
+    github.rest.issues.get.mockResolvedValue({
+      data: buildIssue({ author_association: 'OWNER' }),
+    });
+    await run({ github, context, core });
+    expect(core.getOutput('should_run')).toBe('false');
   });
 
   describe('gate 1b: daily bot PR ceiling', () => {

@@ -1,0 +1,11 @@
+name: Prepare trusted issue reader
+description: Configure the GitHub CLI to filter issue reads by trusted authors.
+runs:
+  using: composite
+  steps:
+    - name: Prepare trusted issue reader
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+      with:
+        script: |
+          const prepare = require('./.ai-workflows/.github/scripts/issue-author-gate/prepare.js');
+          await prepare({ core });

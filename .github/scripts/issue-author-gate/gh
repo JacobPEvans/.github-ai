@@ -1,0 +1,487 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const { filterTrustedComments, filterTrustedIssues } = require('./authors.js');
+
+const MAX_BUFFER = 64 * 1024 * 1024;
+const WORKFLOW_REPOSITORY_ERROR = 'Issue reads are restricted to the workflow repository.';
+
+function realGhPath() {
+  const configFile = path.join(__dirname, 'config.json');
+  if (fs.existsSync(configFile)) return JSON.parse(fs.readFileSync(configFile, 'utf8')).gh;
+  return process.env.GH_REAL_PATH;
+}
+
+function parseRepository(value) {
+  const repository = value ?? process.env.GITHUB_REPOSITORY;
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || '')) {
+    throw new Error('Issue reads require a repository in owner/name form.');
+  }
+  return repository;
+}
+
+function assertWorkflowRepository(repository) {
+  const workflowRepository = parseRepository(process.env.GITHUB_REPOSITORY);
+  if (process.env.GH_REPO !== undefined
+    && parseRepository(process.env.GH_REPO).toLowerCase() !== workflowRepository.toLowerCase()) {
+    throw new Error(WORKFLOW_REPOSITORY_ERROR);
+  }
+
+  const requestedRepository = repository === null || repository === undefined
+    ? workflowRepository
+    : parseRepository(repository);
+  if (requestedRepository.toLowerCase() !== workflowRepository.toLowerCase()) {
+    throw new Error(WORKFLOW_REPOSITORY_ERROR);
+  }
+  return workflowRepository;
+}
+
+function execute(args) {
+  const executable = realGhPath();
+  if (!executable) throw new Error('The trusted issue reader is not configured.');
+
+  const result = spawnSync(executable, args, {
+    encoding: 'utf8',
+    env: process.env,
+    maxBuffer: MAX_BUFFER,
+  });
+  if (result.error || result.status !== 0) throw new Error('GitHub issue lookup failed.');
+  return result.stdout;
+}
+
+function runNativeGh(args) {
+  const executable = realGhPath();
+  if (!executable) throw new Error('The trusted issue reader is not configured.');
+
+  const result = spawnSync(executable, args, {
+    env: process.env,
+    stdio: 'inherit',
+    maxBuffer: MAX_BUFFER,
+  });
+  if (result.error) throw new Error('GitHub CLI could not run.');
+  return result.status ?? 1;
+}
+
+function parsePagedJson(stdout) {
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error('GitHub returned an invalid JSON response.');
+  }
+
+  if (!Array.isArray(parsed)) return Array.isArray(parsed.items) ? parsed.items : [parsed];
+  if (parsed.every(Array.isArray)) return parsed.flat(Infinity);
+  if (parsed.every(page => page && Array.isArray(page.items))) return parsed.flatMap(page => page.items);
+  return parsed;
+}
+
+function readPaged(endpoint, parameters = []) {
+  const stdout = execute([
+    'api', '--method', 'GET', '--paginate', '--slurp', endpoint,
+    '-F', 'per_page=100',
+    ...parameters,
+  ]);
+  return parsePagedJson(stdout);
+}
+
+function readObject(endpoint) {
+  let parsed;
+  try {
+    parsed = JSON.parse(execute(['api', '--method', 'GET', endpoint]));
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error('GitHub returned an invalid JSON response.');
+    throw error;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('GitHub returned an invalid issue response.');
+  }
+  return parsed;
+}
+
+function optionValue(args, index) {
+  const [option, inlineValue] = args[index].split(/=(.*)/s, 2);
+  if (inlineValue !== undefined) return { option, value: inlineValue, nextIndex: index };
+  if (index + 1 >= args.length) throw new Error(`Missing value for ${option}.`);
+  return { option, value: args[index + 1], nextIndex: index + 1 };
+}
+
+function parseListArguments(args) {
+  const parsed = {
+    fields: null,
+    limit: 30,
+    repository: null,
+    search: '',
+    state: 'open',
+  };
+
+  for (let index = 0; index < args.length; index++) {
+    const token = args[index];
+    if (token === '--web' || token === '-w' || token === '--jq' || token === '-q' || token === '--template' || token === '-t') {
+      throw new Error('This issue read format is not available through the trusted issue reader.');
+    }
+
+    if (token === '--json' || token.startsWith('--json=')) {
+      const result = optionValue(args, index);
+      parsed.fields = result.value.split(',').filter(Boolean);
+      index = result.nextIndex;
+      continue;
+    }
+
+    const flags = {
+      '--limit': 'limit', '-L': 'limit',
+      '--repo': 'repository', '-R': 'repository',
+      '--search': 'search', '-S': 'search',
+      '--state': 'state', '-s': 'state',
+    };
+    if (flags[token] || Object.keys(flags).some(flag => token.startsWith(`${flag}=`))) {
+      const result = optionValue(args, index);
+      const key = flags[result.option];
+      parsed[key] = key === 'limit' ? Number(result.value) : result.value;
+      index = result.nextIndex;
+      continue;
+    }
+
+    if (token.startsWith('-')) throw new Error(`Unsupported issue list option: ${token}.`);
+  }
+
+  if (!Number.isInteger(parsed.limit) || parsed.limit < 0) throw new Error('Issue limit must be a non-negative integer.');
+  parsed.limit = Math.min(parsed.limit || 30, 100);
+  if (!['open', 'closed', 'all'].includes(parsed.state)) throw new Error('Issue state must be open, closed, or all.');
+  parsed.repository = assertWorkflowRepository(parsed.repository);
+  return parsed;
+}
+
+function removeSortTerms(search) {
+  const matches = [...search.matchAll(/\bsort:(created|updated)-(asc|desc)\b/gi)];
+  const sort = matches.at(-1);
+  return {
+    search: search.replace(/\bsort:(created|updated)-(asc|desc)\b/gi, '').trim(),
+    sortBy: sort ? sort[1].toLowerCase() : 'created',
+    direction: sort ? sort[2].toLowerCase() : 'desc',
+  };
+}
+
+function queryIssueList({ repository, state, search }) {
+  const { search: terms, sortBy, direction } = removeSortTerms(search);
+  if (terms) {
+    const safeTerms = terms.replace(/\brepo:[^\s]+/gi, '').replace(/\bis:(issue|pr|open|closed)\b/gi, '').trim();
+    const qualifiers = [`repo:${repository}`, 'is:issue'];
+    if (state !== 'all') qualifiers.push(`is:${state}`);
+    if (safeTerms) qualifiers.push(safeTerms);
+    const encodedQuery = qualifiers.join(' ');
+    const pages = readPaged('search/issues', [
+      '-f', `q=${encodedQuery}`,
+      '-f', `sort=${sortBy}`,
+      '-f', `order=${direction}`,
+    ]);
+    return pages;
+  }
+
+  return readPaged(`repos/${repository}/issues`, [
+    '-f', `state=${state}`,
+    '-f', `sort=${sortBy}`,
+    '-f', `direction=${direction}`,
+  ]);
+}
+
+function sortIssues(issues, search) {
+  const { sortBy, direction } = removeSortTerms(search);
+  const field = sortBy === 'updated' ? 'updated_at' : 'created_at';
+  return [...issues].sort((left, right) => {
+    const order = new Date(left[field] || 0) - new Date(right[field] || 0);
+    return direction === 'asc' ? order : -order;
+  });
+}
+
+function issueValue(issue, field) {
+  const values = {
+    assignees: (issue.assignees || []).map(assignee => assignee.user || assignee),
+    author: issue.user,
+    authorAssociation: issue.author_association,
+    body: issue.body,
+    closed: issue.state === 'closed',
+    closedAt: issue.closed_at,
+    createdAt: issue.created_at,
+    id: issue.id,
+    labels: (issue.labels || []).map(label => typeof label === 'string' ? { name: label } : label),
+    milestone: issue.milestone,
+    number: issue.number,
+    state: issue.state,
+    stateReason: issue.state_reason,
+    title: issue.title,
+    updatedAt: issue.updated_at,
+    url: issue.html_url,
+  };
+  if (field === 'comments') return [];
+  if (!Object.hasOwn(values, field)) throw new Error(`Unsupported issue JSON field: ${field}.`);
+  return values[field];
+}
+
+function formatIssueList(issues, fields) {
+  if (fields) return JSON.stringify(issues.map(issue => Object.fromEntries(fields.map(field => [field, issueValue(issue, field)]))));
+  return issues.map(issue => `#${issue.number}\t${issue.title}\t${issue.html_url}`).join('\n');
+}
+
+function logSkipped(kind, count) {
+  process.stderr.write(`Skipped ${count} untrusted ${kind}${count === 1 ? '' : 's'}.\n`);
+}
+
+function issueList(args) {
+  const options = parseListArguments(args);
+  const records = queryIssueList(options);
+  const { trusted, skipped } = filterTrustedIssues(records);
+  logSkipped('issue', skipped);
+  const filtered = sortIssues(trusted, options.search).slice(0, options.limit);
+  process.stdout.write(`${formatIssueList(filtered, options.fields)}\n`);
+  return 0;
+}
+
+function parseViewArguments(args) {
+  const issueRef = args.find(argument => /^\d+$/.test(argument) || /^https?:\/\//i.test(argument));
+  if (!issueRef) throw new Error('Issue view requires an issue number or issue URL.');
+
+  let number;
+  let urlRepository = null;
+  if (/^\d+$/.test(issueRef)) {
+    number = Number(issueRef);
+  } else {
+    let issueUrl;
+    try {
+      issueUrl = new URL(issueRef);
+    } catch {
+      throw new Error('Issue view requires an issue number or issue URL.');
+    }
+    if (!['http:', 'https:'].includes(issueUrl.protocol)) {
+      throw new Error('Issue view requires an issue number or issue URL.');
+    }
+
+    let segments;
+    try {
+      segments = issueUrl.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    } catch {
+      throw new Error('Issue view requires an issue number or issue URL.');
+    }
+    const issuePath = segments.slice(-4);
+    if (issuePath.length !== 4 || issuePath[2].toLowerCase() !== 'issues' || !/^\d+$/.test(issuePath[3])) {
+      throw new Error('Issue view requires an issue number or issue URL.');
+    }
+    urlRepository = `${issuePath[0]}/${issuePath[1]}`;
+    number = Number(issuePath[3]);
+  }
+
+  const parsed = { comments: args.includes('--comments') || args.includes('-c'), fields: null, repository: null };
+
+  for (let index = 0; index < args.length; index++) {
+    const token = args[index];
+    if (token === '--comments' || token === '-c') continue;
+    if (token === '--web' || token === '-w' || token === '--jq' || token === '-q' || token === '--template' || token === '-t') {
+      throw new Error('This issue read format is not available through the trusted issue reader.');
+    }
+    if (token === '--json' || token.startsWith('--json=')) {
+      const result = optionValue(args, index);
+      parsed.fields = result.value.split(',').filter(Boolean);
+      parsed.comments ||= parsed.fields.includes('comments');
+      index = result.nextIndex;
+      continue;
+    }
+    if (token === '--repo' || token === '-R' || token.startsWith('--repo=') || token.startsWith('-R=')) {
+      const result = optionValue(args, index);
+      parsed.repository = result.value;
+      index = result.nextIndex;
+    }
+  }
+
+  parsed.number = number;
+  const requestedRepository = assertWorkflowRepository(parsed.repository);
+  if (urlRepository) assertWorkflowRepository(urlRepository);
+  parsed.repository = requestedRepository;
+  return parsed;
+}
+
+function commentValue(comment, field) {
+  const values = {
+    author: comment.user,
+    authorAssociation: comment.author_association,
+    body: comment.body,
+    createdAt: comment.created_at,
+    id: comment.id,
+    updatedAt: comment.updated_at,
+    url: comment.html_url,
+  };
+  if (!Object.hasOwn(values, field)) throw new Error(`Unsupported comment JSON field: ${field}.`);
+  return values[field];
+}
+
+function mapIssueView(issue, comments, fields) {
+  return Object.fromEntries(fields.map(field => [
+    field,
+    field === 'comments'
+      ? comments.map(comment => Object.fromEntries(['author', 'authorAssociation', 'body', 'createdAt', 'url'].map(commentField => [
+        commentField,
+        commentValue(comment, commentField),
+      ])))
+      : issueValue(issue, field),
+  ]));
+}
+
+function formatIssueView(issue, comments, includeComments) {
+  const labels = (issue.labels || []).map(label => typeof label === 'string' ? label : label.name).filter(Boolean);
+  const body = [
+    `#${issue.number} ${issue.title}`,
+    `Author: ${issue.user?.login || 'unknown'} (${issue.author_association})`,
+    `State: ${issue.state}`,
+    `Labels: ${labels.join(', ') || 'none'}`,
+    '',
+    issue.body || '',
+  ];
+  if (includeComments) {
+    body.push('', 'Trusted comments:');
+    body.push(...comments.map(comment => [
+      `Comment by ${comment.user?.login || 'unknown'} (${comment.author_association}) at ${comment.created_at}`,
+      comment.body || '',
+    ].join('\n')));
+  }
+  return body.join('\n');
+}
+
+function issueView(args) {
+  const options = parseViewArguments(args);
+  const issue = readObject(`repos/${options.repository}/issues/${options.number}`);
+  const { trusted, skipped } = filterTrustedIssues([issue]);
+  if (!trusted.length) {
+    logSkipped('issue', skipped);
+    throw new Error('Issue text is blocked by the trusted author filter.');
+  }
+
+  let comments = [];
+  if (options.comments) {
+    const records = readPaged(`repos/${options.repository}/issues/${options.number}/comments`);
+    const filtered = filterTrustedComments(records);
+    comments = filtered.trusted;
+    logSkipped('comment', filtered.skipped);
+  }
+
+  const result = options.fields
+    ? JSON.stringify(mapIssueView(issue, comments, options.fields))
+    : formatIssueView(issue, comments, options.comments);
+  process.stdout.write(`${result}\n`);
+  return 0;
+}
+
+function apiEndpoint(args) {
+  const valueFlags = new Set([
+    '--cache',
+    '--field', '-F',
+    '--header', '-H',
+    '--hostname',
+    '--input',
+    '--jq', '-q',
+    '--method', '-X',
+    '--preview', '-p',
+    '--raw-field', '-f',
+    '--template', '-t',
+  ]);
+  const booleanFlags = new Set([
+    '--allow-escape-sequences',
+    '--include', '-i',
+    '--paginate',
+    '--silent',
+    '--slurp',
+    '--verbose',
+  ]);
+
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (argument === '--') return args[index + 1] || '';
+
+    if (argument.startsWith('-')) {
+      const [option, inlineValue] = argument.split(/=(.*)/s, 2);
+      if (booleanFlags.has(option)) continue;
+      if (valueFlags.has(option)) {
+        if (inlineValue === undefined) {
+          if (index + 1 >= args.length) throw new Error(`Missing value for ${option}.`);
+          index++;
+        }
+        continue;
+      }
+      throw new Error(`Unsupported gh api option: ${option}.`);
+    }
+
+    if (argument.startsWith('@')) {
+      throw new Error('The gh api endpoint is missing.');
+    }
+
+    return argument;
+  }
+
+  return '';
+}
+
+function isIssueApiEndpoint(endpoint) {
+  if (typeof endpoint !== 'string' || !endpoint.trim()) return true;
+
+  let pathname;
+  let parsedUrl;
+  try {
+    parsedUrl = /^https?:\/\//i.test(endpoint)
+      ? new URL(endpoint)
+      : new URL(endpoint, 'https://api.github.com');
+  } catch {
+    return true;
+  }
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) return true;
+  pathname = parsedUrl.pathname;
+
+  try {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const decoded = decodeURIComponent(pathname);
+      if (decoded === pathname) break;
+      pathname = decoded;
+      if (attempt === 7 && /%[a-f\d]{2}/i.test(pathname)) return true;
+    }
+  } catch {
+    return true;
+  }
+  const normalized = pathname.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+  const issueEventEndpoint = /^(?:events|repos\/[^/]+\/[^/]+\/(?:events|issues\/(?:events|\d+\/events))|networks\/[^/]+\/[^/]+\/events|users\/[^/]+\/(?:events|received_events)|orgs\/[^/]+\/events)(?:\/|$)/.test(normalized);
+  return normalized === 'graphql'
+    || issueEventEndpoint
+    || /(^|\/)issues?(\/|$)/.test(normalized)
+    || /(^|\/)search\/issues(\/|$)/.test(normalized);
+}
+
+function main(args) {
+  if (args[0] === 'issue' && args[1] === 'list') return issueList(args.slice(2));
+  if (args[0] === 'issue' && args[1] === 'view') return issueView(args.slice(2));
+  if (args[0] === 'issue') throw new Error('Only filtered issue list and view commands are available.');
+  if (args[0] === 'search' && ['issue', 'issues'].includes(args[1])) {
+    throw new Error('Issue search is restricted to the trusted author filter.');
+  }
+  if (args[0] === 'api' && isIssueApiEndpoint(apiEndpoint(args.slice(1)))) {
+    throw new Error('Issue API reads are restricted to the trusted author filter.');
+  }
+  return runNativeGh(args);
+}
+
+if (require.main === module) {
+  try {
+    process.exitCode = main(process.argv.slice(2));
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  }
+}
+
+module.exports = {
+  filterTrustedComments,
+  filterTrustedIssues,
+  formatIssueList,
+  formatIssueView,
+  isIssueApiEndpoint,
+  main,
+  parsePagedJson,
+};
