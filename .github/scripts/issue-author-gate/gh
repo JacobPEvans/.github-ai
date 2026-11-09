@@ -224,9 +224,38 @@ function issueList(args) {
 }
 
 function parseViewArguments(args) {
-  const issueRef = args.find(argument => /^(\d+|https?:\/\/[^\s]*\/issues\/\d+\/?$)$/.test(argument));
-  const match = String(issueRef || '').match(/(?:^|\/issues\/)(\d+)\/?$/);
-  if (!match) throw new Error('Issue view requires an issue number or issue URL.');
+  const issueRef = args.find(argument => /^\d+$/.test(argument) || /^https?:\/\//i.test(argument));
+  if (!issueRef) throw new Error('Issue view requires an issue number or issue URL.');
+
+  let number;
+  let urlRepository = null;
+  if (/^\d+$/.test(issueRef)) {
+    number = Number(issueRef);
+  } else {
+    let issueUrl;
+    try {
+      issueUrl = new URL(issueRef);
+    } catch {
+      throw new Error('Issue view requires an issue number or issue URL.');
+    }
+    if (!['http:', 'https:'].includes(issueUrl.protocol)) {
+      throw new Error('Issue view requires an issue number or issue URL.');
+    }
+
+    let segments;
+    try {
+      segments = issueUrl.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    } catch {
+      throw new Error('Issue view requires an issue number or issue URL.');
+    }
+    const issuePath = segments.slice(-4);
+    if (issuePath.length !== 4 || issuePath[2].toLowerCase() !== 'issues' || !/^\d+$/.test(issuePath[3])) {
+      throw new Error('Issue view requires an issue number or issue URL.');
+    }
+    urlRepository = `${issuePath[0]}/${issuePath[1]}`;
+    number = Number(issuePath[3]);
+  }
+
   const parsed = { comments: args.includes('--comments') || args.includes('-c'), fields: null, repository: null };
 
   for (let index = 0; index < args.length; index++) {
@@ -249,8 +278,16 @@ function parseViewArguments(args) {
     }
   }
 
-  parsed.number = Number(match[1]);
-  parsed.repository = parseRepository(parsed.repository);
+  parsed.number = number;
+  const requestedRepository = parseRepository(parsed.repository);
+  if (urlRepository) {
+    const currentRepository = parseRepository(process.env.GITHUB_REPOSITORY);
+    if (urlRepository.toLowerCase() !== currentRepository.toLowerCase()
+      || urlRepository.toLowerCase() !== requestedRepository.toLowerCase()) {
+      throw new Error('Issue URL repository does not match the requested repository.');
+    }
+  }
+  parsed.repository = urlRepository || requestedRepository;
   return parsed;
 }
 

@@ -386,3 +386,28 @@ for (const [bypass, args] of rawIssueApiBypasses) {
     expect(result.stderr).toContain('Issue API reads are restricted');
   });
 }
+
+test('issue view keeps a URL repository and rejects URLs outside the current repository', () => {
+  const issue = issueFixture(7, 'OWNER', 'trusted issue from URL repository');
+  const fixture = { comments: [], issues: [issue] };
+  const sameRepository = runGh([
+    'issue', 'view', 'https://github.com/test-owner/test-repo/issues/7',
+  ], fixture);
+  expect(sameRepository.status).toBe(0);
+  expect(sameRepository.stdout).toContain('trusted issue from URL repository');
+
+  const otherRepository = runGh([
+    'issue', 'view', 'https://github.com/other-owner/other-repo/issues/7',
+  ], fixture);
+  expect(otherRepository.status).not.toBe(0);
+  expect(otherRepository.stdout).toBe('');
+  expect(otherRepository.stderr).toContain('Issue URL repository does not match');
+
+  const explicitlySelectedOtherRepository = runGh([
+    'issue', 'view', 'https://github.com/other-owner/other-repo/issues/7',
+    '--repo', 'other-owner/other-repo',
+  ], fixture);
+  expect(explicitlySelectedOtherRepository.status).not.toBe(0);
+  expect(explicitlySelectedOtherRepository.stdout).toBe('');
+  expect(explicitlySelectedOtherRepository.stderr).toContain('Issue URL repository does not match');
+});
