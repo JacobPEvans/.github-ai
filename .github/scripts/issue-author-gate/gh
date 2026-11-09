@@ -447,7 +447,7 @@ function isIssueApiEndpoint(endpoint) {
     return true;
   }
   const normalized = pathname.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
-  const issueEventEndpoint = /^(?:repos\/[^/]+\/[^/]+\/(?:events|issues\/(?:events|\d+\/events))|networks\/[^/]+\/[^/]+\/events|users\/[^/]+\/(?:events|received_events)|orgs\/[^/]+\/events)(?:\/|$)/.test(normalized);
+  const issueEventEndpoint = /^(?:events|repos\/[^/]+\/[^/]+\/(?:events|issues\/(?:events|\d+\/events))|networks\/[^/]+\/[^/]+\/events|users\/[^/]+\/(?:events|received_events)|orgs\/[^/]+\/events)(?:\/|$)/.test(normalized);
   return normalized === 'graphql'
     || issueEventEndpoint
     || /(^|\/)issues?(\/|$)/.test(normalized)

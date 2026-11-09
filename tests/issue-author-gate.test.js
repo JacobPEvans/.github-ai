@@ -392,6 +392,10 @@ test('raw issue API and GraphQL routes cannot bypass the trusted issue reader', 
   expect(safeGh.isIssueApiEndpoint('repos/test/test/issues')).toBe(true);
   expect(safeGh.isIssueApiEndpoint('search/issues')).toBe(true);
   expect(safeGh.isIssueApiEndpoint('graphql')).toBe(true);
+  expect(safeGh.isIssueApiEndpoint('events')).toBe(true);
+  expect(safeGh.isIssueApiEndpoint('events/')).toBe(true);
+  expect(safeGh.isIssueApiEndpoint('events?per_page=100')).toBe(true);
+  expect(safeGh.isIssueApiEndpoint('repos/test/test/events')).toBe(true);
   expect(safeGh.isIssueApiEndpoint('repos/test/test/pulls')).toBe(false);
 });
 
@@ -417,6 +421,7 @@ for (const [bypass, args] of rawIssueApiBypasses) {
 }
 
 const issueEventApiEndpoints = [
+  ['global events', 'events'],
   ['repository events', 'repos/test-owner/test-repo/events'],
   ['repository issue events', 'repos/test-owner/test-repo/issues/events'],
   ['single issue events', 'repos/test-owner/test-repo/issues/42/events'],
