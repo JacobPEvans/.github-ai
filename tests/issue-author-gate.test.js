@@ -416,6 +416,41 @@ for (const [bypass, args] of rawIssueApiBypasses) {
   });
 }
 
+const issueEventApiEndpoints = [
+  ['repository events', 'repos/test-owner/test-repo/events'],
+  ['repository issue events', 'repos/test-owner/test-repo/issues/events'],
+  ['single issue events', 'repos/test-owner/test-repo/issues/42/events'],
+  ['network repository events', 'networks/test-owner/test-repo/events'],
+  ['user events', 'users/test-user/events'],
+  ['user received events', 'users/test-user/received_events/public'],
+  ['organization events', 'orgs/test-org/events'],
+];
+
+for (const [feed, endpoint] of issueEventApiEndpoints) {
+  const forms = [
+    ['relative', endpoint],
+    ['absolute URL', `https://api.github.com/${endpoint}`],
+    ['query string', `${endpoint}?per_page=20`],
+    ['fragment', `${endpoint}#event-body`],
+    ['trailing slash', `${endpoint}/`],
+  ];
+
+  for (const [formName, form] of forms) {
+    test(`gh api rejects ${feed} with a ${formName}`, () => {
+      const result = runGh(['api', form]);
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('Issue API reads are restricted');
+    });
+  }
+}
+
+test('gh api still allows pull request reads', () => {
+  const result = runGh(['api', 'repos/test-owner/test-repo/pulls']);
+  expect(result.status).toBe(0);
+  expect(result.stderr).toBe('');
+});
+
 test('issue view keeps a URL repository and rejects URLs outside the current repository', () => {
   const issue = issueFixture(7, 'OWNER', 'trusted issue from URL repository');
   const fixture = { comments: [], issues: [issue] };
