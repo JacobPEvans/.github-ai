@@ -192,11 +192,21 @@ test('issue-triage agent reads use the trusted issue reader', () => {
   const job = workflow('issue-triage.yml').jobs.triage;
   const prepare = stepIndex(job, 'Prepare trusted issue reader');
   const agent = stepIndex(job, 'Run AI agent');
+  const checkout = job.steps.find(step => step.name === 'Checkout ai-workflows');
   expect(prepare).toBeGreaterThanOrEqual(0);
   expect(prepare).toBeLessThan(agent);
-  expect(job.steps[prepare].with.script).toContain('issue-author-gate/prepare.js');
+  expect(job.steps[prepare].uses).toBe('./.ai-workflows/.github/actions/trusted-issue-reader');
+  expect(checkout.with['sparse-checkout']).toContain('.github/actions/trusted-issue-reader');
   expect(job.steps[agent].with.allowed_tools).toContain('Bash(gh issue list:*)');
   expect(job.steps[agent].with.allowed_tools).not.toContain('Bash(gh search:*)');
+});
+
+test('trusted issue reader composite action runs the shared setup', () => {
+  const action = Bun.YAML.parse(readFileSync('.github/actions/trusted-issue-reader/action.yml', 'utf8'));
+  const prepare = action.runs.steps[0];
+  expect(action.runs.using).toBe('composite');
+  expect(prepare.uses).toBe('actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3');
+  expect(prepare.with.script).toContain('./.ai-workflows/.github/scripts/issue-author-gate/prepare.js');
 });
 
 test('cc-issue-resolver skips issues and comments unless both authors are trusted', () => {
@@ -223,6 +233,7 @@ for (const [filename, jobName] of sweepWorkflows) {
     const job = workflow(filename).jobs[jobName];
     const prepare = stepIndex(job, 'Prepare trusted issue reader');
     const agent = stepIndex(job, 'Run AI agent');
+    const checkout = job.steps.find(step => step.name === 'Checkout ai-workflows');
     const { trusted, skipped } = filterTrustedIssues([
       issueFixture(1, 'OWNER', 'trusted owner issue'),
       issueFixture(2, 'MEMBER', 'trusted member issue'),
@@ -232,7 +243,8 @@ for (const [filename, jobName] of sweepWorkflows) {
 
     expect(prepare).toBeGreaterThanOrEqual(0);
     expect(prepare).toBeLessThan(agent);
-    expect(job.steps[prepare].with.script).toContain('issue-author-gate/prepare.js');
+    expect(job.steps[prepare].uses).toBe('./.ai-workflows/.github/actions/trusted-issue-reader');
+    expect(checkout.with['sparse-checkout']).toContain('.github/actions/trusted-issue-reader');
     expect(job.permissions.issues).toBe('read');
     expect(trusted.map(issue => issue.body)).toContain('trusted owner issue');
     expect(trusted.map(issue => issue.body)).toContain('trusted member issue');

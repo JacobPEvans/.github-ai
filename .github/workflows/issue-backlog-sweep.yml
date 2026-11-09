@@ -117,6 +117,7 @@ jobs:
           ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             .github/scripts
+            .github/actions/trusted-issue-reader
             .github/actions/run-ai-agent
             .github/actions/checkout-prompts
           path: .ai-workflows
@@ -126,11 +127,7 @@ jobs:
         with:
           sparse-checkout: automation/ai-workflows-issue-backlog-sweep.md
       - name: Prepare trusted issue reader
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        with:
-          script: |
-            const prepare = require('./.ai-workflows/.github/scripts/issue-author-gate/prepare.js');
-            await prepare({ core });
+        uses: ./.ai-workflows/.github/actions/trusted-issue-reader
       - name: Render prompt
         id: prompt
         env:
