@@ -25,7 +25,7 @@ const prompts = {
   'release-notes': 'd6cc1b32304e8dfdc191931177d2ea043f65c69f96bda27119d4ef5658b919ab',
   'issue-backlog-sweep': '2f9591df7033a51c7c6c865b72f3cb1293a8778fd417fbcd4a7a75257be4fd3e',
   'issue-hygiene': 'f6a82b2f6a257f3d51f0890bd51c5f8b18aec0c6f12f63a7972534c5acbcacc1',
-  'issue-linker': 'c2c1538ee7589205792d6656a9309b2d933b317f93dff226186600683c4d56eb',
+  'issue-linker': 'ee5be87ff8aad45640a70c4ed2df90d438a3fe98eeccf6b45ee79ee85259cfb9',
   'issue-sweeper': 'acaac1c7a73bb628db85c9f4dfc7322b50cc9625a0d4a16eebb76fdee663e574',
   'issue-triage': '4cc1472a88e0320c15688584ddbb96d50f1d9e5c9da57adcbba3bbe17aaf5187',
 };
