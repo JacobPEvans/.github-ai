@@ -1,10 +1,10 @@
 # GitHub event forwarder
 
 `github-event-forwarder.yml` posts event metadata to a Dify webhook trigger.
-It accepts `agent_name`, `webhook_url_secret_name`, and `runner_label` (default
-`self-hosted`). The runner provides Bash, jq, curl, and access to the webhook.
-Callers pass repository or organization secrets with `secrets: inherit`; the
-workflow selects the secret named by `webhook_url_secret_name`.
+It accepts `agent_name` and `runner_label` (default `self-hosted`), and one
+secret, `webhook_url`, which the caller passes explicitly. The runner provides
+Bash, jq, curl, and access to the webhook. The older form, `secrets: inherit`
+with `webhook_url_secret_name`, still works.
 
 The JSON envelope contains:
 

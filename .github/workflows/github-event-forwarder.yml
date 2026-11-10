@@ -8,13 +8,17 @@ on:
         type: string
         required: true
       webhook_url_secret_name:
-        description: Name of the webhook URL secret passed with secrets inherit.
+        description: Legacy. Name of the webhook URL secret when the caller uses secrets inherit.
         type: string
-        required: true
+        default: ''
       runner_label:
         description: Runner label for webhook delivery.
         type: string
         default: self-hosted
+    secrets:
+      webhook_url:
+        description: Dify webhook URL for the agent. Pass it explicitly instead of secrets inherit.
+        required: false
 
 permissions: {}
 
@@ -27,7 +31,7 @@ jobs:
         shell: bash
         env:
           AGENT_NAME: ${{ inputs.agent_name }}
-          WEBHOOK_URL: ${{ secrets[inputs.webhook_url_secret_name] }}
+          WEBHOOK_URL: ${{ secrets.webhook_url || secrets[inputs.webhook_url_secret_name] }}
         run: |
           set -euo pipefail
           [[ -n "$WEBHOOK_URL" && -n "$AGENT_NAME" ]]

@@ -17,5 +17,5 @@ jobs:
     uses: ./.github/workflows/github-event-forwarder.yml
     with:
       agent_name: ci-fixer
-      webhook_url_secret_name: DIFY_CI_FIXER_WEBHOOK_URL
-    secrets: inherit
+    secrets:
+      webhook_url: ${{ secrets.DIFY_CI_FIXER_WEBHOOK_URL }}
