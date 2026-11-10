@@ -1,0 +1,45 @@
+# PR Reconcile Sweep
+#
+# Level-triggered guarantee for PR Reconcile: every five minutes at minutes
+# 3, 8, 13 and so on, every open pull request of each listed owner is
+# reconciled. Owners come from the PR_RECONCILE_OWNERS repository variable
+# (comma-separated); nothing runs while it is empty.
+
+name: PR Reconcile Sweep
+
+on:
+  schedule:
+    - cron: "3-58/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owners:
+    name: List owners
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      owners: ${{ steps.list.outputs.owners }}
+    steps:
+      - name: List owners
+        id: list
+        env:
+          OWNERS: ${{ vars.PR_RECONCILE_OWNERS }}
+        run: echo "owners=$(jq -cn --arg o "$OWNERS" '$o | split(",") | map(gsub("\\s"; "")) | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+
+  sweep:
+    name: Sweep ${{ matrix.owner }}
+    needs: owners
+    if: needs.owners.outputs.owners != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        owner: ${{ fromJSON(needs.owners.outputs.owners) }}
+    uses: ./.github/workflows/pr-reconcile.yml
+    with:
+      sweep_owner: ${{ matrix.owner }}
+      resolver_repo: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
+    secrets:
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}

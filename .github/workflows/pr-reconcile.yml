@@ -64,7 +64,7 @@ jobs:
         with:
           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          owner: ${{ inputs.sweep_owner || github.repository_owner }}
           permission-contents: write
           permission-pull-requests: write
           permission-issues: write
