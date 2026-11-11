@@ -27,8 +27,9 @@ let retryDeadline = Infinity;
 const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
 const OWNER_PATTERN = /^[A-Za-z0-9-]+$/;
-const RESOLVER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const DEPRECATED_RESOLVER_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+// A repository name as GitHub allows it: letters, digits, '.', '_' and '-', in any order. '.' and '..' are reserved.
+const REPO_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
+const isRepoName = (name) => REPO_NAME_PATTERN.test(name) && name !== '.' && name !== '..';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -139,7 +140,7 @@ function refusal(message) {
 function resolverTarget(owner) {
   const { name } = resolverName();
   if (!name) return null;
-  if (!RESOLVER_NAME_PATTERN.test(name)) throw new Error(`invalid resolver repository name: ${name}`);
+  if (!isRepoName(name)) throw new Error(`invalid resolver repository name: ${name}`);
   if (fenced(owner) || fenced(name)) throw refusal('resolver repository is fenced');
   return { owner, repo: name };
 }
@@ -150,8 +151,9 @@ function resolverName() {
   if (process.env.RESOLVER_REPO_NAME) return { name: process.env.RESOLVER_REPO_NAME, deprecated: false };
   const legacy = process.env.RESOLVER_REPO || '';
   if (!legacy) return { name: '', deprecated: false };
-  if (!DEPRECATED_RESOLVER_PATTERN.test(legacy)) throw new Error(`invalid RESOLVER_REPO: ${legacy}`);
-  return { name: legacy.split('/')[1], deprecated: true };
+  const parts = legacy.split('/');
+  if (parts.length !== 2 || !OWNER_PATTERN.test(parts[0]) || !isRepoName(parts[1])) throw new Error(`invalid RESOLVER_REPO: ${legacy}`);
+  return { name: parts[1], deprecated: true };
 }
 
 // One repository_dispatch to the resolver. The conflict route uses the default event type.

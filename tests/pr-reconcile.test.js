@@ -263,6 +263,35 @@ describe('reconcile', () => {
     expect(core.warnings.some((w) => w.includes('deprecated'))).toBe(false);
   });
 
+  it('accepts every repository name GitHub allows, through the new and the deprecated input', async () => {
+    for (const name of ['.github', '_x', 'a.b_c-d']) {
+      for (const [variable, value] of [['RESOLVER_REPO_NAME', name], ['RESOLVER_REPO', `o/${name}`]]) {
+        delete process.env.RESOLVER_REPO_NAME;
+        delete process.env.RESOLVER_REPO;
+        process.env[variable] = value;
+        const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
+        const [event] = await run({ github: gh, context: createMockContext({ repo: { owner: 'p', repo: 'app2' } }), core });
+        expect(gh.rest.repos.createDispatchEvent.mock.calls[0][0]).toMatchObject({ owner: 'p', repo: name });
+        expect(event.outcome).toBe('labelled-dispatched');
+      }
+    }
+  });
+
+  it('refuses the names "." and ".." through the new and the deprecated input, before any request', async () => {
+    for (const name of ['.', '..']) {
+      delete process.env.RESOLVER_REPO;
+      process.env.RESOLVER_REPO_NAME = name;
+      const gh = github(pr({ mergeable_state: 'dirty' }));
+      await expect(run({ github: gh, context: createMockContext(), core })).rejects.toThrow('invalid resolver repository name');
+      expect(gh.rest.pulls.get).not.toHaveBeenCalled();
+      delete process.env.RESOLVER_REPO_NAME;
+      process.env.RESOLVER_REPO = `o/${name}`;
+      const legacy = github(pr({ mergeable_state: 'dirty' }));
+      await expect(run({ github: legacy, context: createMockContext(), core })).rejects.toThrow(`invalid RESOLVER_REPO: o/${name}`);
+      expect(legacy.rest.pulls.get).not.toHaveBeenCalled();
+    }
+  });
+
   it('refuses a malformed deprecated RESOLVER_REPO before any request', async () => {
     process.env.RESOLVER_REPO = 'o/';
     const gh = github(pr());
