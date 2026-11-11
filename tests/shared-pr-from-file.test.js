@@ -7,7 +7,13 @@ const path = require('path');
 
 const run = require('../.github/scripts/shared/pr-from-file.js');
 
-const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+// Fixture git calls ignore the global and system git config.
+const git = (cwd, args) =>
+  execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+  });
 
 function initRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prfile-'));
