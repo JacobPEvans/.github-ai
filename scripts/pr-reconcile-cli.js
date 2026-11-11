@@ -10,7 +10,6 @@ const { paginateRest } = require('@octokit/plugin-paginate-rest');
 const run = require('../.github/scripts/pr-reconcile/reconcile.js');
 
 const Client = Octokit.plugin(paginateRest);
-const OWNER_PATTERN = /^[A-Za-z0-9-]+$/;
 const DRY_RUN_BLOCKED = 'dry-run-blocked';
 // Octokit's own request log would print non-JSON lines to stdout; the CLI logs everything itself.
 const QUIET = { debug() {}, info() {}, warn() {}, error() {} };
@@ -23,7 +22,14 @@ async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) }
     log({ level: 'error', message: 'PR_RECONCILE_OWNERS and PR_RECONCILE_TOKEN_DIR must both be set' });
     return 1;
   }
-  if (!run.fenceEntries().length) {
+  let fence;
+  try {
+    fence = run.fenceEntries();
+  } catch (error) {
+    log({ level: 'error', message: error.message });
+    return 1;
+  }
+  if (!fence.length) {
     log({ level: 'error', message: 'PR_RECONCILE_FENCE must name at least one owner or repository' });
     return 1;
   }
@@ -34,7 +40,7 @@ async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) }
   for (const owner of owners) {
     const tick = { event: 'tick', owner, prs: 0, errors: 0, requests: 0, ratelimit_remaining: null, ratelimit_limit: null };
     try {
-      if (!OWNER_PATTERN.test(owner)) throw new Error('invalid owner name');
+      if (!run.OWNER_PATTERN.test(owner)) throw new Error('invalid owner name');
       if (run.fenced(owner)) throw new Error('owner is fenced');
       let token;
       try {

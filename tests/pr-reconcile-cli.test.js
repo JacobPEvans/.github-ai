@@ -32,8 +32,8 @@ function fakeFetch(handler) {
     const method = init.method || 'GET';
     const { pathname } = new URL(url);
     const auth = new Headers(init.headers).get('authorization') || '';
-    calls.push({ method, pathname, auth });
-    const { status = 200, body = {} } = handler(method, pathname, auth) || {};
+    calls.push({ method, pathname, auth, body: init.body ? JSON.parse(init.body) : undefined });
+    const { status = 200, body = {} } = handler(method, pathname, auth, url) || {};
     const response = new Response(JSON.stringify(body), {
       status,
       headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '4990', 'x-ratelimit-limit': '5000' },
@@ -58,6 +58,30 @@ function sweepHandler(prData, statuses = [], searchRepo = 'test-repo') {
     if (method === 'POST' && pathname.includes('/statuses/')) return { status: 201, body: {} };
     return { status: 404, body: { message: 'Not Found' } };
   };
+}
+
+// Two owners, each with one conflicting pull request 7: owner o in repository app, owner p in repository app2.
+function twoOwnerHandler(method, pathname, auth, url) {
+  if (!auth.endsWith('good-token')) return { status: 401, body: { message: 'Bad credentials' } };
+  if (method === 'GET' && pathname === '/search/issues') {
+    const owner = new URL(url).searchParams.get('q').match(/user:(\S+)/)[1];
+    const repo = owner === 'o' ? 'app' : 'app2';
+    return { body: { total_count: 1, incomplete_results: false, items: [{ number: 7, repository_url: `https://api.github.com/repos/${owner}/${repo}` }] } };
+  }
+  const match = pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/(.+)$/);
+  if (!match) return { status: 404, body: { message: 'Not Found' } };
+  const [, owner, repo, rest] = match;
+  const full = `${owner}/${repo}`;
+  if (method === 'GET' && rest === 'pulls/7') {
+    return { body: pr({ mergeable_state: 'dirty', head: { ref: 'feat/x', sha: 'head1', repo: { full_name: full } }, base: { ref: 'develop', sha: 'base1', repo: { full_name: full } } }) };
+  }
+  if (method === 'GET' && rest === 'pulls/7/files') return { body: [] };
+  if (method === 'GET' && rest.endsWith('/status')) return { body: { statuses: [{ context: 'merge-hold', state: 'success' }] } };
+  if (method === 'GET' && rest.startsWith('branches/')) return { body: { commit: { sha: 'base1' } } };
+  if (method === 'POST' && rest === 'issues/7/labels') return { body: [] };
+  if (method === 'POST' && rest === 'dispatches') return { body: {} };
+  if (method === 'POST' && rest.startsWith('statuses/')) return { status: 201, body: {} };
+  return { status: 404, body: { message: 'Not Found' } };
 }
 
 describe('pr-reconcile-cli', () => {
@@ -134,6 +158,32 @@ describe('pr-reconcile-cli', () => {
     expect(await main({ fetch: fake.fetch, out })).toBe(1);
     expect(fake.calls).toHaveLength(0);
     expect(parsed()).toHaveLength(1);
+  });
+
+  it('sends a conflict to the shared resolver only for its own owner, and reports the refusal for the other owner', async () => {
+    fs.writeFileSync(path.join(dir, 'o'), 'good-token\n');
+    fs.writeFileSync(path.join(dir, 'p'), 'good-token\n');
+    process.env.PR_RECONCILE_OWNERS = 'o,p';
+    process.env.RESOLVER_REPO = 'o/resolver-repo';
+    const fake = fakeFetch(twoOwnerHandler);
+    expect(await main({ fetch: fake.fetch, out })).toBe(1);
+    const dispatches = fake.calls.filter((c) => c.method === 'POST' && c.pathname.endsWith('/dispatches'));
+    expect(dispatches).toHaveLength(1);
+    expect(dispatches[0].pathname).toBe('/repos/o/resolver-repo/dispatches');
+    expect(dispatches[0].body.client_payload.repository).toBe('o/app');
+    expect(fake.writes().filter((c) => c.pathname.startsWith('/repos/p/'))).toHaveLength(0);
+    const events = parsed().filter((line) => line.level === 'info').map((line) => JSON.parse(line.message));
+    expect(events.find((e) => e.repository === 'o/app').outcome).toBe('labelled-dispatched');
+    expect(events.find((e) => e.repository === 'p/app2').outcome).toBe('error:resolver-refused');
+    expect(parsed().find((line) => line.event === 'tick' && line.owner === 'p').errors).toBe(1);
+  });
+
+  it('refuses a fence entry written as owner/repo with one error line and no request', async () => {
+    process.env.PR_RECONCILE_FENCE = 'o/app';
+    const fake = fakeFetch(sweepHandler(pr()));
+    expect(await main({ fetch: fake.fetch, out })).toBe(1);
+    expect(fake.calls).toHaveLength(0);
+    expect(parsed()).toEqual([expect.objectContaining({ level: 'error', message: expect.stringContaining('is a full name') })]);
   });
 
   it('refuses to start when the fence list is blank, and sends no request', async () => {
