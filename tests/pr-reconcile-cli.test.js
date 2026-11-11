@@ -136,6 +136,22 @@ describe('pr-reconcile-cli', () => {
     expect(parsed()).toHaveLength(1);
   });
 
+  it('refuses to start when the fence list is blank, and sends no request', async () => {
+    process.env.PR_RECONCILE_FENCE = ' ,  ,';
+    const fake = fakeFetch(sweepHandler(pr()));
+    expect(await main({ fetch: fake.fetch, out })).toBe(1);
+    expect(fake.calls).toHaveLength(0);
+    expect(parsed()).toEqual([expect.objectContaining({ level: 'error', message: 'PR_RECONCILE_FENCE must name at least one owner or repository' })]);
+  });
+
+  it('fails an owner whose resolver repository is fenced with zero requests sent', async () => {
+    process.env.RESOLVER_REPO = 'ctl-owner/fence-repo';
+    const fake = fakeFetch(sweepHandler(pr({ mergeable_state: 'dirty' })));
+    expect(await main({ fetch: fake.fetch, out })).toBe(1);
+    expect(parsed().filter((line) => line.level === 'error')).toEqual([expect.objectContaining({ owner: 'test-owner', message: 'resolver repository is fenced' })]);
+    expect(fake.calls).toHaveLength(0);
+  });
+
   it('fails a fenced owner before its token is read or any request is sent, and still runs the next owner', async () => {
     process.env.PR_RECONCILE_OWNERS = 'fence-prefix-a,test-owner';
     const fake = fakeFetch(sweepHandler(pr()));

@@ -269,6 +269,34 @@ describe('reconcile', () => {
     expect(run.fenced('other-repo')).toBe(false);
   });
 
+  it('treats a blank fence list as empty and trims entries', () => {
+    process.env.PR_RECONCILE_FENCE = '   ';
+    expect(run.fenceEntries()).toEqual([]);
+    process.env.PR_RECONCILE_FENCE = ' , , ';
+    expect(run.fenceEntries()).toEqual([]);
+    process.env.PR_RECONCILE_FENCE = ' Fence-Repo , fence-prefix-* ,, ';
+    expect(run.fenceEntries()).toEqual(['fence-repo', 'fence-prefix-*']);
+  });
+
+  it('refuses a resolver whose repository is fenced, before any dispatch or label', async () => {
+    process.env.PR_NUMBER = '7';
+    process.env.RESOLVER_REPO = 'ctl-owner/fence-repo';
+    process.env.PR_RECONCILE_FENCE = 'fence-repo';
+    const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
+    await expect(run({ github: gh, context: createMockContext(), core })).rejects.toThrow('resolver repository is fenced');
+    expect(gh.rest.repos.createDispatchEvent).not.toHaveBeenCalled();
+    expect(gh.rest.issues.addLabels).not.toHaveBeenCalled();
+    expect(gh.rest.pulls.get).not.toHaveBeenCalled();
+  });
+
+  it('refuses a resolver whose owner is fenced, before any dispatch', async () => {
+    process.env.RESOLVER_REPO = 'fence-owner/ctl-repo';
+    process.env.PR_RECONCILE_FENCE = 'fence-owner';
+    const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
+    await expect(run({ github: gh, context: createMockContext(), core })).rejects.toThrow('resolver repository is fenced');
+    expect(gh.rest.repos.createDispatchEvent).not.toHaveBeenCalled();
+  });
+
   it('fails a sweep of a fenced owner before any request', async () => {
     delete process.env.PR_NUMBER;
     process.env.SWEEP_OWNER = 'fence-owner';

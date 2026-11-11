@@ -29,11 +29,14 @@ const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Fenced owners and repositories come from the runtime, never from this file: PR_RECONCILE_FENCE is one comma list
-// of names, compared case-insensitively. A trailing * matches a prefix. Unset means nothing is fenced.
+// of names, compared case-insensitively. A trailing * matches a prefix. Unset or blank means nothing is fenced.
+function fenceEntries() {
+  return (process.env.PR_RECONCILE_FENCE || '').split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+}
+
 function fenced(name) {
   const value = name.toLowerCase();
-  const entries = (process.env.PR_RECONCILE_FENCE || '').split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean);
-  return entries.some((entry) => (entry.endsWith('*') ? value.startsWith(entry.slice(0, -1)) : value === entry));
+  return fenceEntries().some((entry) => (entry.endsWith('*') ? value.startsWith(entry.slice(0, -1)) : value === entry));
 }
 
 function classify(pr, stale = false) {
@@ -223,6 +226,8 @@ module.exports = async function run({ github, context, core }) {
   const events = [];
   const resolver = process.env.RESOLVER_REPO || '';
   if (resolver && !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(resolver)) throw new Error(`invalid RESOLVER_REPO: ${resolver}`);
+  // The dispatch writes to the resolver repository, so a fenced resolver refuses the run before any request.
+  if (resolver && resolver.split('/').some((part) => fenced(part))) throw new Error('resolver repository is fenced');
   const started = Date.now();
   retryDeadline = started + module.exports.retryBudgetMs;
   const all = await targets({ github, context, core });
@@ -249,6 +254,7 @@ module.exports = async function run({ github, context, core }) {
 module.exports.classify = classify;
 module.exports.reconcile = reconcile;
 module.exports.fenced = fenced;
+module.exports.fenceEntries = fenceEntries;
 module.exports.retryDelayMs = 5000;
 module.exports.retryBudgetMs = 3 * 60 * 1000;
 module.exports.runBudgetMs = 4 * 60 * 1000;

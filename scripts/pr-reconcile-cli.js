@@ -23,8 +23,8 @@ async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) }
     log({ level: 'error', message: 'PR_RECONCILE_OWNERS and PR_RECONCILE_TOKEN_DIR must both be set' });
     return 1;
   }
-  if (!process.env.PR_RECONCILE_FENCE) {
-    log({ level: 'error', message: 'PR_RECONCILE_FENCE must be set' });
+  if (!run.fenceEntries().length) {
+    log({ level: 'error', message: 'PR_RECONCILE_FENCE must name at least one owner or repository' });
     return 1;
   }
   const dryRun = process.env.PR_RECONCILE_DRY_RUN === '1';
