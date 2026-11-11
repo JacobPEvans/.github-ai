@@ -26,9 +26,6 @@ Responses are discarded. Reruns keep `id` and `correlation_id`; receivers can us
 these values to deduplicate deliveries. Each caller job should invoke this
 workflow once per run for its selected agent.
 
-The dogfood caller forwards pull request and completed check run events to
-`ci-fixer`. Enable it with the repository variable `DOGFOOD_SELF_HOSTED=true`
-and the secret `DIFY_CI_FIXER_WEBHOOK_URL`. Fork pull requests are excluded.
 GitHub's native check run trigger rules apply, including recursion prevention
 for checks created by GitHub Actions. Check run triggers use the caller on the
 default branch.
