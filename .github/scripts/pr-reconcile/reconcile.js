@@ -28,11 +28,12 @@ const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function classify(pr) {
+function classify(pr, stale = false) {
   const labels = (pr.labels || []).map((label) => label.name);
   if (pr.state !== 'open') return { state: 'closed', action: 'none' };
   if (!pr.head.repo || pr.head.repo.full_name !== pr.base.repo.full_name) return { state: 'fork', action: 'skip' };
   if (pr.head.ref.startsWith('release-please--')) return { state: pr.mergeable_state, action: 'skip' };
+  if (stale) return { state: 'mergeability-unknown', action: 'none' };
   const promotion = pr.base.ref === 'main' && pr.head.ref === 'develop';
   const renovate = (pr.user && pr.user.login || '').startsWith('renovate');
   switch (pr.mergeable_state) {
@@ -50,15 +51,29 @@ function classify(pr) {
   }
 }
 
+// Only PRs that classify() acts on need the base check; forks, release-please branches and closed PRs skip it.
+function actable(pr) {
+  return pr.state === 'open' && Boolean(pr.head.repo) && pr.head.repo.full_name === pr.base.repo.full_name
+    && !pr.head.ref.startsWith('release-please--');
+}
+
+// A PR whose base.sha lags the base branch head has mergeability computed against an old base.
+async function baseIsStale(github, owner, repo, pr) {
+  const { data: branch } = await github.rest.repos.getBranch({ owner, repo, branch: pr.base.ref });
+  return branch.commit.sha !== pr.base.sha;
+}
+
 async function getPr(github, owner, repo, number) {
   let pr;
+  let stale = false;
   for (let attempt = 0; attempt < UNKNOWN_RETRIES; attempt += 1) {
     ({ data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number }));
-    if (pr.mergeable_state !== 'unknown') return pr;
+    stale = actable(pr) && await baseIsStale(github, owner, repo, pr);
+    if (pr.mergeable_state !== 'unknown' && !stale) break;
     if (attempt === UNKNOWN_RETRIES - 1 || Date.now() > retryDeadline) break;
     await sleep(module.exports.retryDelayMs);
   }
-  return pr;
+  return { pr, stale };
 }
 
 async function touchesWorkflows(github, owner, repo, number) {
@@ -134,8 +149,8 @@ async function act(github, owner, repo, pr, decision) {
 }
 
 async function reconcile({ github, core, owner, repo, number }) {
-  const pr = await getPr(github, owner, repo, number);
-  const decision = classify(pr);
+  const { pr, stale } = await getPr(github, owner, repo, number);
+  const decision = classify(pr, stale);
   let outcome = 'noop';
   let held = false;
   let statuses = [];

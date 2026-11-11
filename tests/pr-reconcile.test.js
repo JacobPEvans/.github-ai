@@ -10,7 +10,7 @@ function pr(overrides = {}) {
     state: 'open',
     mergeable_state: 'clean',
     head: { ref: 'feat/x', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } },
-    base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo' } },
+    base: { ref: 'develop', sha: 'base1', repo: { full_name: 'test-owner/test-repo' } },
     user: { login: 'someone' },
     labels: [],
     body: '',
@@ -29,6 +29,7 @@ function github(prData, { statuses = [], files = [] } = {}) {
   gh.rest.repos.getCombinedStatusForRef = mock().mockResolvedValue({ data: { statuses } });
   gh.rest.repos.createCommitStatus = mock().mockResolvedValue({});
   gh.rest.repos.createDispatchEvent = mock().mockResolvedValue({});
+  gh.rest.repos.getBranch = mock().mockResolvedValue({ data: { commit: { sha: 'base1' } } });
   gh.paginate.mockResolvedValue(files);
   return gh;
 }
@@ -54,6 +55,9 @@ describe('classify', () => {
   });
   it('removes a stale conflict label once the PR is mergeable', () => {
     expect(classify(pr({ labels: [{ name: 'merge-conflict' }] })).action).toBe('unlabel-conflict');
+  });
+  it('reports mergeability-unknown and takes no action when the base is stale', () => {
+    expect(classify(pr({ mergeable_state: 'clean' }), true)).toEqual({ state: 'mergeability-unknown', action: 'none' });
   });
 });
 
@@ -242,5 +246,36 @@ describe('reconcile', () => {
   it('refuses a resolver that is not owner/repo', async () => {
     process.env.RESOLVER_REPO = 'ctl-owner/';
     await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid RESOLVER_REPO');
+  });
+
+  it('re-fetches a clean PR whose base.sha is stale, and labels the conflict found on retry', async () => {
+    const gh = github(pr({ mergeable_state: 'clean', base: { ref: 'develop', sha: 'old', repo: { full_name: 'test-owner/test-repo' } } }));
+    gh.rest.pulls.get
+      .mockResolvedValueOnce({ data: pr({ mergeable_state: 'clean', base: { ref: 'develop', sha: 'old', repo: { full_name: 'test-owner/test-repo' } } }) })
+      .mockResolvedValueOnce({ data: pr({ mergeable_state: 'dirty' }) });
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.pulls.get).toHaveBeenCalledTimes(2);
+    expect(gh.rest.issues.addLabels.mock.calls[0][0].labels).toEqual(['merge-conflict']);
+    expect(event).toMatchObject({ state: 'dirty', action: 'label-conflict', outcome: 'labelled' });
+  });
+
+  it('gives mergeability-unknown and no write when the base is still stale at the end of the budget', async () => {
+    const gh = github(pr({ mergeable_state: 'clean', base: { ref: 'develop', sha: 'old', repo: { full_name: 'test-owner/test-repo' } } }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.pulls.get).toHaveBeenCalledTimes(3);
+    expect(event).toMatchObject({ state: 'mergeability-unknown', action: 'none', outcome: 'noop' });
+    expect(gh.rest.pulls.updateBranch).not.toHaveBeenCalled();
+    expect(gh.rest.pulls.update).not.toHaveBeenCalled();
+    expect(gh.rest.issues.addLabels).not.toHaveBeenCalled();
+    expect(gh.rest.issues.removeLabel).not.toHaveBeenCalled();
+    expect(gh.rest.repos.createDispatchEvent).not.toHaveBeenCalled();
+    expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0].context)).toEqual(['merge-hold']);
+  });
+
+  it('skips the base check for release-please branches', async () => {
+    const gh = github(pr({ mergeable_state: 'dirty', base: { ref: 'develop', sha: 'old', repo: { full_name: 'test-owner/test-repo' } }, head: { ref: 'release-please--branches--develop', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.repos.getBranch).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ state: 'dirty', action: 'skip' });
   });
 });
