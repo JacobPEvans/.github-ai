@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.4.0](https://github.com/JacobPEvans/.github-ai/compare/v2.3.16...v2.4.0) (2026-11-11)
+
+
+### Features
+
+* **pr-reconcile:** keep open pull requests mergeable with update-branch, conflict labels and a merge-hold status ([#95](https://github.com/JacobPEvans/.github-ai/issues/95)) ([f572168](https://github.com/JacobPEvans/.github-ai/commit/f5721688b832c1b618d73a47d634b8b36202a06d))
+
 ## [2.3.16](https://github.com/JacobPEvans/.github-ai/compare/v2.3.15...v2.3.16) (2026-11-09)
 
 
