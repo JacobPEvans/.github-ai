@@ -149,4 +149,44 @@ describe('reconcile', () => {
     await run({ github: fresh, context: createMockContext(), core });
     expect(fresh.rest.repos.createCommitStatus.mock.calls[0][0]).toMatchObject({ context: 'merge-hold', state: 'success' });
   });
+
+  it('does not record a Renovate rebase when the PR has no rebase box', async () => {
+    const gh = github(pr({ mergeable_state: 'dirty', user: { login: 'renovate[bot]' }, body: 'no box' }), { statuses: [{ context: 'merge-hold', state: 'success' }] });
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event.outcome).toBe('no-rebase-box');
+    expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
+  });
+
+  it('reports still-unknown after the retries run out', async () => {
+    const gh = github(pr({ mergeable_state: 'unknown' }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.pulls.get).toHaveBeenCalledTimes(3);
+    expect(event.outcome).toBe('still-unknown');
+  });
+
+  it('removes needs-lead with the conflict label once the PR is mergeable', async () => {
+    const gh = github(pr({ labels: [{ name: 'merge-conflict' }, { name: 'needs-lead' }] }));
+    await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.issues.removeLabel.mock.calls.map((c) => c[0].name)).toEqual(['merge-conflict', 'needs-lead']);
+  });
+
+  it('keeps sweeping when one PR fails to read', async () => {
+    delete process.env.PR_NUMBER;
+    process.env.SWEEP_OWNER = 'test-owner';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([
+      { number: 7, repository_url: 'https://api.github.com/repos/test-owner/a' },
+      { number: 8, repository_url: 'https://api.github.com/repos/test-owner/b' },
+    ]);
+    gh.rest.pulls.get.mockRejectedValueOnce(Object.assign(new Error('gone'), { status: 404 }));
+    const events = await run({ github: gh, context: createMockContext(), core });
+    expect(events.map((e) => e.outcome)).toEqual(['error:404', 'noop']);
+    expect(gh.paginate.mock.calls[0][1].q).toBe('is:pr is:open archived:false user:test-owner');
+  });
+
+  it('refuses a sweep owner that is not a plain login', async () => {
+    delete process.env.PR_NUMBER;
+    process.env.SWEEP_OWNER = 'test-owner is:closed';
+    await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid SWEEP_OWNER');
+  });
 });

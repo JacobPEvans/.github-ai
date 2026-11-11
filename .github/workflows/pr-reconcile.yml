@@ -8,8 +8,9 @@
 # Modes (exactly one): pr_number (one PR), base_ref (every open PR on a base,
 # for push-to-base), sweep_owner (every open PR of an owner, for the schedule).
 #
-# Token: an App token limited to contents, pull requests, issues and statuses.
-# It cannot write workflow files.
+# Token: an App token limited to contents, pull requests, issues and statuses,
+# scoped to the calling repository except in sweep mode. It cannot write
+# workflow files. Runs on GitHub-hosted runners only.
 
 name: PR Reconcile
 
@@ -29,9 +30,6 @@ on:
         description: "owner/repo that receives the pr-conflict repository_dispatch (empty = label only)"
         type: string
         default: ""
-      runner_label:
-        type: string
-        default: ubuntu-24.04
     secrets:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         required: true
@@ -46,7 +44,7 @@ concurrency:
 jobs:
   reconcile:
     name: Reconcile
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 9
     steps:
       - name: Checkout reconcile script
@@ -65,6 +63,8 @@ jobs:
           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
           owner: ${{ inputs.sweep_owner || github.repository_owner }}
+          # Single-PR and base modes get a token for the calling repository only; a sweep covers the owner.
+          repositories: ${{ inputs.sweep_owner == '' && github.event.repository.name || '' }}
           permission-contents: write
           permission-pull-requests: write
           permission-issues: write

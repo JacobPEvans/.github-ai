@@ -52,7 +52,7 @@ async function getPr(github, owner, repo, number) {
   for (let attempt = 0; attempt < UNKNOWN_RETRIES; attempt += 1) {
     ({ data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number }));
     if (pr.mergeable_state !== 'unknown') return pr;
-    await sleep(module.exports.retryDelayMs);
+    if (attempt < UNKNOWN_RETRIES - 1) await sleep(module.exports.retryDelayMs);
   }
   return pr;
 }
@@ -120,6 +120,9 @@ async function act(github, owner, repo, pr, decision) {
     }
     case 'unlabel-conflict':
       await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name: CONFLICT_LABEL });
+      if ((pr.labels || []).some((label) => label.name === LEAD_LABEL)) {
+        await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name: LEAD_LABEL });
+      }
       return 'unlabelled';
     default:
       return 'noop';
@@ -144,7 +147,8 @@ async function reconcile({ github, core, owner, repo, number }) {
     } else {
       try {
         outcome = await act(github, owner, repo, pr, decision);
-        await record(github, owner, repo, pr.head.sha, decision.action);
+        // A body-only edit (a Renovate rebase box added later) keeps the head, so only record real actions.
+        if (outcome !== 'no-rebase-box') await record(github, owner, repo, pr.head.sha, decision.action);
       } catch (error) {
         outcome = `error:${error.status || 'unknown'}`;
       }
@@ -166,8 +170,11 @@ async function targets({ github, context }) {
     return prs.map((pr) => ({ owner, repo, number: pr.number }));
   }
   if (process.env.SWEEP_OWNER) {
+    const sweepOwner = process.env.SWEEP_OWNER;
+    if (!/^[A-Za-z0-9-]+$/.test(sweepOwner)) throw new Error(`invalid SWEEP_OWNER: ${sweepOwner}`);
+    // user: matches repositories of both user accounts and organizations; org: matches organizations only.
     const items = await github.paginate(github.rest.search.issuesAndPullRequests, {
-      q: `is:pr is:open archived:false org:${process.env.SWEEP_OWNER}`, per_page: 100,
+      q: `is:pr is:open archived:false user:${sweepOwner}`, per_page: 100,
     });
     return items.map((item) => {
       const [itemOwner, itemRepo] = item.repository_url.split('/').slice(-2);
@@ -180,7 +187,17 @@ async function targets({ github, context }) {
 module.exports = async function run({ github, context, core }) {
   const events = [];
   for (const target of await targets({ github, context })) {
-    events.push(await reconcile({ github, core, ...target }));
+    try {
+      events.push(await reconcile({ github, core, ...target }));
+    } catch (error) {
+      // One PR that vanished or failed to read must not stop the rest of the sweep.
+      const event = {
+        event: 'pr_reconcile', repository: `${target.owner}/${target.repo}`, pr: target.number,
+        action: 'none', outcome: `error:${error.status || 'unknown'}`,
+      };
+      core.warning(JSON.stringify(event));
+      events.push(event);
+    }
   }
   core.setOutput('events', JSON.stringify(events));
   return events;
