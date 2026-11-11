@@ -20,6 +20,9 @@ const STATUS_CONTEXT = 'pr-reconcile';
 const HOLD_CONTEXT = 'merge-hold';
 const HOLD_LABEL = 'merge-hold';
 const UNKNOWN_RETRIES = 3;
+// Retries stop once a run passes this budget, so a large sweep ends inside the job timeout.
+const RETRY_BUDGET_MS = 6 * 60 * 1000;
+let retryDeadline = Infinity;
 const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
 
@@ -52,7 +55,8 @@ async function getPr(github, owner, repo, number) {
   for (let attempt = 0; attempt < UNKNOWN_RETRIES; attempt += 1) {
     ({ data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number }));
     if (pr.mergeable_state !== 'unknown') return pr;
-    if (attempt < UNKNOWN_RETRIES - 1) await sleep(module.exports.retryDelayMs);
+    if (attempt === UNKNOWN_RETRIES - 1 || Date.now() > retryDeadline) break;
+    await sleep(module.exports.retryDelayMs);
   }
   return pr;
 }
@@ -186,6 +190,7 @@ async function targets({ github, context }) {
 
 module.exports = async function run({ github, context, core }) {
   const events = [];
+  retryDeadline = Date.now() + RETRY_BUDGET_MS;
   for (const target of await targets({ github, context })) {
     try {
       events.push(await reconcile({ github, core, ...target }));
