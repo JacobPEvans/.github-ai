@@ -189,4 +189,13 @@ describe('reconcile', () => {
     process.env.SWEEP_OWNER = 'test-owner is:closed';
     await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid SWEEP_OWNER');
   });
+
+  it('warns when a sweep reaches the search cap', async () => {
+    delete process.env.PR_NUMBER;
+    process.env.SWEEP_OWNER = 'test-owner';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce(Array.from({ length: 1000 }, () => ({ number: 7, repository_url: 'https://api.github.com/repos/test-owner/a' })));
+    await run({ github: gh, context: createMockContext(), core });
+    expect(core.warnings.some((w) => w.includes('truncated at 1000'))).toBe(true);
+  });
 });

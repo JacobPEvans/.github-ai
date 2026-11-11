@@ -21,7 +21,7 @@ const HOLD_CONTEXT = 'merge-hold';
 const HOLD_LABEL = 'merge-hold';
 const UNKNOWN_RETRIES = 3;
 // Retries stop once a run passes this budget, so a large sweep ends inside the job timeout.
-const RETRY_BUDGET_MS = 6 * 60 * 1000;
+const RETRY_BUDGET_MS = 3 * 60 * 1000;
 let retryDeadline = Infinity;
 const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
@@ -166,7 +166,9 @@ async function reconcile({ github, core, owner, repo, number }) {
   return event;
 }
 
-async function targets({ github, context }) {
+const SEARCH_CAP = 1000;
+
+async function targets({ github, context, core }) {
   const { owner, repo } = context.repo;
   if (process.env.PR_NUMBER) return [{ owner, repo, number: Number(process.env.PR_NUMBER) }];
   if (process.env.BASE_REF) {
@@ -180,6 +182,8 @@ async function targets({ github, context }) {
     const items = await github.paginate(github.rest.search.issuesAndPullRequests, {
       q: `is:pr is:open archived:false user:${sweepOwner}`, per_page: 100,
     });
+    // Search returns at most 1000 results; the rest wait for a later sweep.
+    if (items.length >= SEARCH_CAP) core.warning(`sweep of ${sweepOwner} truncated at ${SEARCH_CAP} pull requests`);
     return items.map((item) => {
       const [itemOwner, itemRepo] = item.repository_url.split('/').slice(-2);
       return { owner: itemOwner, repo: itemRepo, number: item.number };
@@ -191,7 +195,7 @@ async function targets({ github, context }) {
 module.exports = async function run({ github, context, core }) {
   const events = [];
   retryDeadline = Date.now() + RETRY_BUDGET_MS;
-  for (const target of await targets({ github, context })) {
+  for (const target of await targets({ github, context, core })) {
     try {
       events.push(await reconcile({ github, core, ...target }));
     } catch (error) {
