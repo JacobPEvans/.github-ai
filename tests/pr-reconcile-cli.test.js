@@ -4,7 +4,10 @@ const os = require('os');
 const path = require('path');
 const { main } = require('../scripts/pr-reconcile-cli.js');
 
-const ENV_KEYS = ['PR_RECONCILE_OWNERS', 'PR_RECONCILE_TOKEN_DIR', 'PR_RECONCILE_DRY_RUN', 'PR_NUMBER', 'BASE_REF', 'SWEEP_OWNER', 'RESOLVER_REPO'];
+const ENV_KEYS = [
+  'PR_RECONCILE_OWNERS', 'PR_RECONCILE_TOKEN_DIR', 'PR_RECONCILE_DRY_RUN', 'PR_RECONCILE_FENCE',
+  'PR_NUMBER', 'BASE_REF', 'SWEEP_OWNER', 'RESOLVER_REPO',
+];
 const REPO = 'test-owner/test-repo';
 
 function pr(overrides = {}) {
@@ -42,11 +45,11 @@ function fakeFetch(handler) {
   return { fetch, calls, writes: () => calls.filter((c) => c.method !== 'GET') };
 }
 
-function sweepHandler(prData, statuses = []) {
+function sweepHandler(prData, statuses = [], searchRepo = 'test-repo') {
   return (method, pathname, auth) => {
     if (!auth.endsWith('good-token')) return { status: 401, body: { message: 'Bad credentials' } };
     if (method === 'GET' && pathname === '/search/issues') {
-      return { body: { total_count: 1, incomplete_results: false, items: [{ number: 7, repository_url: `https://api.github.com/repos/${REPO}` }] } };
+      return { body: { total_count: 1, incomplete_results: false, items: [{ number: 7, repository_url: `https://api.github.com/repos/test-owner/${searchRepo}` }] } };
     }
     if (method === 'GET' && pathname === '/repos/test-owner/test-repo/pulls/7') return { body: prData };
     if (method === 'GET' && pathname.endsWith('/status')) return { body: { statuses } };
@@ -71,6 +74,7 @@ describe('pr-reconcile-cli', () => {
     fs.writeFileSync(path.join(dir, 'test-owner'), 'good-token\n');
     process.env.PR_RECONCILE_OWNERS = 'test-owner';
     process.env.PR_RECONCILE_TOKEN_DIR = dir;
+    process.env.PR_RECONCILE_FENCE = 'fence-owner,fence-prefix-*,fence-repo';
     lines = [];
   });
 
@@ -122,6 +126,32 @@ describe('pr-reconcile-cli', () => {
     expect(fake.calls.filter((c) => c.auth === 'token bad-token').map((c) => c.method)).toEqual(['GET']);
     expect(fake.writes().every((c) => c.auth === 'token good-token')).toBe(true);
     expect(parsed().find((line) => line.event === 'tick' && line.owner === 'test-owner').prs).toBe(1);
+  });
+
+  it('refuses to start when the fence list is unset, and sends no request', async () => {
+    delete process.env.PR_RECONCILE_FENCE;
+    const fake = fakeFetch(sweepHandler(pr()));
+    expect(await main({ fetch: fake.fetch, out })).toBe(1);
+    expect(fake.calls).toHaveLength(0);
+    expect(parsed()).toHaveLength(1);
+  });
+
+  it('fails a fenced owner before its token is read or any request is sent, and still runs the next owner', async () => {
+    process.env.PR_RECONCILE_OWNERS = 'fence-prefix-a,test-owner';
+    const fake = fakeFetch(sweepHandler(pr()));
+    expect(await main({ fetch: fake.fetch, out })).toBe(1);
+    const errors = parsed().filter((line) => line.level === 'error');
+    expect(errors).toEqual([expect.objectContaining({ owner: 'fence-prefix-a', message: 'owner is fenced' })]);
+    expect(fake.calls.some((c) => c.auth !== 'token good-token')).toBe(false);
+    expect(parsed().find((line) => line.event === 'tick' && line.owner === 'test-owner').prs).toBe(1);
+  });
+
+  it('fails an owner whose search returns a fenced repository with zero writes', async () => {
+    const fake = fakeFetch(sweepHandler(pr(), [], 'fence-repo'));
+    expect(await main({ fetch: fake.fetch, out })).toBe(1);
+    expect(parsed().filter((line) => line.level === 'error')).toEqual([expect.objectContaining({ owner: 'test-owner', message: 'sweep refused: search returned a fenced repository' })]);
+    expect(fake.writes()).toHaveLength(0);
+    expect(fake.calls.map((c) => c.method)).toEqual(['GET']);
   });
 
   it('blocks every write in a dry run, logs each blocked call, and never sends updateBranch', async () => {

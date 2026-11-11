@@ -23,6 +23,10 @@ async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) }
     log({ level: 'error', message: 'PR_RECONCILE_OWNERS and PR_RECONCILE_TOKEN_DIR must both be set' });
     return 1;
   }
+  if (!process.env.PR_RECONCILE_FENCE) {
+    log({ level: 'error', message: 'PR_RECONCILE_FENCE must be set' });
+    return 1;
+  }
   const dryRun = process.env.PR_RECONCILE_DRY_RUN === '1';
   delete process.env.PR_NUMBER;
   delete process.env.BASE_REF;
@@ -31,6 +35,7 @@ async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) }
     const tick = { event: 'tick', owner, prs: 0, errors: 0, requests: 0, ratelimit_remaining: null, ratelimit_limit: null };
     try {
       if (!OWNER_PATTERN.test(owner)) throw new Error('invalid owner name');
+      if (run.fenced(owner)) throw new Error('owner is fenced');
       let token;
       try {
         token = fs.readFileSync(path.join(dir, owner), 'utf8').trim();

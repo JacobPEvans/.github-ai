@@ -28,6 +28,14 @@ const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Fenced owners and repositories come from the runtime, never from this file: PR_RECONCILE_FENCE is one comma list
+// of names, compared case-insensitively. A trailing * matches a prefix. Unset means nothing is fenced.
+function fenced(name) {
+  const value = name.toLowerCase();
+  const entries = (process.env.PR_RECONCILE_FENCE || '').split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+  return entries.some((entry) => (entry.endsWith('*') ? value.startsWith(entry.slice(0, -1)) : value === entry));
+}
+
 function classify(pr, stale = false) {
   const labels = (pr.labels || []).map((label) => label.name);
   if (pr.state !== 'open') return { state: 'closed', action: 'none' };
@@ -193,16 +201,20 @@ async function targets({ github, context, core }) {
   if (process.env.SWEEP_OWNER) {
     const sweepOwner = process.env.SWEEP_OWNER;
     if (!/^[A-Za-z0-9-]+$/.test(sweepOwner)) throw new Error(`invalid SWEEP_OWNER: ${sweepOwner}`);
+    if (fenced(sweepOwner)) throw new Error('sweep refused: owner is fenced');
     // user: matches repositories of both user accounts and organizations; org: matches organizations only.
     const items = await github.paginate(github.rest.search.issuesAndPullRequests, {
       q: `is:pr is:open archived:false user:${sweepOwner}`, per_page: 100,
     });
     // Search returns at most 1000 results; the rest wait for a later sweep.
     if (items.length >= SEARCH_CAP) core.warning(`sweep of ${sweepOwner} truncated at ${SEARCH_CAP} pull requests`);
-    return items.map((item) => {
+    const found = items.map((item) => {
       const [itemOwner, itemRepo] = item.repository_url.split('/').slice(-2);
       return { owner: itemOwner, repo: itemRepo, number: item.number };
     });
+    // A fenced repository fails the whole owner before any pull request is read or written.
+    if (found.some((target) => fenced(target.repo))) throw new Error('sweep refused: search returned a fenced repository');
+    return found;
   }
   return [];
 }
@@ -236,6 +248,7 @@ module.exports = async function run({ github, context, core }) {
 };
 module.exports.classify = classify;
 module.exports.reconcile = reconcile;
+module.exports.fenced = fenced;
 module.exports.retryDelayMs = 5000;
 module.exports.retryBudgetMs = 3 * 60 * 1000;
 module.exports.runBudgetMs = 4 * 60 * 1000;

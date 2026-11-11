@@ -71,6 +71,7 @@ describe('reconcile', () => {
     delete process.env.RESOLVER_REPO;
     delete process.env.BASE_REF;
     delete process.env.SWEEP_OWNER;
+    delete process.env.PR_RECONCILE_FENCE;
     process.env.PR_NUMBER = '7';
   });
 
@@ -257,6 +258,40 @@ describe('reconcile', () => {
     expect(gh.rest.pulls.get).toHaveBeenCalledTimes(2);
     expect(gh.rest.issues.addLabels.mock.calls[0][0].labels).toEqual(['merge-conflict']);
     expect(event).toMatchObject({ state: 'dirty', action: 'label-conflict', outcome: 'labelled' });
+  });
+
+  it('matches fence entries case-insensitively and treats a trailing * as a prefix', () => {
+    process.env.PR_RECONCILE_FENCE = 'Fence-Owner, fence-prefix-*, fence-repo';
+    expect(run.fenced('FENCE-owner')).toBe(true);
+    expect(run.fenced('fence-prefix-a')).toBe(true);
+    expect(run.fenced('fence-owner-2')).toBe(false);
+    expect(run.fenced('Fence-Repo')).toBe(true);
+    expect(run.fenced('other-repo')).toBe(false);
+  });
+
+  it('fails a sweep of a fenced owner before any request', async () => {
+    delete process.env.PR_NUMBER;
+    process.env.SWEEP_OWNER = 'fence-owner';
+    process.env.PR_RECONCILE_FENCE = 'fence-owner,fence-repo';
+    const gh = github(pr());
+    await expect(run({ github: gh, context: createMockContext(), core })).rejects.toThrow('owner is fenced');
+    expect(gh.paginate).not.toHaveBeenCalled();
+    expect(gh.rest.pulls.get).not.toHaveBeenCalled();
+  });
+
+  it('fails a sweep whose search returns a fenced repository, with no write to any pull request', async () => {
+    delete process.env.PR_NUMBER;
+    process.env.SWEEP_OWNER = 'test-owner';
+    process.env.PR_RECONCILE_FENCE = 'fence-owner,fence-repo';
+    const gh = github(pr({ mergeable_state: 'behind' }));
+    gh.paginate.mockResolvedValueOnce([
+      { number: 7, repository_url: 'https://api.github.com/repos/test-owner/test-repo' },
+      { number: 8, repository_url: 'https://api.github.com/repos/test-owner/fence-repo' },
+    ]);
+    await expect(run({ github: gh, context: createMockContext(), core })).rejects.toThrow('fenced repository');
+    expect(gh.rest.pulls.get).not.toHaveBeenCalled();
+    expect(gh.rest.pulls.updateBranch).not.toHaveBeenCalled();
+    expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
   });
 
   it('gives mergeability-unknown and no write when the base is still stale at the end of the budget', async () => {
