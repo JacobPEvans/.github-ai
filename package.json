@@ -1,6 +1,8 @@
 {
   "private": true,
   "dependencies": {
+    "@octokit/plugin-paginate-rest": "14.0.0",
+    "@octokit/rest": "22.0.1",
     "remark-frontmatter": "^5.0.0",
     "remark-mdx": "^3.1.1",
     "remark-parse": "^11.0.0",
