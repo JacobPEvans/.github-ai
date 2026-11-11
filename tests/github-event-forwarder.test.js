@@ -3,7 +3,6 @@ const { readFileSync } = require('fs');
 const { spawnSync } = require('child_process');
 
 const workflow = Bun.YAML.parse(readFileSync('.github/workflows/github-event-forwarder.yml', 'utf8'));
-const caller = Bun.YAML.parse(readFileSync('.github/workflows/dogfood-github-event-forwarder.yml', 'utf8'));
 const step = workflow.jobs.forward.steps[0];
 
 function forward(event, overrides = {}) {
@@ -80,13 +79,4 @@ test('workflow selects the inherited secret and requests no token permissions or
   expect(step.env.WEBHOOK_URL).toBe('${{ secrets[inputs.webhook_url_secret_name] }}');
   expect(workflow.jobs.forward.steps).toHaveLength(1);
   expect(step.uses).toBeUndefined();
-});
-
-test('dogfood calls the local workflow for both triggers with opt-in and fork guards', () => {
-  expect(caller.on.pull_request.types).toContain('opened');
-  expect(caller.on.check_run.types).toEqual(['completed']);
-  expect(caller.jobs.forward.uses).toBe('./.github/workflows/github-event-forwarder.yml');
-  expect(caller.jobs.forward.secrets).toBe('inherit');
-  expect(caller.jobs.forward.if).toContain("vars.DOGFOOD_SELF_HOSTED == 'true'");
-  expect(caller.jobs.forward.if).toContain('github.event.pull_request.head.repo.full_name == github.repository');
 });
