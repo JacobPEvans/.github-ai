@@ -7,9 +7,11 @@
 // RESOLVER_REPO is set. Each decision is logged as one JSON event line.
 //
 // Hold: every reconcile sets the `merge-hold` commit status at the head: failure
-// while the PR carries the merge-hold label, success otherwise. A ruleset that
-// requires this status blocks the merge itself, so re-armed auto-merge cannot
-// race a hold, and the PR stays ready and mergeable.
+// while the PR carries the merge-hold label, or while its repository is in the
+// held class (listed in PR_RECONCILE_HELD_REPOS) and it does not carry the
+// merge-release label, success otherwise. A ruleset that requires this status
+// blocks the merge itself, so re-armed auto-merge cannot race a hold, and the
+// PR stays ready and mergeable.
 //
 // Modes: PR_NUMBER (one PR in this repo), BASE_REF (every open PR on that base,
 // for push-to-base), SWEEP_OWNER (every open PR of the owner).
@@ -19,6 +21,7 @@ const LEAD_LABEL = 'needs-lead';
 const STATUS_CONTEXT = 'pr-reconcile';
 const HOLD_CONTEXT = 'merge-hold';
 const HOLD_LABEL = 'merge-hold';
+const RELEASE_LABEL = 'merge-release';
 const UNKNOWN_RETRIES = 3;
 // Unknown-state retries stop after the retry budget; no new PR starts after the run budget, so a large sweep
 // ends inside the 5-minute job timeout and the next sweep picks up the rest.
@@ -82,14 +85,25 @@ async function record(github, owner, repo, sha, action) {
   });
 }
 
+// A held-class repository deploys itself when its default branch merges, so its pull requests
+// stay mergeable but held until someone adds the merge-release label on purpose.
+function heldRepos() {
+  const raw = process.env.PR_RECONCILE_HELD_REPOS || '';
+  return new Set(raw.split(/[\s,]+/).filter((name) => name.length > 0).map((name) => name.toLowerCase()));
+}
+
 async function setHold(github, owner, repo, pr, statuses) {
-  const held = (pr.labels || []).some((label) => label.name === HOLD_LABEL);
+  const labels = (pr.labels || []).map((label) => label.name);
+  const labelHold = labels.includes(HOLD_LABEL);
+  const held = labelHold || (!labels.includes(RELEASE_LABEL) && heldRepos().has(`${owner}/${repo}`.toLowerCase()));
+  const description = labelHold ? 'Held by the merge-hold label'
+    : held ? 'Held: deploys on merge; add merge-release to release'
+    : 'Not held';
   const state = held ? 'failure' : 'success';
   const current = statuses.find((status) => status.context === HOLD_CONTEXT);
-  if (current && current.state === state) return held;
+  if (current && current.state === state && current.description === description) return held;
   await github.rest.repos.createCommitStatus({
-    owner, repo, sha: pr.head.sha, state, context: HOLD_CONTEXT,
-    description: held ? 'Held by the merge-hold label' : 'Not held',
+    owner, repo, sha: pr.head.sha, state, context: HOLD_CONTEXT, description,
   });
   return held;
 }
