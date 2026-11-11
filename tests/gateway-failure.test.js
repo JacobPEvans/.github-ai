@@ -136,6 +136,42 @@ describe('gateway failure classification', () => {
   });
 });
 
+describe('verdict truncation', () => {
+  function truncated(text) {
+    const dir = mkdtempSync(join(tmpdir(), 'gateway-failure-'));
+    const file = join(dir, 'verdict.json');
+    writeFileSync(file, text);
+    const result = Bun.spawnSync(['bash', script, 'truncated', file]);
+    expect(result.exitCode).toBe(0);
+    return result.stdout.toString().trim();
+  }
+
+  it('names a verdict cut off mid-string', () => {
+    expect(truncated('{"summary":"Found one","findings":[{"check":"credential","result":"fail","file":"a.yml","line":3,"detail":"Unfinished')).toBe('truncated');
+  });
+
+  it('names an empty verdict', () => {
+    expect(truncated('')).toBe('truncated');
+  });
+
+  it('names a completion that stopped at the output limit', () => {
+    expect(truncated('{"choices":[{"finish_reason":"length","message":{"content":"{}"}}]}')).toBe('truncated');
+  });
+
+  it('passes a complete verdict, including one whose text quotes a length finish reason', () => {
+    expect(truncated('{"summary":"No issues.","findings":[]}')).toBe('');
+    expect(truncated('{"summary":"finish_reason: length","findings":[]}')).toBe('');
+  });
+
+  it('passes a completion that stopped normally', () => {
+    expect(truncated('{"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}')).toBe('');
+  });
+
+  it('keeps a length finish reason out of the router classes, so other callers still fail', () => {
+    expect(classify('finish_reason: length')).toBe('');
+  });
+});
+
 describe('gateway failure report', () => {
   it('advisory: posts a neutral check run on the head commit and exits 0', () => {
     const r = report({});
@@ -210,6 +246,24 @@ describe('gateway failure report', () => {
   it('skips the ops alert without NTFY_BASE_URL and still writes the summary', () => {
     const r = report({});
     expect(r.stdout).toContain('NTFY_BASE_URL not configured; skipping the ops alert.');
+  });
+
+  it('truncated: reports the output limit, never the gateway, as a neutral check run', () => {
+    const r = report({}, { reason: 'truncated' });
+    expect(r.exitCode).toBe(0);
+    expect(r.summary).toBe('AI review output truncated\n');
+    expect(r.stdout).toContain('::warning::demo: AI review output truncated');
+    expect(r.stdout).not.toContain('gateway unavailable');
+    expect(r.request.conclusion).toBe('neutral');
+    expect(r.request.output.summary).toBe('AI review output truncated');
+  });
+
+  it('truncated and blocking: fails closed and names the truncated verdict', () => {
+    const r = report({ CONCLUSION: 'failure' }, { reason: 'truncated' });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain('::error::demo: AI review output truncated');
+    expect(r.stdout).toContain('failing closed on a truncated verdict');
+    expect(r.stdout).not.toContain('gateway unavailable');
   });
 });
 
