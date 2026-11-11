@@ -12,6 +12,8 @@ const run = require('../.github/scripts/pr-reconcile/reconcile.js');
 const Client = Octokit.plugin(paginateRest);
 const OWNER_PATTERN = /^[A-Za-z0-9-]+$/;
 const DRY_RUN_BLOCKED = 'dry-run-blocked';
+// Octokit's own request log would print non-JSON lines to stdout; the CLI logs everything itself.
+const QUIET = { debug() {}, info() {}, warn() {}, error() {} };
 
 async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) } = {}) {
   const log = (obj) => out(JSON.stringify(obj));
@@ -29,12 +31,17 @@ async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) }
     const tick = { event: 'tick', owner, prs: 0, errors: 0, requests: 0, ratelimit_remaining: null, ratelimit_limit: null };
     try {
       if (!OWNER_PATTERN.test(owner)) throw new Error('invalid owner name');
-      const token = fs.readFileSync(path.join(dir, owner), 'utf8').trim();
+      let token;
+      try {
+        token = fs.readFileSync(path.join(dir, owner), 'utf8').trim();
+      } catch {
+        throw new Error('token file is missing or unreadable');
+      }
       if (!token) throw new Error('token file is empty');
-      const github = new Client({ auth: token, request: fetch ? { fetch } : {} });
+      const github = new Client({ auth: token, log: QUIET, request: fetch ? { fetch } : {} });
       github.hook.before('request', (options) => {
         if (dryRun && options.method !== 'GET') {
-          log({ event: 'dry_run_blocked', owner, method: options.method, url: options.url });
+          log({ event: 'dry_run_blocked', owner, method: options.method, route: options.url });
           throw Object.assign(new Error('dry run: request blocked'), { status: DRY_RUN_BLOCKED });
         }
         tick.requests += 1;
