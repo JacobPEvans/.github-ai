@@ -14,7 +14,9 @@ const DRY_RUN_BLOCKED = 'dry-run-blocked';
 // Octokit's own request log would print non-JSON lines to stdout; the CLI logs everything itself.
 const QUIET = { debug() {}, info() {}, warn() {}, error() {} };
 
-async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) } = {}) {
+const readTokenFile = (dir, owner) => fs.readFileSync(path.join(dir, owner), 'utf8');
+
+async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`), readToken = readTokenFile } = {}) {
   const log = (obj) => out(JSON.stringify(obj));
   const owners = (process.env.PR_RECONCILE_OWNERS || '').split(',').map((o) => o.trim()).filter(Boolean);
   const dir = process.env.PR_RECONCILE_TOKEN_DIR || '';
@@ -41,9 +43,11 @@ async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) }
     const tick = { event: 'tick', owner, prs: 0, errors: 0, requests: 0, ratelimit_remaining: null, ratelimit_limit: null };
     try {
       if (!run.OWNER_PATTERN.test(owner)) throw new Error('invalid owner name');
+      // The fence predicate runs before the token file is read, so a fenced owner's token is never read.
+      if (run.fenced(owner)) throw new Error('owner is fenced');
       let token;
       try {
-        token = fs.readFileSync(path.join(dir, owner), 'utf8').trim();
+        token = readToken(dir, owner).trim();
       } catch {
         throw new Error('token file is missing or unreadable');
       }

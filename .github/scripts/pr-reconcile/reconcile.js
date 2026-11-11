@@ -28,6 +28,7 @@ const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
 const OWNER_PATTERN = /^[A-Za-z0-9-]+$/;
 const RESOLVER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const DEPRECATED_RESOLVER_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -136,11 +137,21 @@ function refusal(message) {
 // repository name or when the resolved repository is fenced. Called from run() before any request, and from
 // reconcile() before any write to a pull request.
 function resolverTarget(owner) {
-  const name = process.env.RESOLVER_REPO_NAME || '';
+  const { name } = resolverName();
   if (!name) return null;
-  if (!RESOLVER_NAME_PATTERN.test(name)) throw new Error(`invalid RESOLVER_REPO_NAME: ${name}`);
+  if (!RESOLVER_NAME_PATTERN.test(name)) throw new Error(`invalid resolver repository name: ${name}`);
   if (fenced(owner) || fenced(name)) throw refusal('resolver repository is fenced');
   return { owner, repo: name };
+}
+
+// RESOLVER_REPO_NAME is the resolver's name. The deprecated RESOLVER_REPO (owner/repo) is used only when the name is
+// unset, and only its name part counts: the owner is always the pull request's owner. The new name wins when both are set.
+function resolverName() {
+  if (process.env.RESOLVER_REPO_NAME) return { name: process.env.RESOLVER_REPO_NAME, deprecated: false };
+  const legacy = process.env.RESOLVER_REPO || '';
+  if (!legacy) return { name: '', deprecated: false };
+  if (!DEPRECATED_RESOLVER_PATTERN.test(legacy)) throw new Error(`invalid RESOLVER_REPO: ${legacy}`);
+  return { name: legacy.split('/')[1], deprecated: true };
 }
 
 // One repository_dispatch to the resolver. The conflict route uses the default event type.
@@ -257,6 +268,9 @@ module.exports = async function run({ github, context, core }) {
   const owner = process.env.SWEEP_OWNER || context.repo.owner;
   if (fenced(owner)) throw new Error('run refused: owner is fenced');
   resolverTarget(owner);
+  if (resolverName().deprecated) {
+    core.warning('RESOLVER_REPO is deprecated: set RESOLVER_REPO_NAME. Only the name part of RESOLVER_REPO is used.');
+  }
   const started = Date.now();
   retryDeadline = started + module.exports.retryBudgetMs;
   const all = await targets({ github, context, core });

@@ -41,5 +41,6 @@ jobs:
     with:
       sweep_owner: ${{ matrix.owner }}
       resolver_repo_name: ${{ vars.PR_RECONCILE_RESOLVER_REPO_NAME }}
+      resolver_repo: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
     secrets:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}

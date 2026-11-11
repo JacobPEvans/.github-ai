@@ -6,7 +6,7 @@ const { main } = require('../scripts/pr-reconcile-cli.js');
 
 const ENV_KEYS = [
   'PR_RECONCILE_OWNERS', 'PR_RECONCILE_TOKEN_DIR', 'PR_RECONCILE_DRY_RUN', 'PR_RECONCILE_FENCE',
-  'PR_NUMBER', 'BASE_REF', 'SWEEP_OWNER', 'RESOLVER_REPO_NAME',
+  'PR_NUMBER', 'BASE_REF', 'SWEEP_OWNER', 'RESOLVER_REPO_NAME', 'RESOLVER_REPO',
 ];
 const REPO = 'test-owner/test-repo';
 
@@ -201,15 +201,35 @@ describe('pr-reconcile-cli', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('refuses a fenced owner with no request, and still runs the next owner', async () => {
-    fs.writeFileSync(path.join(dir, 'fence-prefix-a'), 'good-token\n');
+  it('refuses a fenced owner before its token file is read, with no request, and still runs the next owner', async () => {
     process.env.PR_RECONCILE_OWNERS = 'fence-prefix-a,test-owner';
+    const reads = [];
+    const readToken = (_dir, owner) => {
+      reads.push(owner);
+      return 'good-token\n';
+    };
     const fake = fakeFetch(sweepHandler(pr()));
-    expect(await main({ fetch: fake.fetch, out })).toBe(1);
-    const errors = parsed().filter((line) => line.level === 'error');
-    expect(errors).toEqual([expect.objectContaining({ owner: 'fence-prefix-a', message: 'run refused: owner is fenced' })]);
+    expect(await main({ fetch: fake.fetch, out, readToken })).toBe(1);
+    expect(reads).toEqual(['test-owner']);
     expect(fake.calls.some((c) => c.url.includes('fence-prefix-a'))).toBe(false);
+    const errors = parsed().filter((line) => line.level === 'error');
+    expect(errors).toEqual([expect.objectContaining({ owner: 'fence-prefix-a', message: 'owner is fenced' })]);
     expect(parsed().find((line) => line.event === 'tick' && line.owner === 'test-owner').prs).toBe(1);
+  });
+
+  it('dispatches each owner conflict to the resolver named by the deprecated RESOLVER_REPO, and warns once per owner run', async () => {
+    fs.writeFileSync(path.join(dir, 'o'), 'good-token\n');
+    fs.writeFileSync(path.join(dir, 'p'), 'good-token\n');
+    process.env.PR_RECONCILE_OWNERS = 'o,p';
+    process.env.RESOLVER_REPO = 'o/resolver-repo';
+    const fake = fakeFetch(twoOwnerHandler);
+    expect(await main({ fetch: fake.fetch, out })).toBe(0);
+    const dispatches = fake.calls.filter((c) => c.method === 'POST' && c.pathname.endsWith('/dispatches'));
+    expect(dispatches.map((c) => [c.pathname, c.body.client_payload.repository]).sort()).toEqual([
+      ['/repos/o/resolver-repo/dispatches', 'o/app'],
+      ['/repos/p/resolver-repo/dispatches', 'p/app2'],
+    ]);
+    expect(parsed().filter((line) => line.level === 'warning' && line.message.includes('RESOLVER_REPO is deprecated'))).toHaveLength(2);
   });
 
   it('fails an owner whose search returns a fenced repository with zero writes', async () => {

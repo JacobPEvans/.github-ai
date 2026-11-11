@@ -30,6 +30,10 @@ on:
         description: "Repository name, in the swept or calling repository's owner, that receives the pr-conflict repository_dispatch (empty = label only)"
         type: string
         default: ""
+      resolver_repo:
+        description: "Deprecated alias for resolver_repo_name: owner/repo. Used only when resolver_repo_name is empty; its name part is used with the swept or calling owner."
+        type: string
+        default: ""
     secrets:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         required: true
@@ -62,7 +66,7 @@ jobs:
         id: scope
         env:
           SWEEP_OWNER: ${{ inputs.sweep_owner }}
-          RESOLVER_REPO: ${{ inputs.resolver_repo_name && format('{0}/{1}', github.repository_owner, inputs.resolver_repo_name) || '' }}
+          RESOLVER_REPO: ${{ inputs.resolver_repo_name && format('{0}/{1}', github.repository_owner, inputs.resolver_repo_name) || inputs.resolver_repo }}
         run: |
           repos=""
           if [ -z "$SWEEP_OWNER" ]; then
@@ -93,6 +97,7 @@ jobs:
           BASE_REF: ${{ inputs.base_ref }}
           SWEEP_OWNER: ${{ inputs.sweep_owner }}
           RESOLVER_REPO_NAME: ${{ inputs.resolver_repo_name }}
+          RESOLVER_REPO: ${{ inputs.resolver_repo }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |

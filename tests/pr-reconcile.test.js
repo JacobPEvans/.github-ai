@@ -69,6 +69,7 @@ describe('reconcile', () => {
     run.retryBudgetMs = 3 * 60 * 1000;
     run.runBudgetMs = 4 * 60 * 1000;
     delete process.env.RESOLVER_REPO_NAME;
+    delete process.env.RESOLVER_REPO;
     delete process.env.BASE_REF;
     delete process.env.SWEEP_OWNER;
     delete process.env.PR_RECONCILE_FENCE;
@@ -244,9 +245,34 @@ describe('reconcile', () => {
     expect(event.outcome).toBe('rebase-requested');
   });
 
+  it('uses the name part of the deprecated RESOLVER_REPO with the pull request owner, and warns once', async () => {
+    process.env.RESOLVER_REPO = 'o/ctl-repo';
+    const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
+    const [event] = await run({ github: gh, context: createMockContext({ repo: { owner: 'p', repo: 'app2' } }), core });
+    expect(gh.rest.repos.createDispatchEvent.mock.calls[0][0]).toMatchObject({ owner: 'p', repo: 'ctl-repo', event_type: 'pr-conflict' });
+    expect(event.outcome).toBe('labelled-dispatched');
+    expect(core.warnings.filter((w) => w.includes('RESOLVER_REPO is deprecated'))).toHaveLength(1);
+  });
+
+  it('prefers RESOLVER_REPO_NAME over the deprecated RESOLVER_REPO, without a deprecation warning', async () => {
+    process.env.RESOLVER_REPO_NAME = 'ctl-repo';
+    process.env.RESOLVER_REPO = 'o/other-repo';
+    const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
+    await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.repos.createDispatchEvent.mock.calls[0][0]).toMatchObject({ owner: 'test-owner', repo: 'ctl-repo' });
+    expect(core.warnings.some((w) => w.includes('deprecated'))).toBe(false);
+  });
+
+  it('refuses a malformed deprecated RESOLVER_REPO before any request', async () => {
+    process.env.RESOLVER_REPO = 'o/';
+    const gh = github(pr());
+    await expect(run({ github: gh, context: createMockContext(), core })).rejects.toThrow('invalid RESOLVER_REPO: o/');
+    expect(gh.rest.pulls.get).not.toHaveBeenCalled();
+  });
+
   it('refuses a resolver name that is not a bare repository name', async () => {
     process.env.RESOLVER_REPO_NAME = 'o/';
-    await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid RESOLVER_REPO_NAME');
+    await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid resolver repository name');
   });
 
   it('re-fetches a clean PR whose base.sha is stale, and labels the conflict found on retry', async () => {
