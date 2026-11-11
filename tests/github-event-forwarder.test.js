@@ -74,10 +74,10 @@ test('reruns preserve delivery and correlation identifiers', () => {
   expect(second.correlation_id).toBe(first.correlation_id);
 });
 
-test('workflow selects the inherited secret and requests no token permissions or checkout', () => {
+test('workflow reads the explicit secret or the inherited one, with no token permissions or checkout', () => {
   expect(workflow.permissions).toEqual({});
   expect(workflow.on.workflow_call.inputs.runner_label.default).toBe('self-hosted');
-  expect(step.env.WEBHOOK_URL).toBe('${{ secrets[inputs.webhook_url_secret_name] }}');
+  expect(step.env.WEBHOOK_URL).toBe('${{ secrets.webhook_url || secrets[inputs.webhook_url_secret_name] }}');
   expect(workflow.jobs.forward.steps).toHaveLength(1);
   expect(step.uses).toBeUndefined();
 });
@@ -86,7 +86,7 @@ test('dogfood calls the local workflow for both triggers with opt-in and fork gu
   expect(caller.on.pull_request.types).toContain('opened');
   expect(caller.on.check_run.types).toEqual(['completed']);
   expect(caller.jobs.forward.uses).toBe('./.github/workflows/github-event-forwarder.yml');
-  expect(caller.jobs.forward.secrets).toBe('inherit');
+  expect(caller.jobs.forward.secrets).toEqual({ webhook_url: '${{ secrets.DIFY_CI_FIXER_WEBHOOK_URL }}' });
   expect(caller.jobs.forward.if).toContain("vars.DOGFOOD_SELF_HOSTED == 'true'");
   expect(caller.jobs.forward.if).toContain('github.event.pull_request.head.repo.full_name == github.repository');
 });
