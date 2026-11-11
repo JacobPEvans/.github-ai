@@ -20,8 +20,8 @@ const STATUS_CONTEXT = 'pr-reconcile';
 const HOLD_CONTEXT = 'merge-hold';
 const HOLD_LABEL = 'merge-hold';
 const UNKNOWN_RETRIES = 3;
-// Retries stop once a run passes this budget, so a large sweep ends inside the job timeout.
-const RETRY_BUDGET_MS = 3 * 60 * 1000;
+// Unknown-state retries stop after the retry budget; no new PR starts after the run budget, so a large sweep
+// ends inside the 5-minute job timeout and the next sweep picks up the rest.
 let retryDeadline = Infinity;
 const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
@@ -194,8 +194,16 @@ async function targets({ github, context, core }) {
 
 module.exports = async function run({ github, context, core }) {
   const events = [];
-  retryDeadline = Date.now() + RETRY_BUDGET_MS;
-  for (const target of await targets({ github, context, core })) {
+  const resolver = process.env.RESOLVER_REPO || '';
+  if (resolver && !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(resolver)) throw new Error(`invalid RESOLVER_REPO: ${resolver}`);
+  const started = Date.now();
+  retryDeadline = started + module.exports.retryBudgetMs;
+  const all = await targets({ github, context, core });
+  for (const [index, target] of all.entries()) {
+    if (Date.now() - started > module.exports.runBudgetMs) {
+      core.warning(`run budget reached; ${all.length - index} pull requests deferred to the next sweep`);
+      break;
+    }
     try {
       events.push(await reconcile({ github, core, ...target }));
     } catch (error) {
@@ -214,3 +222,5 @@ module.exports = async function run({ github, context, core }) {
 module.exports.classify = classify;
 module.exports.reconcile = reconcile;
 module.exports.retryDelayMs = 5000;
+module.exports.retryBudgetMs = 3 * 60 * 1000;
+module.exports.runBudgetMs = 4 * 60 * 1000;

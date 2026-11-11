@@ -62,6 +62,8 @@ describe('reconcile', () => {
   beforeEach(() => {
     core = createMockCore();
     run.retryDelayMs = 0;
+    run.retryBudgetMs = 3 * 60 * 1000;
+    run.runBudgetMs = 4 * 60 * 1000;
     delete process.env.RESOLVER_REPO;
     delete process.env.BASE_REF;
     delete process.env.SWEEP_OWNER;
@@ -197,5 +199,48 @@ describe('reconcile', () => {
     gh.paginate.mockResolvedValueOnce(Array.from({ length: 1000 }, () => ({ number: 7, repository_url: 'https://api.github.com/repos/test-owner/a' })));
     await run({ github: gh, context: createMockContext(), core });
     expect(core.warnings.some((w) => w.includes('truncated at 1000'))).toBe(true);
+  });
+
+  it('stops unknown-state retries once the retry budget is spent', async () => {
+    run.retryBudgetMs = -1;
+    const gh = github(pr({ mergeable_state: 'unknown' }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.pulls.get).toHaveBeenCalledTimes(1);
+    expect(event.outcome).toBe('still-unknown');
+  });
+
+  it('defers the rest of a sweep once the run budget is spent', async () => {
+    run.runBudgetMs = -1;
+    delete process.env.PR_NUMBER;
+    process.env.SWEEP_OWNER = 'test-owner';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([
+      { number: 7, repository_url: 'https://api.github.com/repos/test-owner/a' },
+      { number: 8, repository_url: 'https://api.github.com/repos/test-owner/b' },
+    ]);
+    const events = await run({ github: gh, context: createMockContext(), core });
+    expect(events).toEqual([]);
+    expect(core.warnings.some((w) => w.includes('2 pull requests deferred'))).toBe(true);
+  });
+
+  it('sends the resolver the repository, PR, head and base', async () => {
+    process.env.RESOLVER_REPO = 'ctl-owner/ctl-repo';
+    const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
+    await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.repos.createDispatchEvent.mock.calls[0][0].client_payload).toEqual({
+      repository: 'test-owner/test-repo', pr: 7, head_sha: 'head1', base: 'develop',
+    });
+  });
+
+  it('ticks the Renovate rebase box when the PR has one', async () => {
+    const gh = github(pr({ mergeable_state: 'dirty', user: { login: 'renovate[bot]' }, body: 'x\n- [ ] <!-- rebase-check -->' }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.pulls.update.mock.calls[0][0].body).toContain('- [x] <!-- rebase-check -->');
+    expect(event.outcome).toBe('rebase-requested');
+  });
+
+  it('refuses a resolver that is not owner/repo', async () => {
+    process.env.RESOLVER_REPO = 'ctl-owner/';
+    await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid RESOLVER_REPO');
   });
 });
