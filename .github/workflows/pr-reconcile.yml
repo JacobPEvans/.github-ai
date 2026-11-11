@@ -2,7 +2,7 @@
 #
 # Reusable workflow that keeps open pull requests mergeable without a model.
 # BEHIND: update-branch. DIRTY: merge-conflict label, needs-lead when workflow
-# files are involved, and a repository_dispatch to resolver_repo when set.
+# files are involved, and a repository_dispatch to resolver_repo_name when set.
 # Every reconcile also sets the merge-hold commit status at the head.
 #
 # Modes (exactly one): pr_number (one PR), base_ref (every open PR on a base,
@@ -26,8 +26,8 @@ on:
       sweep_owner:
         type: string
         default: ""
-      resolver_repo:
-        description: "owner/repo that receives the pr-conflict repository_dispatch (empty = label only); must have the same owner as the swept or calling repository"
+      resolver_repo_name:
+        description: "Repository name, in the swept or calling repository's owner, that receives the pr-conflict repository_dispatch (empty = label only)"
         type: string
         default: ""
     secrets:
@@ -57,12 +57,12 @@ jobs:
           persist-credentials: false
 
       # Single-PR and base modes get a token for the calling repository (plus the resolver
-      # repository when it has the same owner); a sweep covers the whole owner.
+      # repository, which always has the calling owner); a sweep covers the whole owner.
       - name: Token scope
         id: scope
         env:
           SWEEP_OWNER: ${{ inputs.sweep_owner }}
-          RESOLVER_REPO: ${{ inputs.resolver_repo }}
+          RESOLVER_REPO: ${{ inputs.resolver_repo_name && format('{0}/{1}', github.repository_owner, inputs.resolver_repo_name) || '' }}
         run: |
           repos=""
           if [ -z "$SWEEP_OWNER" ]; then
@@ -92,7 +92,7 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           BASE_REF: ${{ inputs.base_ref }}
           SWEEP_OWNER: ${{ inputs.sweep_owner }}
-          RESOLVER_REPO: ${{ inputs.resolver_repo }}
+          RESOLVER_REPO_NAME: ${{ inputs.resolver_repo_name }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |

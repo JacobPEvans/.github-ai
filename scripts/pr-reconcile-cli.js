@@ -41,7 +41,6 @@ async function main({ fetch, out = (line) => process.stdout.write(`${line}\n`) }
     const tick = { event: 'tick', owner, prs: 0, errors: 0, requests: 0, ratelimit_remaining: null, ratelimit_limit: null };
     try {
       if (!run.OWNER_PATTERN.test(owner)) throw new Error('invalid owner name');
-      if (run.fenced(owner)) throw new Error('owner is fenced');
       let token;
       try {
         token = fs.readFileSync(path.join(dir, owner), 'utf8').trim();

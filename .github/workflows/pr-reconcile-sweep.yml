@@ -40,6 +40,6 @@ jobs:
     uses: ./.github/workflows/pr-reconcile.yml
     with:
       sweep_owner: ${{ matrix.owner }}
-      resolver_repo: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
+      resolver_repo_name: ${{ vars.PR_RECONCILE_RESOLVER_REPO_NAME }}
     secrets:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}

@@ -68,7 +68,7 @@ describe('reconcile', () => {
     run.retryDelayMs = 0;
     run.retryBudgetMs = 3 * 60 * 1000;
     run.runBudgetMs = 4 * 60 * 1000;
-    delete process.env.RESOLVER_REPO;
+    delete process.env.RESOLVER_REPO_NAME;
     delete process.env.BASE_REF;
     delete process.env.SWEEP_OWNER;
     delete process.env.PR_RECONCILE_FENCE;
@@ -91,7 +91,7 @@ describe('reconcile', () => {
   });
 
   it('labels a conflict and dispatches the resolver when one is configured', async () => {
-    process.env.RESOLVER_REPO = 'test-owner/ctl-repo';
+    process.env.RESOLVER_REPO_NAME = 'ctl-repo';
     const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.issues.addLabels.mock.calls[0][0].labels).toEqual(['merge-conflict']);
@@ -100,7 +100,7 @@ describe('reconcile', () => {
   });
 
   it('sends a conflict that touches workflow files to the lead without dispatching', async () => {
-    process.env.RESOLVER_REPO = 'test-owner/ctl-repo';
+    process.env.RESOLVER_REPO_NAME = 'ctl-repo';
     const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: '.github/workflows/ci.yml' }] });
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.issues.addLabels.mock.calls[0][0].labels).toEqual(['merge-conflict', 'needs-lead']);
@@ -229,7 +229,7 @@ describe('reconcile', () => {
   });
 
   it('sends the resolver the repository, PR, head and base', async () => {
-    process.env.RESOLVER_REPO = 'test-owner/ctl-repo';
+    process.env.RESOLVER_REPO_NAME = 'ctl-repo';
     const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
     await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.repos.createDispatchEvent.mock.calls[0][0].client_payload).toEqual({
@@ -244,9 +244,9 @@ describe('reconcile', () => {
     expect(event.outcome).toBe('rebase-requested');
   });
 
-  it('refuses a resolver that is not owner/repo', async () => {
-    process.env.RESOLVER_REPO = 'ctl-owner/';
-    await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid RESOLVER_REPO');
+  it('refuses a resolver name that is not a bare repository name', async () => {
+    process.env.RESOLVER_REPO_NAME = 'o/';
+    await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid RESOLVER_REPO_NAME');
   });
 
   it('re-fetches a clean PR whose base.sha is stale, and labels the conflict found on retry', async () => {
@@ -280,7 +280,7 @@ describe('reconcile', () => {
 
   it('refuses a resolver whose repository is fenced, before any dispatch or label', async () => {
     process.env.PR_NUMBER = '7';
-    process.env.RESOLVER_REPO = 'ctl-owner/fence-repo';
+    process.env.RESOLVER_REPO_NAME = 'fence-repo';
     process.env.PR_RECONCILE_FENCE = 'fence-repo';
     const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
     await expect(run({ github: gh, context: createMockContext(), core })).rejects.toThrow('resolver repository is fenced');
@@ -289,21 +289,22 @@ describe('reconcile', () => {
     expect(gh.rest.pulls.get).not.toHaveBeenCalled();
   });
 
-  it('refuses a resolver whose owner is fenced, before any dispatch', async () => {
-    process.env.RESOLVER_REPO = 'fence-owner/ctl-repo';
-    process.env.PR_RECONCILE_FENCE = 'fence-owner';
+  it('leaves a pull request with no status, label or dispatch when its resolver is fenced, even when reconcile is called directly', async () => {
+    process.env.RESOLVER_REPO_NAME = 'fence-repo';
+    process.env.PR_RECONCILE_FENCE = 'fence-repo';
     const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
-    await expect(run({ github: gh, context: createMockContext(), core })).rejects.toThrow('resolver repository is fenced');
+    await expect(run.reconcile({ github: gh, core, owner: 'test-owner', repo: 'test-repo', number: 7 })).rejects.toThrow('resolver repository is fenced');
+    expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
+    expect(gh.rest.issues.addLabels).not.toHaveBeenCalled();
     expect(gh.rest.repos.createDispatchEvent).not.toHaveBeenCalled();
   });
 
-  it('refuses a resolver that belongs to another owner, before any label or dispatch, and reports it', async () => {
-    process.env.RESOLVER_REPO = 'o/resolver-repo';
+  it('dispatches a conflict to the resolver named for the pull request owner', async () => {
+    process.env.RESOLVER_REPO_NAME = 'ctl-repo';
     const gh = github(pr({ mergeable_state: 'dirty' }), { files: [{ filename: 'src/a.js' }] });
     const [event] = await run({ github: gh, context: createMockContext({ repo: { owner: 'p', repo: 'app2' } }), core });
-    expect(event).toMatchObject({ pr: 7, state: 'dirty', action: 'label-conflict', outcome: 'error:resolver-refused' });
-    expect(gh.rest.repos.createDispatchEvent).not.toHaveBeenCalled();
-    expect(gh.rest.issues.addLabels).not.toHaveBeenCalled();
+    expect(gh.rest.repos.createDispatchEvent.mock.calls[0][0]).toMatchObject({ owner: 'p', repo: 'ctl-repo', event_type: 'pr-conflict' });
+    expect(event.outcome).toBe('labelled-dispatched');
   });
 
   it('refuses a fence entry written as owner/repo before any request', async () => {

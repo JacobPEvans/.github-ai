@@ -4,7 +4,8 @@
 // GitHub API fields. BEHIND gets the update-branch API. DIRTY gets the
 // merge-conflict label (and needs-lead when workflow files are involved, which
 // this token cannot write); a resolver is started by repository_dispatch when
-// RESOLVER_REPO is set. Each decision is logged as one JSON event line.
+// RESOLVER_REPO_NAME is set. The resolver is <owner>/<RESOLVER_REPO_NAME>, where
+// owner is the pull request's owner. Each decision is logged as one JSON event line.
 //
 // Hold: every reconcile sets the `merge-hold` commit status at the head: failure
 // while the PR carries the merge-hold label, success otherwise. A ruleset that
@@ -26,7 +27,7 @@ let retryDeadline = Infinity;
 const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
 const OWNER_PATTERN = /^[A-Za-z0-9-]+$/;
-const RESOLVER_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+const RESOLVER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -126,20 +127,20 @@ async function setHold(github, owner, repo, pr, statuses) {
   return held;
 }
 
-// The resolver takes conflict dispatches for one owner. Returns its owner and repository, or null when none is set.
-// Refuses, before any write, a resolver that belongs to another owner or is fenced.
-function resolverTarget(owner) {
-  const resolver = process.env.RESOLVER_REPO || '';
-  if (!resolver) return null;
-  if (!RESOLVER_PATTERN.test(resolver)) throw refusal(`invalid RESOLVER_REPO: ${resolver}`);
-  const [rOwner, rRepo] = resolver.split('/');
-  if (rOwner.toLowerCase() !== owner.toLowerCase()) throw refusal('resolver repository belongs to another owner');
-  if (fenced(rOwner) || fenced(rRepo)) throw refusal('resolver repository is fenced');
-  return { owner: rOwner, repo: rRepo };
-}
-
 function refusal(message) {
   return Object.assign(new Error(message), { status: 'resolver-refused' });
+}
+
+// The one resolver check. A pull request in <owner> is dispatched to <owner>/<RESOLVER_REPO_NAME>, so the owner is
+// never chosen separately. Returns that repository, or null when no name is set. Throws when the name is not a bare
+// repository name or when the resolved repository is fenced. Called from run() before any request, and from
+// reconcile() before any write to a pull request.
+function resolverTarget(owner) {
+  const name = process.env.RESOLVER_REPO_NAME || '';
+  if (!name) return null;
+  if (!RESOLVER_NAME_PATTERN.test(name)) throw new Error(`invalid RESOLVER_REPO_NAME: ${name}`);
+  if (fenced(owner) || fenced(name)) throw refusal('resolver repository is fenced');
+  return { owner, repo: name };
 }
 
 // One repository_dispatch to the resolver. The conflict route uses the default event type.
@@ -150,7 +151,7 @@ async function dispatchEvent(github, target, owner, repo, pr, eventType = 'pr-co
   });
 }
 
-async function act(github, owner, repo, pr, decision) {
+async function act(github, owner, repo, pr, decision, resolver) {
   const number = pr.number;
   switch (decision.action) {
     case 'update-branch':
@@ -168,11 +169,9 @@ async function act(github, owner, repo, pr, decision) {
         await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [CONFLICT_LABEL, LEAD_LABEL] });
         return 'labelled-lead-workflows';
       }
-      // The resolver is checked before the label write, so a refused resolver leaves the pull request untouched.
-      const target = resolverTarget(owner);
       await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [CONFLICT_LABEL] });
-      if (!target) return 'labelled';
-      await dispatchEvent(github, target, owner, repo, pr);
+      if (!resolver) return 'labelled';
+      await dispatchEvent(github, resolver, owner, repo, pr);
       return 'labelled-dispatched';
     }
     case 'unlabel-conflict':
@@ -189,6 +188,9 @@ async function act(github, owner, repo, pr, decision) {
 async function reconcile({ github, core, owner, repo, number }) {
   const { pr, stale } = await getPr(github, owner, repo, number);
   const decision = classify(pr, stale);
+  // A conflict resolves its resolver before the first write, so a refused or fenced resolver leaves the pull request
+  // with no status, label or dispatch.
+  const resolver = decision.action === 'label-conflict' ? resolverTarget(owner) : null;
   let outcome = 'noop';
   let held = false;
   let statuses = [];
@@ -203,7 +205,7 @@ async function reconcile({ github, core, owner, repo, number }) {
       outcome = 'already-done';
     } else {
       try {
-        outcome = await act(github, owner, repo, pr, decision);
+        outcome = await act(github, owner, repo, pr, decision, resolver);
         // A body-only edit (a Renovate rebase box added later) keeps the head, so only record real actions.
         if (outcome !== 'no-rebase-box') await record(github, owner, repo, pr.head.sha, decision.action);
       } catch (error) {
@@ -231,7 +233,6 @@ async function targets({ github, context, core }) {
   if (process.env.SWEEP_OWNER) {
     const sweepOwner = process.env.SWEEP_OWNER;
     if (!OWNER_PATTERN.test(sweepOwner)) throw new Error(`invalid SWEEP_OWNER: ${sweepOwner}`);
-    if (fenced(sweepOwner)) throw new Error('sweep refused: owner is fenced');
     // user: matches repositories of both user accounts and organizations; org: matches organizations only.
     const items = await github.paginate(github.rest.search.issuesAndPullRequests, {
       q: `is:pr is:open archived:false user:${sweepOwner}`, per_page: 100,
@@ -251,10 +252,11 @@ async function targets({ github, context, core }) {
 
 module.exports = async function run({ github, context, core }) {
   const events = [];
-  const resolver = process.env.RESOLVER_REPO || '';
-  if (resolver && !RESOLVER_PATTERN.test(resolver)) throw new Error(`invalid RESOLVER_REPO: ${resolver}`);
-  // The dispatch writes to the resolver repository, so a fenced resolver refuses the run before any request.
-  if (resolver && resolver.split('/').some((part) => fenced(part))) throw new Error('resolver repository is fenced');
+  // The owner fence and the resolver check run here, once, before any request. Every caller reaches them: the
+  // sweep owner in sweep mode, otherwise the calling repository's owner.
+  const owner = process.env.SWEEP_OWNER || context.repo.owner;
+  if (fenced(owner)) throw new Error('run refused: owner is fenced');
+  resolverTarget(owner);
   const started = Date.now();
   retryDeadline = started + module.exports.retryBudgetMs;
   const all = await targets({ github, context, core });

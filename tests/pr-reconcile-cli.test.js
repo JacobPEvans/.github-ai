@@ -6,7 +6,7 @@ const { main } = require('../scripts/pr-reconcile-cli.js');
 
 const ENV_KEYS = [
   'PR_RECONCILE_OWNERS', 'PR_RECONCILE_TOKEN_DIR', 'PR_RECONCILE_DRY_RUN', 'PR_RECONCILE_FENCE',
-  'PR_NUMBER', 'BASE_REF', 'SWEEP_OWNER', 'RESOLVER_REPO',
+  'PR_NUMBER', 'BASE_REF', 'SWEEP_OWNER', 'RESOLVER_REPO_NAME',
 ];
 const REPO = 'test-owner/test-repo';
 
@@ -32,7 +32,7 @@ function fakeFetch(handler) {
     const method = init.method || 'GET';
     const { pathname } = new URL(url);
     const auth = new Headers(init.headers).get('authorization') || '';
-    calls.push({ method, pathname, auth, body: init.body ? JSON.parse(init.body) : undefined });
+    calls.push({ method, pathname, url, auth, body: init.body ? JSON.parse(init.body) : undefined });
     const { status = 200, body = {} } = handler(method, pathname, auth, url) || {};
     const response = new Response(JSON.stringify(body), {
       status,
@@ -160,22 +160,21 @@ describe('pr-reconcile-cli', () => {
     expect(parsed()).toHaveLength(1);
   });
 
-  it('sends a conflict to the shared resolver only for its own owner, and reports the refusal for the other owner', async () => {
+  it('dispatches each owner conflict to that owner resolver, and exits 0', async () => {
     fs.writeFileSync(path.join(dir, 'o'), 'good-token\n');
     fs.writeFileSync(path.join(dir, 'p'), 'good-token\n');
     process.env.PR_RECONCILE_OWNERS = 'o,p';
-    process.env.RESOLVER_REPO = 'o/resolver-repo';
+    process.env.RESOLVER_REPO_NAME = 'resolver-repo';
     const fake = fakeFetch(twoOwnerHandler);
-    expect(await main({ fetch: fake.fetch, out })).toBe(1);
+    expect(await main({ fetch: fake.fetch, out })).toBe(0);
     const dispatches = fake.calls.filter((c) => c.method === 'POST' && c.pathname.endsWith('/dispatches'));
-    expect(dispatches).toHaveLength(1);
-    expect(dispatches[0].pathname).toBe('/repos/o/resolver-repo/dispatches');
-    expect(dispatches[0].body.client_payload.repository).toBe('o/app');
-    expect(fake.writes().filter((c) => c.pathname.startsWith('/repos/p/'))).toHaveLength(0);
+    expect(dispatches.map((c) => [c.pathname, c.body.client_payload.repository]).sort()).toEqual([
+      ['/repos/o/resolver-repo/dispatches', 'o/app'],
+      ['/repos/p/resolver-repo/dispatches', 'p/app2'],
+    ]);
     const events = parsed().filter((line) => line.level === 'info').map((line) => JSON.parse(line.message));
-    expect(events.find((e) => e.repository === 'o/app').outcome).toBe('labelled-dispatched');
-    expect(events.find((e) => e.repository === 'p/app2').outcome).toBe('error:resolver-refused');
-    expect(parsed().find((line) => line.event === 'tick' && line.owner === 'p').errors).toBe(1);
+    expect(events.map((e) => [e.repository, e.outcome]).sort()).toEqual([['o/app', 'labelled-dispatched'], ['p/app2', 'labelled-dispatched']]);
+    expect(parsed().filter((line) => line.event === 'tick').map((line) => line.errors)).toEqual([0, 0]);
   });
 
   it('refuses a fence entry written as owner/repo with one error line and no request', async () => {
@@ -195,20 +194,21 @@ describe('pr-reconcile-cli', () => {
   });
 
   it('fails an owner whose resolver repository is fenced with zero requests sent', async () => {
-    process.env.RESOLVER_REPO = 'ctl-owner/fence-repo';
+    process.env.RESOLVER_REPO_NAME = 'fence-repo';
     const fake = fakeFetch(sweepHandler(pr({ mergeable_state: 'dirty' })));
     expect(await main({ fetch: fake.fetch, out })).toBe(1);
     expect(parsed().filter((line) => line.level === 'error')).toEqual([expect.objectContaining({ owner: 'test-owner', message: 'resolver repository is fenced' })]);
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('fails a fenced owner before its token is read or any request is sent, and still runs the next owner', async () => {
+  it('refuses a fenced owner with no request, and still runs the next owner', async () => {
+    fs.writeFileSync(path.join(dir, 'fence-prefix-a'), 'good-token\n');
     process.env.PR_RECONCILE_OWNERS = 'fence-prefix-a,test-owner';
     const fake = fakeFetch(sweepHandler(pr()));
     expect(await main({ fetch: fake.fetch, out })).toBe(1);
     const errors = parsed().filter((line) => line.level === 'error');
-    expect(errors).toEqual([expect.objectContaining({ owner: 'fence-prefix-a', message: 'owner is fenced' })]);
-    expect(fake.calls.some((c) => c.auth !== 'token good-token')).toBe(false);
+    expect(errors).toEqual([expect.objectContaining({ owner: 'fence-prefix-a', message: 'run refused: owner is fenced' })]);
+    expect(fake.calls.some((c) => c.url.includes('fence-prefix-a'))).toBe(false);
     expect(parsed().find((line) => line.event === 'tick' && line.owner === 'test-owner').prs).toBe(1);
   });
 
