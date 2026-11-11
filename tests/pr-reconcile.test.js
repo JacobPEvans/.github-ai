@@ -67,6 +67,7 @@ describe('reconcile', () => {
     delete process.env.RESOLVER_REPO;
     delete process.env.BASE_REF;
     delete process.env.SWEEP_OWNER;
+    delete process.env.PR_RECONCILE_HELD_REPOS;
     process.env.PR_NUMBER = '7';
   });
 
@@ -143,8 +144,61 @@ describe('reconcile', () => {
     expect(event).toMatchObject({ held: true, outcome: 'updated' });
   });
 
+  it('holds a held-class repository until merge-release releases it', async () => {
+    process.env.PR_RECONCILE_HELD_REPOS = 'Other/Repo, TEST-OWNER/TEST-REPO';
+    const gh = github(pr({ mergeable_state: 'behind' }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.repos.createCommitStatus.mock.calls[0][0]).toMatchObject({ context: 'merge-hold', state: 'failure', sha: 'head1', description: 'Held: deploys on merge; add merge-release to release' });
+    expect(gh.rest.pulls.updateBranch).toHaveBeenCalled();
+    expect(event).toMatchObject({ held: true, outcome: 'updated' });
+  });
+
+  it('releases a held-class repository carrying the merge-release label', async () => {
+    process.env.PR_RECONCILE_HELD_REPOS = 'TEST-OWNER/TEST-REPO';
+    const gh = github(pr({ labels: [{ name: 'merge-release' }] }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.repos.createCommitStatus.mock.calls[0][0]).toMatchObject({ context: 'merge-hold', state: 'success', description: 'Not held' });
+    expect(event).toMatchObject({ held: false });
+  });
+
+  it('lets the merge-hold label win over merge-release', async () => {
+    process.env.PR_RECONCILE_HELD_REPOS = 'test-owner/test-repo';
+    const gh = github(pr({ labels: [{ name: 'merge-hold' }, { name: 'merge-release' }] }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.repos.createCommitStatus.mock.calls[0][0]).toMatchObject({ context: 'merge-hold', state: 'failure', description: 'Held by the merge-hold label' });
+    expect(event).toMatchObject({ held: true });
+  });
+
+  it('rewrites the hold description when the reason changes without a state change', async () => {
+    process.env.PR_RECONCILE_HELD_REPOS = 'test-owner/test-repo';
+    const gh = github(pr(), { statuses: [{ context: 'merge-hold', state: 'failure', description: 'Held by the merge-hold label' }] });
+    await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.repos.createCommitStatus.mock.calls[0][0]).toMatchObject({ state: 'failure', description: 'Held: deploys on merge; add merge-release to release' });
+  });
+
+  it('parses the held list across commas, whitespace and case', async () => {
+    process.env.PR_RECONCILE_HELD_REPOS = '  Other/Repo\n,\tTEST-OWNER/TEST-REPO  , ';
+    const gh = github(pr({ mergeable_state: 'behind' }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.repos.createCommitStatus.mock.calls[0][0]).toMatchObject({ context: 'merge-hold', state: 'failure', description: 'Held: deploys on merge; add merge-release to release' });
+    expect(event).toMatchObject({ held: true, outcome: 'updated' });
+  });
+
+  it('holds nothing for a repository outside the held class or an empty held list', async () => {
+    process.env.PR_RECONCILE_HELD_REPOS = 'other/repo';
+    const gh = github(pr());
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.repos.createCommitStatus.mock.calls[0][0]).toMatchObject({ context: 'merge-hold', state: 'success', description: 'Not held' });
+    expect(event).toMatchObject({ held: false });
+    process.env.PR_RECONCILE_HELD_REPOS = '  ,\n ';
+    const empty = github(pr());
+    const [emptyEvent] = await run({ github: empty, context: createMockContext(), core });
+    expect(empty.rest.repos.createCommitStatus.mock.calls[0][0]).toMatchObject({ context: 'merge-hold', state: 'success', description: 'Not held' });
+    expect(emptyEvent).toMatchObject({ held: false });
+  });
+
   it('sets merge-hold to success once, then leaves an unchanged status alone', async () => {
-    const gh = github(pr(), { statuses: [{ context: 'merge-hold', state: 'success' }] });
+    const gh = github(pr(), { statuses: [{ context: 'merge-hold', state: 'success', description: 'Not held' }] });
     await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
     const fresh = github(pr());
@@ -153,7 +207,7 @@ describe('reconcile', () => {
   });
 
   it('does not record a Renovate rebase when the PR has no rebase box', async () => {
-    const gh = github(pr({ mergeable_state: 'dirty', user: { login: 'renovate[bot]' }, body: 'no box' }), { statuses: [{ context: 'merge-hold', state: 'success' }] });
+    const gh = github(pr({ mergeable_state: 'dirty', user: { login: 'renovate[bot]' }, body: 'no box' }), { statuses: [{ context: 'merge-hold', state: 'success', description: 'Not held' }] });
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(event.outcome).toBe('no-rebase-box');
     expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
