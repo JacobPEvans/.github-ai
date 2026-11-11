@@ -5,7 +5,12 @@
 # or required caller still fails closed; the check run itself always stays neutral.
 #
 #   gateway-failure.sh classify <file|->      print the reason class, or nothing
+#   gateway-failure.sh truncated <file>       print truncated when a verdict file is cut off
 #   gateway-failure.sh report <job> <class>   write the four signals; exit 1 when failed
+#
+# A verdict cut off by the output limit is reported as "AI review output truncated", never as a
+# gateway failure. classify does not name it: its input is a log, and callers that read logs keep
+# failing on a length finish reason as before.
 #
 # report reads:
 #   CONCLUSION        neutral (default) or failure (blocking or required; job exit only)
@@ -46,6 +51,16 @@ classify() {
   fi
 }
 
+# A verdict cut off by the output limit: empty, JSON that does not parse, or a completion whose
+# finish reason is length. A complete verdict passes, even one whose text quotes that wording.
+verdict_truncated() {
+  if [ ! -s "$1" ] || ! jq empty "$1" > /dev/null 2>&1; then
+    echo truncated
+  elif jq -e '(.choices[0].finish_reason // .finish_reason) == "length"' "$1" > /dev/null 2>&1; then
+    echo truncated
+  fi
+}
+
 create_check() {
   local job="$1" reason="$2" conclusion="$3" summary check_name response
   if [ -z "${GITHUB_TOKEN:-}" ]; then
@@ -63,6 +78,8 @@ create_check() {
   fi
   if [[ ${CHECK_SUMMARY+x} ]]; then
     summary="$CHECK_SUMMARY"
+  elif [ "$reason" = truncated ]; then
+    summary="AI review output truncated"
   else
     summary="gateway unavailable ($reason)"
   fi
@@ -107,8 +124,14 @@ send_alert() {
 }
 
 report() {
-  local job="$1" reason="$2" line conclusion="${CONCLUSION:-neutral}" check_status=0
-  line="AI review not performed: gateway unavailable ($reason)"
+  local job="$1" reason="$2" line cause conclusion="${CONCLUSION:-neutral}" check_status=0
+  if [ "$reason" = truncated ]; then
+    line="AI review output truncated"
+    cause="a truncated verdict"
+  else
+    line="AI review not performed: gateway unavailable ($reason)"
+    cause="a gateway failure"
+  fi
   printf '%s\n' "$line" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
   if [ "$conclusion" = failure ]; then
     echo "::error::$job: $line"
@@ -122,7 +145,7 @@ report() {
     return "$check_status"
   fi
   if [ "$conclusion" = failure ]; then
-    echo "::error::$job is blocking or required; failing closed on a gateway failure."
+    echo "::error::$job is blocking or required; failing closed on $cause."
     return 1
   fi
   return 0
@@ -130,9 +153,10 @@ report() {
 
 case "${1:-}" in
   classify) classify "${2:--}" ;;
+  truncated) verdict_truncated "${2:?verdict file is required}" ;;
   report) report "${2:?job name is required}" "${3:?reason class is required}" ;;
   *)
-    echo "usage: gateway-failure.sh classify <file|-> | report <job> <class>" >&2
+    echo "usage: gateway-failure.sh classify <file|-> | truncated <file> | report <job> <class>" >&2
     exit 2
     ;;
 esac
