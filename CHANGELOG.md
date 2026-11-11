@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.4.3](https://github.com/JacobPEvans/.github-ai/compare/v2.4.2...v2.4.3) (2026-11-11)
+
+
+### Bug Fixes
+
+* **tests:** pin bun to 1.4.4 and isolate fixture git config ([#102](https://github.com/JacobPEvans/.github-ai/issues/102)) ([2762948](https://github.com/JacobPEvans/.github-ai/commit/27629483ef01fbe5c6d605c0f3377ae718c03d34))
+
 ## [2.4.2](https://github.com/JacobPEvans/.github-ai/compare/v2.4.1...v2.4.2) (2026-11-11)
 
 
