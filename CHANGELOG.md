@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.4.1](https://github.com/JacobPEvans/.github-ai/compare/v2.4.0...v2.4.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** bound a sweep by a run budget and validate the resolver ([#97](https://github.com/JacobPEvans/.github-ai/issues/97)) ([1a970ce](https://github.com/JacobPEvans/.github-ai/commit/1a970cefa28d91b0ad67543b09bd515be382eb06))
+
 ## [2.4.0](https://github.com/JacobPEvans/.github-ai/compare/v2.3.16...v2.4.0) (2026-11-11)
 
 
