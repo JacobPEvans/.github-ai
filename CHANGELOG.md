@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.4.2](https://github.com/JacobPEvans/.github-ai/compare/v2.4.1...v2.4.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **policy-gate:** report a truncated verdict as output truncated ([#101](https://github.com/JacobPEvans/.github-ai/issues/101)) ([de7d0c0](https://github.com/JacobPEvans/.github-ai/commit/de7d0c0618fa337fa87736a21f65b4f6bd21e9fa))
+
 ## [2.4.1](https://github.com/JacobPEvans/.github-ai/compare/v2.4.0...v2.4.1) (2026-11-11)
 
 
