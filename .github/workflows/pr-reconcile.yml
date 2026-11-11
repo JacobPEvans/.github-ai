@@ -1,0 +1,100 @@
+# PR Reconcile
+#
+# Reusable workflow that keeps open pull requests mergeable without a model.
+# BEHIND: update-branch. DIRTY: merge-conflict label, needs-lead when workflow
+# files are involved, and a repository_dispatch to resolver_repo when set.
+# Every reconcile also sets the merge-hold commit status at the head.
+#
+# Modes (exactly one): pr_number (one PR), base_ref (every open PR on a base,
+# for push-to-base), sweep_owner (every open PR of an owner, for the schedule).
+#
+# Token: an App token limited to contents, pull requests, issues and statuses,
+# scoped to the calling repository except in sweep mode. It cannot write
+# workflow files. Runs on GitHub-hosted runners only.
+
+name: PR Reconcile
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        type: string
+        default: ""
+      base_ref:
+        type: string
+        default: ""
+      sweep_owner:
+        type: string
+        default: ""
+      resolver_repo:
+        description: "owner/repo that receives the pr-conflict repository_dispatch (empty = label only)"
+        type: string
+        default: ""
+    secrets:
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-reconcile-${{ github.repository }}-${{ inputs.pr_number || inputs.base_ref || inputs.sweep_owner }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout reconcile script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts/pr-reconcile
+          path: .ai-workflows
+          persist-credentials: false
+
+      # Single-PR and base modes get a token for the calling repository (plus the resolver
+      # repository when it has the same owner); a sweep covers the whole owner.
+      - name: Token scope
+        id: scope
+        env:
+          SWEEP_OWNER: ${{ inputs.sweep_owner }}
+          RESOLVER_REPO: ${{ inputs.resolver_repo }}
+        run: |
+          repos=""
+          if [ -z "$SWEEP_OWNER" ]; then
+            repos="${GITHUB_REPOSITORY#*/}"
+            if [ "${RESOLVER_REPO%%/*}" = "$GITHUB_REPOSITORY_OWNER" ] && [ "${RESOLVER_REPO#*/}" != "$repos" ]; then
+              repos="$repos,${RESOLVER_REPO#*/}"
+            fi
+          fi
+          echo "repositories=$repos" >> "$GITHUB_OUTPUT"
+
+      - name: Mint App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+          owner: ${{ inputs.sweep_owner || github.repository_owner }}
+          repositories: ${{ steps.scope.outputs.repositories }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-statuses: write
+
+      - name: Reconcile
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          BASE_REF: ${{ inputs.base_ref }}
+          SWEEP_OWNER: ${{ inputs.sweep_owner }}
+          RESOLVER_REPO: ${{ inputs.resolver_repo }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/pr-reconcile/reconcile.js');
+            await run({ github, context, core });

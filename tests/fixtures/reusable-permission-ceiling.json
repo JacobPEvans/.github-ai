@@ -99,6 +99,9 @@
     "contents": "read",
     "pull-requests": "write"
   },
+  "pr-reconcile.yml": {
+    "contents": "read"
+  },
   "repo-hygiene-digest.yml": {
     "actions": "read",
     "contents": "read",
