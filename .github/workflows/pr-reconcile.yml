@@ -27,7 +27,7 @@ on:
         type: string
         default: ""
       resolver_repo:
-        description: "owner/repo that receives the pr-conflict repository_dispatch (empty = label only)"
+        description: "owner/repo that receives the pr-conflict repository_dispatch (empty = label only); must have the same owner as the swept or calling repository"
         type: string
         default: ""
     secrets:
