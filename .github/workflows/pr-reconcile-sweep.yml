@@ -4,6 +4,11 @@
 # 3, 8, 13 and so on, every open pull request of each listed owner is
 # reconciled. Owners come from the PR_RECONCILE_OWNERS repository variable
 # (comma-separated); nothing runs while it is empty.
+#
+# Each owner's job runs in the pr-reconcile runner group and logs in to OpenBao
+# with this workflow's OIDC identity, then mints one installation token for that
+# owner, limited to contents, pull requests, issues and statuses. No stored
+# credential is used.
 
 name: PR Reconcile Sweep
 
@@ -12,8 +17,7 @@ on:
     - cron: "3-58/5 * * * *"
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   owners:
@@ -33,14 +37,65 @@ jobs:
     name: Sweep ${{ matrix.owner }}
     needs: owners
     if: needs.owners.outputs.owners != '[]'
+    runs-on:
+      group: pr-reconcile
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 5
+    concurrency:
+      group: pr-reconcile-sweep-${{ matrix.owner }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
         owner: ${{ fromJSON(needs.owners.outputs.owners) }}
-    uses: ./.github/workflows/pr-reconcile.yml
-    with:
-      sweep_owner: ${{ matrix.owner }}
-      resolver_repo: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
-    secrets:
-      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
-      PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
+    steps:
+      - name: Checkout reconcile action and script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: |
+            .github/actions/pr-reconcile-run
+            .github/scripts/pr-reconcile
+          sparse-checkout-cone-mode: false
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Resolve OpenBao address
+        id: bao
+        run: |
+          test -n "${OPENBAO_ADDR:-}" || { echo "::error::OPENBAO_ADDR is not set on this runner" >&2; exit 1; }
+          echo "addr=$OPENBAO_ADDR" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to OpenBao
+        id: login
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ steps.bao.outputs.addr }}
+          method: jwt
+          path: github-actions
+          role: pr-reconcile-sweep
+          jwtGithubAudience: openbao
+          exportEnv: false
+          exportToken: false
+          outputToken: true
+
+      - name: Mint owner token
+        id: mint
+        env:
+          BAO_ADDR: ${{ steps.bao.outputs.addr }}
+          BAO_TOKEN: ${{ steps.login.outputs.vault_token }}
+          OWNER: ${{ matrix.owner }}
+        run: |
+          body=$(jq -cn --arg o "$OWNER" '{org_name: $o, permissions: {contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}')
+          token=$(curl -sSf -X POST -H "X-Vault-Token: $BAO_TOKEN" --data-binary "$body" "$BAO_ADDR/v1/github/token" | jq -er '.data.token')
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Reconcile
+        uses: ./.ai-workflows/.github/actions/pr-reconcile-run
+        with:
+          github-token: ${{ steps.mint.outputs.token }}
+          sweep_owner: ${{ matrix.owner }}
+          resolver_repo: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
+          exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}

@@ -72,15 +72,34 @@ describe('reconcile', () => {
     process.env.PR_NUMBER = '7';
   });
 
-  it('passes the exclusion secret only to the reconcile script step', () => {
+  it('passes the exclusion secret only to the reconcile step', () => {
     const workflow = readFileSync('.github/workflows/pr-reconcile.yml', 'utf8');
     const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
-    const secretEnvLines = workflow.match(/^ {10}PR_RECONCILE_EXCLUDE_REPOS:.*$/gm) || [];
+    const action = readFileSync('.github/actions/pr-reconcile-run/action.yml', 'utf8');
+    const line = '          exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}';
 
     expect(workflow).toContain('      PR_RECONCILE_EXCLUDE_REPOS:\n        required: false');
-    expect(secretEnvLines).toEqual(['          PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}']);
-    expect(workflow.indexOf(secretEnvLines[0])).toBeGreaterThan(workflow.indexOf('      - name: Reconcile'));
-    expect(sweep).toContain('      PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}');
+    expect(workflow.split(line).length - 1).toBe(1);
+    expect(workflow.indexOf(line)).toBeGreaterThan(workflow.indexOf('      - name: Reconcile'));
+    expect(sweep.split(line).length - 1).toBe(1);
+    expect(sweep.indexOf(line)).toBeGreaterThan(sweep.indexOf('      - name: Reconcile'));
+    expect(action.match(/PR_RECONCILE_EXCLUDE_REPOS:/g)).toEqual(['PR_RECONCILE_EXCLUDE_REPOS:']);
+  });
+
+  it('runs the sweep on its runner group with an OIDC-minted owner token and no stored App key', () => {
+    const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
+
+    expect(sweep).toContain('\npermissions: {}\n');
+    expect(sweep).toContain('    runs-on:\n      group: pr-reconcile\n');
+    expect(sweep).toContain('    permissions:\n      contents: read\n      id-token: write\n');
+    expect(sweep).toContain('      fail-fast: false\n');
+    expect(sweep).toContain('          role: pr-reconcile-sweep\n');
+    expect(sweep).toContain('"$BAO_ADDR/v1/github/token"');
+    expect(sweep).toContain('{org_name: $o, permissions: {contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}');
+    expect(sweep).toContain('echo "::add-mask::$token"');
+    expect(sweep).not.toContain('GH_APP_CLAUDE_BOT_PRIVATE_KEY');
+    expect(sweep).not.toContain('pr-reconcile.yml');
+    expect(sweep).not.toContain('repository:');
   });
 
   it('calls update-branch at the observed head and records the action once', async () => {

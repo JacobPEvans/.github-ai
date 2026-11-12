@@ -1,0 +1,44 @@
+name: Run PR Reconcile
+description: Run the PR Reconcile script with a caller-minted token. Exactly one of pr_number, base_ref or sweep_owner is set.
+inputs:
+  github-token:
+    description: Token limited to contents, pull requests, issues and statuses.
+    required: true
+  pr_number:
+    description: One pull request in the calling repository.
+    required: false
+    default: ""
+  base_ref:
+    description: Every open pull request on this base in the calling repository.
+    required: false
+    default: ""
+  sweep_owner:
+    description: Every open pull request of this owner.
+    required: false
+    default: ""
+  resolver_repo:
+    description: owner/repo that receives the pr-conflict repository_dispatch (empty = label only).
+    required: false
+    default: ""
+  exclude_repos:
+    description: Comma-separated repositories the sweep skips.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Reconcile
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        BASE_REF: ${{ inputs.base_ref }}
+        SWEEP_OWNER: ${{ inputs.sweep_owner }}
+        RESOLVER_REPO: ${{ inputs.resolver_repo }}
+        PR_RECONCILE_EXCLUDE_REPOS: ${{ inputs.exclude_repos }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const path = require('path');
+          const run = require(path.join(process.env.ACTION_PATH, '../../scripts/pr-reconcile/reconcile.js'));
+          await run({ github, context, core });
