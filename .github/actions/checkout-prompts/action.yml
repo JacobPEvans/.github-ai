@@ -16,7 +16,7 @@ runs:
       with:
         repository: dryvist/ai-llm-prompts
         # renovate: datasource=github-tags depName=dryvist/ai-llm-prompts
-        ref: da5455ff4fc951d9552899bbe5d496fafc5d2429  # v1.101.1
+        ref: 32b6c593f6a15f38b677fddd9cb3c44e4eb36461  # v1.111.1
         sparse-checkout: ${{ inputs.sparse-checkout }}
         sparse-checkout-cone-mode: false
         path: ${{ inputs.path }}
