@@ -98,6 +98,7 @@ jobs:
     with:
       rubric: leak
       model: light
+      max_tokens: 4000
       max_diff_kb: 24
       blocking: true
       runner_label: ${{ inputs.runner_label }}

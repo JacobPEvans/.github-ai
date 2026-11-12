@@ -16,6 +16,7 @@ jobs:
     with:
       rubric: leak
       model: light
+      max_tokens: 4000
       # shortcut: the light lane refuses input over ~8k tokens, so only the first
       # 24 KiB of the diff is scanned; raise it once a local-only long lane exists.
       max_diff_kb: 24

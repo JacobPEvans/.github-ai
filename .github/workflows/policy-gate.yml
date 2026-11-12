@@ -301,6 +301,7 @@ jobs:
           HAS_OVERRIDE: ${{ needs.review.outputs.has_override }}
           REVIEW_STATUS: ${{ needs.review.outputs.verdict_status }}
           VALID_OUTCOME: ${{ steps.valid.outcome }}
+          RESPONSE_FILE: handoff/verdict.json
         run: |
           if [ "$HAS_OVERRIDE" = "true" ]; then
             state=override
@@ -308,7 +309,12 @@ jobs:
           elif [ "$REVIEW_STATUS" != "ok" ]; then
             state=router-request-failed
           elif [ "$VALID_OUTCOME" != "success" ]; then
-            state=invalid-response
+            truncated="$(bash .ai-workflows/.github/scripts/shared/gateway-failure.sh truncated "$RESPONSE_FILE")"
+            if [ "$truncated" = truncated ]; then
+              state=truncated-response
+            else
+              state=invalid-response
+            fi
           else
             state=ok
           fi
@@ -350,7 +356,7 @@ jobs:
       # failed request is reported as router-request-failed.
       - name: Report gateway unavailability
         id: gateway
-        if: steps.state.outputs.state == 'router-request-failed' || steps.state.outputs.state == 'invalid-response'
+        if: steps.state.outputs.state == 'router-request-failed' || steps.state.outputs.state == 'invalid-response' || steps.state.outputs.state == 'truncated-response'
         env:
           NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -363,7 +369,11 @@ jobs:
           CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
           REASON: ${{ steps.state.outputs.state }}
         run: |
-          printf '## %s\n\nAI review not performed: gateway unavailable (%s).\n' "$REVIEW_TITLE" "$REASON" > policy-gate.md
+          if [ "$REASON" = truncated-response ]; then
+            printf '## %s\n\nAI review reply was truncated at the completion ceiling.\n' "$REVIEW_TITLE" > policy-gate.md
+          else
+            printf '## %s\n\nAI review not performed: gateway unavailable (%s).\n' "$REVIEW_TITLE" "$REASON" > policy-gate.md
+          fi
           echo 0 > policy-gate.exit
           bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "$REVIEW_NAME" "$REASON"
 

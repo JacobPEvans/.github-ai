@@ -51,12 +51,17 @@ classify() {
   fi
 }
 
-# A verdict cut off by the output limit: empty, JSON that does not parse, or a completion whose
-# finish reason is length. A complete verdict passes, even one whose text quotes that wording.
+# A non-empty verdict cut off by the output limit: an unterminated JSON document or a completion
+# whose finish reason is length. Other invalid JSON and schema failures remain invalid responses.
 verdict_truncated() {
-  if [ ! -s "$1" ] || ! jq empty "$1" > /dev/null 2>&1; then
-    echo truncated
-  elif jq -e '(.choices[0].finish_reason // .finish_reason) == "length"' "$1" > /dev/null 2>&1; then
+  local parse_error
+  if [ ! -s "$1" ]; then
+    return 0
+  elif parse_error="$(jq empty "$1" 2>&1)"; then
+    if jq -e '(.choices[0].finish_reason // .finish_reason) == "length"' "$1" > /dev/null 2>&1; then
+      echo truncated
+    fi
+  elif grep -Eqi 'Unfinished .* at EOF|Unfinished JSON term at EOF|Unexpected end of JSON input' <<< "$parse_error"; then
     echo truncated
   fi
 }
@@ -78,8 +83,8 @@ create_check() {
   fi
   if [[ ${CHECK_SUMMARY+x} ]]; then
     summary="$CHECK_SUMMARY"
-  elif [ "$reason" = truncated ]; then
-    summary="AI review output truncated"
+  elif [ "$reason" = truncated-response ] || [ "$reason" = truncated ]; then
+    summary="AI review reply was truncated at the completion ceiling"
   else
     summary="gateway unavailable ($reason)"
   fi
@@ -125,8 +130,8 @@ send_alert() {
 
 report() {
   local job="$1" reason="$2" line cause conclusion="${CONCLUSION:-neutral}" check_status=0
-  if [ "$reason" = truncated ]; then
-    line="AI review output truncated"
+  if [ "$reason" = truncated-response ] || [ "$reason" = truncated ]; then
+    line="AI review reply was truncated at the completion ceiling"
     cause="a truncated verdict"
   else
     line="AI review not performed: gateway unavailable ($reason)"
