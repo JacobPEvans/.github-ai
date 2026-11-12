@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.0](https://github.com/JacobPEvans/.github-ai/compare/v2.4.5...v2.5.0) (2026-11-12)
+
+
+### Features
+
+* **pr-reconcile:** skip repositories on a private exclusion list ([#112](https://github.com/JacobPEvans/.github-ai/issues/112)) ([fd3c893](https://github.com/JacobPEvans/.github-ai/commit/fd3c893befde77cda1a82529ebc6cbc25562719e))
+
 ## [2.4.5](https://github.com/JacobPEvans/.github-ai/compare/v2.4.4...v2.4.5) (2026-11-12)
 
 
