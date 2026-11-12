@@ -1,4 +1,5 @@
 const { mock, describe, it, expect, beforeEach } = require('bun:test');
+const { readFileSync } = require('node:fs');
 const { createMockCore, createMockContext, createMockGithub } = require('./helpers.js');
 const run = require('../.github/scripts/pr-reconcile/reconcile.js');
 
@@ -65,9 +66,21 @@ describe('reconcile', () => {
     run.retryBudgetMs = 3 * 60 * 1000;
     run.runBudgetMs = 4 * 60 * 1000;
     delete process.env.RESOLVER_REPO;
+    delete process.env.PR_RECONCILE_EXCLUDE_REPOS;
     delete process.env.BASE_REF;
     delete process.env.SWEEP_OWNER;
     process.env.PR_NUMBER = '7';
+  });
+
+  it('passes the exclusion secret only to the reconcile script step', () => {
+    const workflow = readFileSync('.github/workflows/pr-reconcile.yml', 'utf8');
+    const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
+    const secretEnvLines = workflow.match(/^ {10}PR_RECONCILE_EXCLUDE_REPOS:.*$/gm) || [];
+
+    expect(workflow).toContain('      PR_RECONCILE_EXCLUDE_REPOS:\n        required: false');
+    expect(secretEnvLines).toEqual(['          PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}']);
+    expect(workflow.indexOf(secretEnvLines[0])).toBeGreaterThan(workflow.indexOf('      - name: Reconcile'));
+    expect(sweep).toContain('      PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}');
   });
 
   it('calls update-branch at the observed head and records the action once', async () => {
@@ -125,6 +138,84 @@ describe('reconcile', () => {
     gh.paginate.mockResolvedValueOnce([{ number: 7 }, { number: 8 }]);
     const events = await run({ github: gh, context: createMockContext(), core });
     expect(events.length).toBe(2);
+  });
+
+  it('skips excluded repositories during a sweep without logging their names', async () => {
+    delete process.env.PR_NUMBER;
+    process.env.SWEEP_OWNER = 'example-org';
+    process.env.PR_RECONCILE_EXCLUDE_REPOS = ' EXAMPLE-ORG / HIDDEN-REPO ,  ';
+    const gh = github(pr({ mergeable_state: 'behind' }));
+    gh.paginate.mockResolvedValueOnce([
+      { number: 7, repository_url: 'https://api.github.com/repos/example-org/hidden-repo' },
+      { number: 8, repository_url: 'https://api.github.com/repos/example-org/public-repo' },
+    ]);
+
+    const events = await run({ github: gh, context: createMockContext(), core });
+    const apiCalls = [
+      ...gh.rest.pulls.get.mock.calls,
+      ...gh.rest.pulls.updateBranch.mock.calls,
+      ...gh.rest.pulls.update.mock.calls,
+      ...gh.rest.pulls.listFiles.mock.calls,
+      ...gh.rest.issues.addLabels.mock.calls,
+      ...gh.rest.issues.removeLabel.mock.calls,
+      ...gh.rest.repos.getCombinedStatusForRef.mock.calls,
+      ...gh.rest.repos.createCommitStatus.mock.calls,
+      ...gh.rest.repos.createDispatchEvent.mock.calls,
+    ];
+    const logs = JSON.stringify({ infos: core.infos, warnings: core.warnings, events, output: core.getOutput('events') });
+
+    expect(gh.rest.pulls.get).toHaveBeenCalledTimes(1);
+    expect(gh.rest.pulls.get.mock.calls[0][0]).toMatchObject({ owner: 'example-org', repo: 'public-repo', pull_number: 8 });
+    expect(apiCalls.every(([args]) => args.owner !== 'example-org' || args.repo !== 'hidden-repo')).toBe(true);
+    expect(gh.paginate.mock.calls.map(([method]) => method)).toEqual([gh.rest.search.issuesAndPullRequests]);
+    expect(events).toHaveLength(1);
+    expect(logs).not.toContain('example-org/hidden-repo');
+    expect(core.infos).toContain('skipped 1 pull requests in excluded repositories');
+  });
+
+  it('skips excluded repositories in base mode before reading individual PRs', async () => {
+    delete process.env.PR_NUMBER;
+    process.env.BASE_REF = 'develop';
+    process.env.PR_RECONCILE_EXCLUDE_REPOS = 'test-owner/test-repo';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([{ number: 7 }, { number: 8 }]);
+
+    const events = await run({ github: gh, context: createMockContext(), core });
+
+    expect(events).toEqual([]);
+    expect(gh.paginate).not.toHaveBeenCalled();
+    expect(gh.rest.pulls.get).not.toHaveBeenCalled();
+    expect(gh.rest.repos.getCombinedStatusForRef).not.toHaveBeenCalled();
+    expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
+    expect(JSON.stringify({ infos: core.infos, warnings: core.warnings, output: core.getOutput('events') })).not.toContain('test-owner/test-repo');
+    expect(core.infos).toContain('skipped 1 reconcile target in excluded repositories');
+  });
+
+  it('skips an excluded single PR before any per-PR API calls', async () => {
+    process.env.PR_RECONCILE_EXCLUDE_REPOS = ' TEST-OWNER / TEST-REPO ';
+    const gh = github(pr());
+
+    const events = await run({ github: gh, context: createMockContext(), core });
+
+    expect(events).toEqual([]);
+    expect(gh.rest.pulls.get).not.toHaveBeenCalled();
+    expect(gh.rest.pulls.updateBranch).not.toHaveBeenCalled();
+    expect(gh.rest.repos.getCombinedStatusForRef).not.toHaveBeenCalled();
+    expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
+    expect(JSON.stringify({ infos: core.infos, warnings: core.warnings, output: core.getOutput('events') })).not.toContain('test-owner/test-repo');
+    expect(core.infos).toContain('skipped 1 reconcile target in excluded repositories');
+  });
+
+  it('keeps the existing behavior when the exclusion list is empty', async () => {
+    process.env.PR_RECONCILE_EXCLUDE_REPOS = ' ,  ';
+    const gh = github(pr({ mergeable_state: 'behind' }));
+
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+
+    expect(gh.rest.pulls.get).toHaveBeenCalledTimes(1);
+    expect(gh.rest.pulls.updateBranch).toHaveBeenCalledTimes(1);
+    expect(event).toMatchObject({ pr: 7, action: 'update-branch', outcome: 'updated' });
+    expect(core.infos.some((message) => message.includes('skipped'))).toBe(false);
   });
 
   it('records an API error as the outcome instead of throwing', async () => {

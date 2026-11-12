@@ -43,3 +43,4 @@ jobs:
       resolver_repo: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
     secrets:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+      PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}

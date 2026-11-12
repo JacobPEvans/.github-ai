@@ -168,6 +168,17 @@ async function reconcile({ github, core, owner, repo, number }) {
 
 const SEARCH_CAP = 1000;
 
+function excludedRepositories() {
+  return new Set((process.env.PR_RECONCILE_EXCLUDE_REPOS || '')
+    .split(',')
+    .map((repository) => repository.replace(/\s/g, '').toLowerCase())
+    .filter(Boolean));
+}
+
+function isExcludedRepository(exclusions, owner, repo) {
+  return exclusions.has(`${owner}/${repo}`.toLowerCase());
+}
+
 async function targets({ github, context, core }) {
   const { owner, repo } = context.repo;
   if (process.env.PR_NUMBER) return [{ owner, repo, number: Number(process.env.PR_NUMBER) }];
@@ -198,10 +209,20 @@ module.exports = async function run({ github, context, core }) {
   if (resolver && !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(resolver)) throw new Error(`invalid RESOLVER_REPO: ${resolver}`);
   const started = Date.now();
   retryDeadline = started + module.exports.retryBudgetMs;
+  const exclusions = excludedRepositories();
+  if ((process.env.PR_NUMBER || process.env.BASE_REF)
+    && isExcludedRepository(exclusions, context.repo.owner, context.repo.repo)) {
+    core.info('skipped 1 reconcile target in excluded repositories');
+    core.setOutput('events', JSON.stringify(events));
+    return events;
+  }
   const all = await targets({ github, context, core });
-  for (const [index, target] of all.entries()) {
+  const selected = all.filter((target) => !isExcludedRepository(exclusions, target.owner, target.repo));
+  const skipped = all.length - selected.length;
+  if (skipped > 0) core.info(`skipped ${skipped} pull requests in excluded repositories`);
+  for (const [index, target] of selected.entries()) {
     if (Date.now() - started > module.exports.runBudgetMs) {
-      core.warning(`run budget reached; ${all.length - index} pull requests deferred to the next sweep`);
+      core.warning(`run budget reached; ${selected.length - index} pull requests deferred to the next sweep`);
       break;
     }
     try {

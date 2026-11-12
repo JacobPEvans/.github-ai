@@ -33,6 +33,8 @@ on:
     secrets:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         required: true
+      PR_RECONCILE_EXCLUDE_REPOS:
+        required: false
 
 permissions:
   contents: read
@@ -93,6 +95,7 @@ jobs:
           BASE_REF: ${{ inputs.base_ref }}
           SWEEP_OWNER: ${{ inputs.sweep_owner }}
           RESOLVER_REPO: ${{ inputs.resolver_repo }}
+          PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
