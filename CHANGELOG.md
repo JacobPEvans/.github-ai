@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.4.5](https://github.com/JacobPEvans/.github-ai/compare/v2.4.4...v2.4.5) (2026-11-12)
+
+
+### Bug Fixes
+
+* **policy-gate:** raise the leak review completion ceiling and report truncated replies ([#110](https://github.com/JacobPEvans/.github-ai/issues/110)) ([ee4683f](https://github.com/JacobPEvans/.github-ai/commit/ee4683f932c993403e280d39e0856ef45565a586))
+
 ## [2.4.4](https://github.com/JacobPEvans/.github-ai/compare/v2.4.3...v2.4.4) (2026-11-12)
 
 
