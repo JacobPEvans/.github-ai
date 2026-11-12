@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.4.4](https://github.com/JacobPEvans/.github-ai/compare/v2.4.3...v2.4.4) (2026-11-12)
+
+
+### Bug Fixes
+
+* **ci:** bound the learning-gate evaluation step at 60 minutes ([#108](https://github.com/JacobPEvans/.github-ai/issues/108)) ([9a06526](https://github.com/JacobPEvans/.github-ai/commit/9a065262bbe5c1f6e08ef91ecd9a98882fbe1e11))
+
 ## [2.4.3](https://github.com/JacobPEvans/.github-ai/compare/v2.4.2...v2.4.3) (2026-11-11)
 
 
