@@ -106,6 +106,7 @@ jobs:
           persist-credentials: false
 
       - name: Evaluate proposals and write decisions
+        timeout-minutes: 60
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           EVALS_DIR: ${{ github.workspace }}/.llm-prompt-evals
