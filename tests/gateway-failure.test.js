@@ -1,5 +1,5 @@
 const { describe, expect, it } = require('bun:test');
-const { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } = require('node:fs');
+const { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 
@@ -150,8 +150,12 @@ describe('verdict truncation', () => {
     expect(truncated('{"summary":"Found one","findings":[{"check":"credential","result":"fail","file":"a.yml","line":3,"detail":"Unfinished')).toBe('truncated');
   });
 
-  it('names an empty verdict', () => {
-    expect(truncated('')).toBe('truncated');
+  it('does not call an empty verdict truncated', () => {
+    expect(truncated('')).toBe('');
+  });
+
+  it('does not call unrelated invalid JSON truncated', () => {
+    expect(truncated('{"summary":]')).toBe('');
   });
 
   it('names a completion that stopped at the output limit', () => {
@@ -248,22 +252,69 @@ describe('gateway failure report', () => {
     expect(r.stdout).toContain('NTFY_BASE_URL not configured; skipping the ops alert.');
   });
 
-  it('truncated: reports the output limit, never the gateway, as a neutral check run', () => {
-    const r = report({}, { reason: 'truncated' });
+  it('truncated: reports the completion ceiling, never the gateway, as a neutral check run', () => {
+    const r = report({}, { reason: 'truncated-response' });
     expect(r.exitCode).toBe(0);
-    expect(r.summary).toBe('AI review output truncated\n');
-    expect(r.stdout).toContain('::warning::demo: AI review output truncated');
+    expect(r.summary).toBe('AI review reply was truncated at the completion ceiling\n');
+    expect(r.stdout).toContain('::warning::demo: AI review reply was truncated at the completion ceiling');
     expect(r.stdout).not.toContain('gateway unavailable');
     expect(r.request.conclusion).toBe('neutral');
-    expect(r.request.output.summary).toBe('AI review output truncated');
+    expect(r.request.output.summary).toBe('AI review reply was truncated at the completion ceiling');
   });
 
   it('truncated and blocking: fails closed and names the truncated verdict', () => {
-    const r = report({ CONCLUSION: 'failure' }, { reason: 'truncated' });
+    const r = report({ CONCLUSION: 'failure' }, { reason: 'truncated-response' });
     expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain('::error::demo: AI review output truncated');
+    expect(r.stdout).toContain('::error::demo: AI review reply was truncated at the completion ceiling');
     expect(r.stdout).toContain('failing closed on a truncated verdict');
     expect(r.stdout).not.toContain('gateway unavailable');
+  });
+});
+
+describe('policy-gate verdict state', () => {
+  const workflow = Bun.YAML.parse(readFileSync(join('.github', 'workflows', 'policy-gate.yml'), 'utf8'));
+  const settle = workflow.jobs.gate.steps.find((step) => step.name === 'Settle the verdict state').run;
+
+  function stateFor(response, validOutcome = 'failure') {
+    const dir = mkdtempSync(join(tmpdir(), 'policy-verdict-state-'));
+    try {
+      const responseFile = join(dir, 'verdict.json');
+      const outputFile = join(dir, 'github-output');
+      writeFileSync(responseFile, response);
+      mkdirSync(join(dir, '.ai-workflows', '.github'), { recursive: true });
+      symlinkSync(join(process.cwd(), '.github', 'scripts'), join(dir, '.ai-workflows', '.github', 'scripts'), 'dir');
+      const result = Bun.spawnSync(['/bin/bash', '-e', '-o', 'pipefail', '-c', settle], {
+        cwd: dir,
+        env: {
+          ...process.env,
+          HAS_OVERRIDE: 'false',
+          REVIEW_STATUS: 'ok',
+          VALID_OUTCOME: validOutcome,
+          RESPONSE_FILE: responseFile,
+          GITHUB_OUTPUT: outputFile,
+        },
+      });
+      expect(result.exitCode).toBe(0);
+      return readFileSync(outputFile, 'utf8').trim().replace('state=', '');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('settles an unterminated verdict as truncated-response', () => {
+    expect(stateFor('{"summary":"Found a leak","findings":[{"detail":"unfinished')).toBe('truncated-response');
+  });
+
+  it('settles a completion with finish reason length as truncated-response', () => {
+    expect(stateFor('{"choices":[{"finish_reason":"length"}]}')).toBe('truncated-response');
+  });
+
+  it('keeps a valid verdict in the ok state', () => {
+    expect(stateFor('{"summary":"clean","findings":[]}', 'success')).toBe('ok');
+  });
+
+  it('keeps structurally valid but schema-invalid JSON as invalid-response', () => {
+    expect(stateFor('{"unexpected":true}')).toBe('invalid-response');
   });
 });
 
