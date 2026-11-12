@@ -35,9 +35,12 @@ test('the three policy reviews use dogfood rubrics, models, and blocking mode', 
 
 test('the leak reviews raise only their completion ceiling to 4000 tokens', () => {
   expect(gate.jobs.leak.with.max_tokens).toBe(4000);
+  expect(gate.jobs.leak.with).toMatchObject({ model: 'standard', max_diff_kb: 150 });
   expect(gate.jobs.security.with.max_tokens).toBeUndefined();
   expect(gate.jobs.semantic.with.max_tokens).toBeUndefined();
-  expect(workflow('dogfood-leak-review.yml').jobs['leak-review'].with.max_tokens).toBe(4000);
+  expect(workflow('dogfood-leak-review.yml').jobs['leak-review'].with).toMatchObject({
+    model: 'standard', max_tokens: 4000, max_diff_kb: 150,
+  });
 });
 
 test('the deterministic scan is pinned and checks out the full pull request head history', () => {

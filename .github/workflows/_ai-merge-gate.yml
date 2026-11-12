@@ -97,9 +97,9 @@ jobs:
       pull-requests: write
     with:
       rubric: leak
-      model: light
+      model: standard
       max_tokens: 4000
-      max_diff_kb: 24
+      max_diff_kb: 150
       blocking: true
       runner_label: ${{ inputs.runner_label }}
     secrets:

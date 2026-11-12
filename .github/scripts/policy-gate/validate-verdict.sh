@@ -21,7 +21,61 @@ case "$RUBRIC" in
   *) echo "::error::Unknown rubric: $RUBRIC" >&2; exit 2 ;;
 esac
 
-jq -e --arg names "$names" --arg rubric "$RUBRIC" --argjson exact "$exact" '
+salvage_truncated_leak() {
+  local candidate="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/policy-gate-salvage.XXXXXXXX"
+  candidate="$(mktemp "$candidate")" || return 1
+  if ! python3 - "$RESPONSE_FILE" > "$candidate" <<'PY'
+import json, sys
+s = open(sys.argv[1], encoding="utf-8").read()
+d = json.JSONDecoder()
+def ws(i):
+    while i < len(s) and s[i] in " \t\r\n": i += 1
+    return i
+def val(i): return d.raw_decode(s, ws(i))
+i, findings = ws(0), None
+if i < len(s) and s[i] == "{":
+    i = ws(i + 1)
+    while i < len(s):
+        try: key, i = val(i)
+        except json.JSONDecodeError: break
+        i = ws(i)
+        if not isinstance(key, str) or i == len(s) or s[i] != ":": break
+        i = ws(i + 1)
+        if key == "findings":
+            if i == len(s) or s[i] != "[": break
+            findings, i = [], ws(i + 1)
+            while i < len(s) and s[i] != "]":
+                try: item, end = val(i)
+                except json.JSONDecodeError: break
+                if not isinstance(item, dict) or item.get("result") != "fail": break
+                if item not in findings: findings.append(item)
+                i = ws(end)
+                if i < len(s) and s[i] == ",": i = ws(i + 1); continue
+                break
+            break
+        try: _, i = val(i)
+        except json.JSONDecodeError: break
+        i = ws(i)
+        if i < len(s) and s[i] == ",": i = ws(i + 1); continue
+        break
+if findings:
+    print(json.dumps({"summary": "Salvaged complete findings from a truncated reply.", "findings": findings}))
+PY
+  then
+    rm -f -- "$candidate"
+    return 1
+  fi
+  if [[ ! -s "$candidate" ]] || ! RESPONSE_FILE="$candidate" bash "${BASH_SOURCE[0]}"; then
+    rm -f -- "$candidate"
+    return 1
+  fi
+  if ! mv -- "$candidate" "$RESPONSE_FILE"; then
+    rm -f -- "$candidate"
+    return 1
+  fi
+}
+
+if ! jq -e --arg names "$names" --arg rubric "$RUBRIC" --argjson exact "$exact" '
   ($names | split(" ")) as $allowed |
   type == "object" and
   ((keys - ["findings", "summary"]) | length == 0) and
@@ -47,7 +101,15 @@ jq -e --arg names "$names" --arg rubric "$RUBRIC" --argjson exact "$exact" '
      ((.file | length) > 0 and .line > 0 and (.line | floor) == .line))
    else true
    end)
-' "$RESPONSE_FILE" > /dev/null
+' "$RESPONSE_FILE" > /dev/null; then
+  if [[ "$RUBRIC" == leak ]]; then
+    truncated="$(bash "$(dirname -- "${BASH_SOURCE[0]}")/../shared/gateway-failure.sh" truncated "$RESPONSE_FILE")"
+    if [[ "$truncated" == truncated ]] && salvage_truncated_leak; then
+      exit 0
+    fi
+  fi
+  exit 1
+fi
 
 if [[ "$RUBRIC" != leak ]]; then
   exit 0

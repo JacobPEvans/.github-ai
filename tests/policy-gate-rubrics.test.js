@@ -18,7 +18,7 @@ const rubrics = {
   },
   leak: {
     prompt: 'leak-review',
-    model: 'light',
+    model: 'standard',
     checks: ['credential', 'private_host_or_ip', 'internal_topology', 'incident_detail'],
   },
   semantic: {
