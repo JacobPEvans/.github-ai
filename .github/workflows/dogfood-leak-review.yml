@@ -15,11 +15,9 @@ jobs:
     uses: ./.github/workflows/policy-gate.yml
     with:
       rubric: leak
-      model: light
+      model: standard
       max_tokens: 4000
-      # shortcut: the light lane refuses input over ~8k tokens, so only the first
-      # 24 KiB of the diff is scanned; raise it once a local-only long lane exists.
-      max_diff_kb: 24
+      max_diff_kb: 150
     secrets:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}

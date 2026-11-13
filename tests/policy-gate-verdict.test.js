@@ -127,6 +127,36 @@ test('accepts a leak verdict with several findings in one category', () => {
   expect(exitCodeFor('leak', JSON.stringify(verdict))).toBe(0);
 });
 
+test('salvages and deduplicates complete findings from a truncated leak reply', () => {
+  const finding = makeFinding('credential', 'fail', { file: 'config.yml', line: 1 });
+  const copies = Array(129).fill(JSON.stringify(finding)).join(',');
+  const truncated = `{"summary":"repeated finding","findings":[${copies}`;
+  const result = leakResult(truncated, patch(['+password: fixture-value-12345']));
+
+  expect(result.validationExit).toBe(0);
+  expect(JSON.parse(result.response).findings).toEqual([finding]);
+  expect(result.renderedExit).toBe('1');
+});
+
+test('keeps a truncated leak reply without a complete finding unvalidated', () => {
+  const truncated = '{"summary":"unfinished","findings":[{"check":"credential","result":"fail"';
+  const result = leakResult(truncated, patch(['+password: fixture-value-12345']));
+
+  expect(result.validationExit).not.toBe(0);
+  expect(result.response).toBe(truncated);
+  expect(result.renderedExit).toBeNull();
+});
+
+test('does not salvage a truncated leak reply with only pass findings', () => {
+  const finding = makeFinding('credential', 'pass');
+  const truncated = `{"summary":"unfinished","findings":[${JSON.stringify(finding)}`;
+  const result = leakResult(truncated, patch(['+password: fixture-value-12345']));
+
+  expect(result.validationExit).not.toBe(0);
+  expect(result.response).toBe(truncated);
+  expect(result.renderedExit).toBeNull();
+});
+
 test('validates leak findings against the aggregate GitHub pull-request diff', () => {
   const dir = mkdtempSync(join(tmpdir(), 'policy-leak-aggregate-diff-'));
   try {
