@@ -10,7 +10,8 @@
 #
 # Token: an App token limited to contents, pull requests, issues and statuses,
 # scoped to the calling repository except in sweep mode. It cannot write
-# workflow files. Runs on GitHub-hosted runners only.
+# workflow files. Runs on GitHub-hosted runners only. The scheduled sweep of
+# this repository runs in pr-reconcile-sweep.yml instead.
 
 name: PR Reconcile
 
@@ -54,7 +55,10 @@ jobs:
         with:
           repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
-          sparse-checkout: .github/scripts/pr-reconcile
+          sparse-checkout: |
+            .github/actions/pr-reconcile-run
+            .github/scripts/pr-reconcile
+          sparse-checkout-cone-mode: false
           path: .ai-workflows
           persist-credentials: false
 
@@ -89,15 +93,11 @@ jobs:
           permission-statuses: write
 
       - name: Reconcile
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        env:
-          PR_NUMBER: ${{ inputs.pr_number }}
-          BASE_REF: ${{ inputs.base_ref }}
-          SWEEP_OWNER: ${{ inputs.sweep_owner }}
-          RESOLVER_REPO: ${{ inputs.resolver_repo }}
-          PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
+        uses: ./.ai-workflows/.github/actions/pr-reconcile-run
         with:
           github-token: ${{ steps.app-token.outputs.token }}
-          script: |
-            const run = require('./.ai-workflows/.github/scripts/pr-reconcile/reconcile.js');
-            await run({ github, context, core });
+          pr_number: ${{ inputs.pr_number }}
+          base_ref: ${{ inputs.base_ref }}
+          sweep_owner: ${{ inputs.sweep_owner }}
+          resolver_repo: ${{ inputs.resolver_repo }}
+          exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
