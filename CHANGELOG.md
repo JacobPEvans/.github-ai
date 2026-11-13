@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.1](https://github.com/JacobPEvans/.github-ai/compare/v2.5.0...v2.5.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **policy-gate:** run the leak review on the standard lane and salvage truncated findings ([#114](https://github.com/JacobPEvans/.github-ai/issues/114)) ([e8f03cb](https://github.com/JacobPEvans/.github-ai/commit/e8f03cb1a1dcf655f0bc7b7f6101f12ac95fc61c))
+
 ## [2.5.0](https://github.com/JacobPEvans/.github-ai/compare/v2.4.5...v2.5.0) (2026-11-12)
 
 
