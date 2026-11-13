@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.6.0](https://github.com/JacobPEvans/.github-ai/compare/v2.5.1...v2.6.0) (2026-11-13)
+
+
+### Features
+
+* **pr-reconcile:** run the sweep on its runner group with an OIDC-minted owner token ([#115](https://github.com/JacobPEvans/.github-ai/issues/115)) ([356b011](https://github.com/JacobPEvans/.github-ai/commit/356b011a21b9ed920bc0cbed9606e78c7f0def18))
+
 ## [2.5.1](https://github.com/JacobPEvans/.github-ai/compare/v2.5.0...v2.5.1) (2026-11-13)
 
 
