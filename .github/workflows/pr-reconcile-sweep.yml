@@ -17,12 +17,15 @@ on:
     - cron: "3-58/5 * * * *"
   workflow_dispatch:
 
-permissions: {}
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   owners:
     name: List owners
     runs-on: ubuntu-24.04
+    permissions: {}
     timeout-minutes: 2
     outputs:
       owners: ${{ steps.list.outputs.owners }}

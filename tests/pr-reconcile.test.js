@@ -89,7 +89,8 @@ describe('reconcile', () => {
   it('runs the sweep on its runner group with an OIDC-minted owner token and no stored App key', () => {
     const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
 
-    expect(sweep).toContain('\npermissions: {}\n');
+    expect(sweep).toContain('\npermissions:\n  contents: read\n  id-token: write\n\njobs:');
+    expect(sweep).toContain('    runs-on: ubuntu-24.04\n    permissions: {}\n');
     expect(sweep).toContain('    runs-on:\n      group: pr-reconcile\n');
     expect(sweep).toContain('    permissions:\n      contents: read\n      id-token: write\n');
     expect(sweep).toContain('      fail-fast: false\n');
