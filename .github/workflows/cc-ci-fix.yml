@@ -33,6 +33,14 @@ on:
         type: string
         required: false
         default: ""
+      agent:
+        description: >-
+          Agent that makes the fix. Empty keeps the configured default. Set
+          openhands to run the OpenHands agent on the role named by local_model.
+          Only claude can be combined with local_only.
+        type: string
+        required: false
+        default: ""
       dry_run:
         description: Generate an artifact without publishing a patch or failure reply.
         type: boolean
@@ -257,6 +265,13 @@ jobs:
       pull-requests: read
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     steps:
+      # The local-only key flow is Claude-specific.
+      - name: Reject another agent with the local-only key flow
+        if: inputs.agent != '' && inputs.agent != 'claude' && inputs.local_only
+        run: |
+          echo "::error::local_only runs Claude only; leave agent empty or set it to claude"
+          exit 1
+
       - name: Checkout PR branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -308,7 +323,8 @@ jobs:
       - name: Run AI agent
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
-          agent: ${{ inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude' }}
+          agent: ${{ inputs.agent || (inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude') }}
+          openhands_model: ${{ inputs.local_model }}
           prompt: ${{ steps.prompt.outputs.content }}
           claude_model: ${{ inputs.local_only && inputs.local_model || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL }}
           codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}

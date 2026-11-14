@@ -7,7 +7,7 @@ description: >-
 
 inputs:
   agent:
-    description: AI agent to run. Supported values are claude and codex.
+    description: AI agent to run. Supported values are claude, codex and openhands.
     required: false
     default: claude
   prompt:
@@ -62,6 +62,14 @@ inputs:
     description: Optional Codex CLI version override.
     required: false
     default: ""
+  openhands_model:
+    description: Router role alias OpenHands requests. Required when agent is openhands.
+    required: false
+    default: ""
+  openhands_version:
+    description: Release tag of OpenHands/software-agent-sdk that the openhands agent installs and runs.
+    required: false
+    default: v1.60.2
   permission_profile:
     description: Codex permission profile. Accepts read-only, workspace, or an explicit profile name.
     required: false
@@ -166,6 +174,7 @@ runs:
         BASE_URL: ${{ inputs.base_url }}
         CLAUDE_ARGS: ${{ inputs.claude_args }}
         CLAUDE_MODEL: ${{ inputs.claude_model || inputs.model }}
+        OPENHANDS_MODEL: ${{ inputs.openhands_model }}
         PERMISSION_PROFILE: ${{ inputs.permission_profile }}
       run: '"$GITHUB_ACTION_PATH/prepare.sh" validate'
 
@@ -195,6 +204,18 @@ runs:
       if: always()
       shell: bash
       run: '"$GITHUB_ACTION_PATH/prepare.sh" cleanup'
+
+    # OpenHands has no fallback to another agent: its failure fails the job.
+    - name: Run OpenHands
+      if: steps.prepare.outputs.effective-agent == 'openhands'
+      uses: ./.ai-workflows/.github/actions/run-ai-agent/openhands
+      with:
+        prompt: ${{ inputs.prompt }}
+        model: ${{ inputs.openhands_model }}
+        base_url: ${{ inputs.base_url }}
+        api_key: ${{ inputs.api_key }}
+        version: ${{ inputs.openhands_version }}
+        working_directory: ${{ inputs.working_directory }}
 
     # Codex runs first (when selected) for two reasons: its drop-sudo safety
     # strategy permanently removes sudo for the rest of the job, and a failed
