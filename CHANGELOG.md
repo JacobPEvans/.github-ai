@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.6.1](https://github.com/JacobPEvans/.github-ai/compare/v2.6.0...v2.6.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **ci:** pass runner_label to the merge gate ([#124](https://github.com/JacobPEvans/.github-ai/issues/124)) ([8147814](https://github.com/JacobPEvans/.github-ai/commit/8147814f25a397836abef872a086c5ba9677bd11))
+
 ## [2.6.0](https://github.com/JacobPEvans/.github-ai/compare/v2.5.1...v2.6.0) (2026-11-13)
 
 
