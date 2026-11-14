@@ -249,7 +249,7 @@ runs:
       # Failure is judged by the report step below: a gateway, budget or 429
       # error ends the job without failing it, any other error still fails it.
       continue-on-error: true
-      uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+      uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1
       env:
         # The CLI's own variable name; it points at the router.
         ANTHROPIC_BASE_URL: ${{ steps.prepare.outputs.claude-base-url }}
