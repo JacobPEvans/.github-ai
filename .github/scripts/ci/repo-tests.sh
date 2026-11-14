@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # The catalog is public and read anonymously. The pin lives once, in the checkout-prompts composite action.
-CATALOG_REPO="https://github.com/dryvist/ai-llm-prompts.git"
+CATALOG_REPO="https://github.com/jpe-ai-agents/ai-llm-prompts.git"
 CATALOG_DIR=".ai-llm-prompts"
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
