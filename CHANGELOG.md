@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.6.2](https://github.com/JacobPEvans/.github-ai/compare/v2.6.1...v2.6.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* **deps:** resolve ai-llm-prompts from jpe-ai-agents ([#126](https://github.com/JacobPEvans/.github-ai/issues/126)) ([dad51e7](https://github.com/JacobPEvans/.github-ai/commit/dad51e777642b6bb60df8c82f6bf3e6adde184ab))
+
 ## [2.6.1](https://github.com/JacobPEvans/.github-ai/compare/v2.6.0...v2.6.1) (2026-11-14)
 
 
