@@ -14,6 +14,12 @@ validate() {
 
   case "$AGENT" in
     claude) ;;
+    openhands)
+      if [[ -z "${OPENHANDS_MODEL:-}" ]]; then
+        echo "::error::model is required when agent is openhands"
+        exit 1
+      fi
+      ;;
     codex)
       if [[ -z "$permission_profile" ]]; then
         echo "::error::permission_profile is required when agent is codex"
@@ -21,7 +27,7 @@ validate() {
       fi
       ;;
     *)
-      echo "::error::agent must be claude or codex"
+      echo "::error::agent must be claude, codex or openhands"
       exit 1
       ;;
   esac
