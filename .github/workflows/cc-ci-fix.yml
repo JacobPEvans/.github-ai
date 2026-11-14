@@ -36,8 +36,8 @@ on:
       agent:
         description: >-
           Agent that makes the fix. Empty keeps the configured default. Set
-          openhands to run the OpenHands agent on the role named by local_model;
-          it cannot be combined with local_only.
+          openhands to run the OpenHands agent on the role named by local_model.
+          Only claude can be combined with local_only.
         type: string
         required: false
         default: ""
@@ -266,10 +266,10 @@ jobs:
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     steps:
       # The local-only key flow is Claude-specific.
-      - name: Reject OpenHands with the local-only key flow
-        if: inputs.agent == 'openhands' && inputs.local_only
+      - name: Reject another agent with the local-only key flow
+        if: inputs.agent != '' && inputs.agent != 'claude' && inputs.local_only
         run: |
-          echo "::error::agent openhands cannot be combined with local_only"
+          echo "::error::local_only runs Claude only; leave agent empty or set it to claude"
           exit 1
 
       - name: Checkout PR branch

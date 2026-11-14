@@ -74,7 +74,7 @@ describe('run-ai-agent prepare validation', () => {
     for (const block of openhands.split(/\n\s+run: \|\n/).slice(1)) {
       expect(block.split(/\n    - name:/)[0]).not.toContain('${{');
     }
-    expect(ciFix).toContain("if: inputs.agent == 'openhands' && inputs.local_only");
+    expect(ciFix).toContain("if: inputs.agent != '' && inputs.agent != 'claude' && inputs.local_only");
     expect(ciFix).toContain("agent: ${{ inputs.agent || (inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude') }}");
   });
 
