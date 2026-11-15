@@ -1,3 +1,4 @@
+const { beforeEach, describe, expect, it, mock } = require('bun:test');
 const { createMockCore, createMockContext, createMockGithub } = require('./helpers.js');
 const run = require('../.github/scripts/ci-fix/get-failure-logs.js');
 
@@ -84,11 +85,13 @@ describe('get-failure-logs', () => {
     delete process.env.FAILURE_RUN_ID;
   });
 
-  it('falls back to the newest failed run on the branch for label-triggered runs', async () => {
+  it('falls back to the newest failed run on the head commit that is not the fixer, for label-triggered runs', async () => {
     context = createMockContext({ payload: {} });
     process.env.FAILURE_HEAD_BRANCH = 'feat/x';
+    process.env.FAILURE_HEAD_SHA = 'a'.repeat(40);
+    github.rest.actions.getWorkflowRun = mock().mockResolvedValue({ data: { workflow_id: 1 } });
     github.rest.actions.listWorkflowRunsForRepo.mockResolvedValue({
-      data: { workflow_runs: [{ id: 777, name: 'AI Merge Gate' }] },
+      data: { workflow_runs: [{ id: 776, name: 'CI Fix', workflow_id: 1 }, { id: 777, name: 'AI Merge Gate', workflow_id: 2 }] },
     });
     github.paginate.mockResolvedValue([{ name: 'gate', conclusion: 'failure', id: 9 }]);
     github.rest.actions.downloadJobLogsForWorkflowRun.mockResolvedValue({ data: 'label log' });
@@ -96,11 +99,12 @@ describe('get-failure-logs', () => {
     await run({ github, context, core });
 
     expect(github.rest.actions.listWorkflowRunsForRepo).toHaveBeenCalledWith(
-      expect.objectContaining({ branch: 'feat/x', status: 'failure' }),
+      expect.objectContaining({ head_sha: 'a'.repeat(40), status: 'failure' }),
     );
     expect(github.paginate.mock.calls[0][1].run_id).toBe(777);
     expect(core.getOutput('logs')).toContain('label log');
     delete process.env.FAILURE_HEAD_BRANCH;
+    delete process.env.FAILURE_HEAD_SHA;
   });
 
   it('fails when neither a run id nor a branch is available', async () => {
@@ -115,12 +119,15 @@ describe('get-failure-logs', () => {
   it('fails when the branch has no failed run', async () => {
     context = createMockContext({ payload: {} });
     process.env.FAILURE_HEAD_BRANCH = 'feat/y';
+    process.env.FAILURE_HEAD_SHA = 'b'.repeat(40);
+    github.rest.actions.getWorkflowRun = mock().mockResolvedValue({ data: { workflow_id: 1 } });
     github.rest.actions.listWorkflowRunsForRepo.mockResolvedValue({ data: { workflow_runs: [] } });
 
     try {
       await run({ github, context, core });
     } finally {
       delete process.env.FAILURE_HEAD_BRANCH;
+      delete process.env.FAILURE_HEAD_SHA;
     }
 
     expect(core.failures).toEqual(['No failed CI run found for branch feat/y']);

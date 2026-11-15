@@ -1,21 +1,28 @@
 module.exports = async ({ github, context, core }) => {
   let runId = process.env.FAILURE_RUN_ID || context.payload.workflow_run?.id;
   if (!runId) {
-    // Label-triggered runs carry no failed run: use the newest failed run on
-    // the PR head branch instead.
+    // Label-triggered runs carry no failed run: use the newest failed gate run
+    // on the PR head sha, never this fixer's own runs; prefer a "CI Gate" run.
     const branch = process.env.FAILURE_HEAD_BRANCH;
-    if (!branch) {
+    const headSha = process.env.FAILURE_HEAD_SHA;
+    if (!branch || !headSha) {
       core.setFailed('FAILURE_RUN_ID is required');
       return;
     }
+    const current = await github.rest.actions.getWorkflowRun({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      run_id: context.runId,
+    });
     const { data } = await github.rest.actions.listWorkflowRunsForRepo({
       owner: context.repo.owner,
       repo: context.repo.repo,
-      branch,
+      head_sha: headSha,
       status: 'failure',
-      per_page: 1,
+      per_page: 50,
     });
-    const latest = data.workflow_runs[0];
+    const candidates = data.workflow_runs.filter((run) => run.workflow_id !== current.data.workflow_id);
+    const latest = candidates.find((run) => run.name && run.name.includes('CI Gate')) || candidates[0];
     if (!latest) {
       core.setFailed(`No failed CI run found for branch ${branch}`);
       return;
