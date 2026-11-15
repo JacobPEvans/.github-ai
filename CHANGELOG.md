@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.10.0](https://github.com/JacobPEvans/.github-ai/compare/v2.9.0...v2.10.0) (2026-11-15)
+
+
+### Features
+
+* **pr-reconcile:** pass the CI fix settings to the sweep ([#137](https://github.com/JacobPEvans/.github-ai/issues/137)) ([43e7ea7](https://github.com/JacobPEvans/.github-ai/commit/43e7ea70ef7cdd82b46e722da0cdaa68d99b73ef))
+
 ## [2.9.0](https://github.com/JacobPEvans/.github-ai/compare/v2.8.0...v2.9.0) (2026-11-15)
 
 
