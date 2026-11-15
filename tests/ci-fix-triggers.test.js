@@ -70,6 +70,17 @@ test('fork guards accept same-repository pull requests and keep refusing forks',
   }
 });
 
+test('the attempt count is taken again under the writer lock and binds the fix job', () => {
+  const marker = jobs['post-attempt-comment'];
+  const names = marker.steps.map((step) => step.name);
+  expect(names.indexOf('Count attempts again under the writer lock')).toBeLessThan(names.indexOf('Post tracking comment'));
+  expect(stepByName('post-attempt-comment', 'Count attempts again under the writer lock').with.script).toContain('check-attempts.js');
+  expect(stepByName('post-attempt-comment', 'Post tracking comment').if).toBe("steps.recount.outputs.should_run == 'true'");
+  expect(stepByName('post-attempt-comment', 'Post tracking comment').env.ATTEMPT).toBe('${{ steps.recount.outputs.attempt }}');
+  expect(marker.outputs.should_run).toBe('${{ steps.recount.outputs.should_run }}');
+  expect(jobs.fix.if).toContain("needs.post-attempt-comment.outputs.should_run == 'true'");
+});
+
 test('the 2-attempt bound stays wired into should-fix', () => {
   expect(jobs['should-fix'].steps.some((step) => step.id === 'check-attempts')).toBe(true);
   expect(jobs['should-fix'].outputs.pr_number).toBe('${{ steps.find-pr.outputs.pr_number }}');

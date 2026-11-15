@@ -5,16 +5,20 @@ module.exports = async ({ github, context, core }) => {
     return;
   }
   // A failed merge queue run names the queue branch. The fix belongs on the
-  // pull request's own branch, which the queue branch name leads to.
-  const queue = branch.match(/^(?:refs\/heads\/)?gh-readonly-queue\/.+\/pr-([0-9]+)-[0-9a-f]+$/);
+  // pull request's own branch, which the queue branch name leads to. Only a
+  // merge_group run is read this way, so an ordinary branch with such a name is not.
+  const queue = context.payload.workflow_run?.event === 'merge_group'
+    && branch.match(/^(?:refs\/heads\/)?gh-readonly-queue\/.+\/pr-([0-9]+)-[0-9a-f]+$/);
   if (queue) {
     const { data: pull } = await github.rest.pulls.get({
       owner: context.repo.owner,
       repo: context.repo.repo,
       pull_number: Number(queue[1]),
     });
+    // The later fork guard sees the queue branch's repository, so a fork is refused here.
+    const sameRepo = pull.head.repo?.full_name === `${context.repo.owner}/${context.repo.repo}`;
     core.setOutput('head_branch', pull.head.ref);
-    core.setOutput('pr_number', pull.state === 'open' ? String(pull.number) : '');
+    core.setOutput('pr_number', pull.state === 'open' && sameRepo ? String(pull.number) : '');
     return;
   }
   core.setOutput('head_branch', branch);

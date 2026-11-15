@@ -31,8 +31,8 @@ describe('find-pr', () => {
       `refs/heads/gh-readonly-queue/release/v2/pr-42-${'b'.repeat(40)}`,
     ]) {
       core = createMockCore();
-      context = createMockContext({ payload: { workflow_run: { head_branch: branch } } });
-      github.rest.pulls.get = mock().mockResolvedValue({ data: { number: 42, state: 'open', head: { ref: 'feat/pr-branch' } } });
+      context = createMockContext({ payload: { workflow_run: { event: 'merge_group', head_branch: branch } } });
+      github.rest.pulls.get = mock().mockResolvedValue({ data: { number: 42, state: 'open', head: { ref: 'feat/pr-branch', repo: { full_name: 'test-owner/test-repo' } } } });
       await run({ github, context, core });
       expect(github.rest.pulls.get.mock.calls[0][0].pull_number, branch).toBe(42);
       expect(core.getOutput('pr_number'), branch).toBe('42');
@@ -42,10 +42,28 @@ describe('find-pr', () => {
   });
 
   it('gives no pull request number when the queue entry is already closed', async () => {
-    context = createMockContext({ payload: { workflow_run: { head_branch: `gh-readonly-queue/main/pr-7-${'c'.repeat(40)}` } } });
-    github.rest.pulls.get = mock().mockResolvedValue({ data: { number: 7, state: 'closed', head: { ref: 'feat/done' } } });
+    context = createMockContext({ payload: { workflow_run: { event: 'merge_group', head_branch: `gh-readonly-queue/main/pr-7-${'c'.repeat(40)}` } } });
+    github.rest.pulls.get = mock().mockResolvedValue({ data: { number: 7, state: 'closed', head: { ref: 'feat/done', repo: { full_name: 'test-owner/test-repo' } } } });
     await run({ github, context, core });
     expect(core.getOutput('pr_number')).toBe('');
+  });
+
+  it('gives no pull request number when the queued pull request comes from a fork', async () => {
+    context = createMockContext({ payload: { workflow_run: { event: 'merge_group', head_branch: `gh-readonly-queue/main/pr-8-${'d'.repeat(40)}` } } });
+    github.rest.pulls.get = mock().mockResolvedValue({ data: { number: 8, state: 'open', head: { ref: 'main', repo: { full_name: 'someone/test-repo' } } } });
+    await run({ github, context, core });
+    expect(core.getOutput('pr_number')).toBe('');
+  });
+
+  it('reads a queue-shaped branch name as an ordinary branch when the run is not a merge queue run', async () => {
+    const branch = `gh-readonly-queue/main/pr-9-${'e'.repeat(40)}`;
+    context = createMockContext({ payload: { workflow_run: { event: 'pull_request', head_branch: branch } } });
+    github.rest.pulls.get = mock();
+    github.rest.pulls.list.mockResolvedValue({ data: [{ number: 51 }] });
+    await run({ github, context, core });
+    expect(github.rest.pulls.get).not.toHaveBeenCalled();
+    expect(core.getOutput('head_branch')).toBe(branch);
+    expect(core.getOutput('pr_number')).toBe('51');
   });
 
   it('passes an ordinary branch through as the branch to fix', async () => {
