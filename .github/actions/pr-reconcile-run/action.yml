@@ -20,6 +20,14 @@ inputs:
     description: owner/repo that receives the pr-conflict repository_dispatch (empty = label only).
     required: false
     default: ""
+  ci_fix_workflow:
+    description: Workflow file name in the calling repository to dispatch for a failed check, e.g. openhands-ci-fix.yml (empty = off).
+    required: false
+    default: ""
+  ci_fix_skip_checks:
+    description: Case-insensitive regex of check-run names that never start a CI fix (empty = built-in default).
+    required: false
+    default: ""
   exclude_repos:
     description: Comma-separated repositories the sweep skips.
     required: false
@@ -35,6 +43,8 @@ runs:
         BASE_REF: ${{ inputs.base_ref }}
         SWEEP_OWNER: ${{ inputs.sweep_owner }}
         RESOLVER_REPO: ${{ inputs.resolver_repo }}
+        CI_FIX_WORKFLOW: ${{ inputs.ci_fix_workflow }}
+        CI_FIX_SKIP_CHECKS: ${{ inputs.ci_fix_skip_checks }}
         PR_RECONCILE_EXCLUDE_REPOS: ${{ inputs.exclude_repos }}
       with:
         github-token: ${{ inputs.github-token }}

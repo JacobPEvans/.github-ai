@@ -6,6 +6,11 @@
 // this token cannot write); a resolver is started by repository_dispatch when
 // RESOLVER_REPO is set. Each decision is logged as one JSON event line.
 //
+// CI fix: when CI_FIX_WORKFLOW names a workflow file, a pull request that is
+// otherwise left alone but has failed github-actions checks gets one
+// workflow_dispatch per head commit to fix them. CI_FIX_SKIP_CHECKS is a
+// case-insensitive regex of check names a coding agent should not touch.
+//
 // Hold: every reconcile sets the `merge-hold` commit status at the head: failure
 // while the PR carries the merge-hold label, success otherwise. A ruleset that
 // requires this status blocks the merge itself, so re-armed auto-merge cannot
@@ -25,6 +30,8 @@ const UNKNOWN_RETRIES = 3;
 let retryDeadline = Infinity;
 const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
+// Meta gates and scans a coding agent cannot fix by editing code.
+const CI_FIX_SKIP_DEFAULT = 'merge gate|review|freeze|policy|semantic|codeql|dependency|release';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -133,12 +140,68 @@ async function act(github, owner, repo, pr, decision) {
   }
 }
 
-async function reconcile({ github, core, owner, repo, number }) {
+function ciFixSettings() {
+  const workflow = process.env.CI_FIX_WORKFLOW || '';
+  if (workflow && !/^[A-Za-z0-9._-]+\.ya?ml$/.test(workflow)) throw new Error(`invalid CI_FIX_WORKFLOW: ${workflow}`);
+  const pattern = process.env.CI_FIX_SKIP_CHECKS || CI_FIX_SKIP_DEFAULT;
+  try {
+    return { workflow, skip: new RegExp(pattern, 'i') };
+  } catch {
+    throw new Error(`invalid CI_FIX_SKIP_CHECKS: ${pattern}`);
+  }
+}
+
+// The CI fix applies only to pull requests the reconcile leaves alone otherwise.
+function ciFixEligible(pr, held) {
+  const promotion = pr.base.ref === 'main' && pr.head.ref === 'develop';
+  const renovate = (pr.user && pr.user.login || '').startsWith('renovate');
+  return !held && !promotion && !renovate;
+}
+
+// A github-actions check run links its workflow run in its page URLs.
+function ciFixRunId(check) {
+  for (const url of [check.details_url, check.html_url]) {
+    const match = (url || '').match(/\/actions\/runs\/(\d+)/);
+    if (match) return match[1];
+  }
+  return '';
+}
+
+async function startCiFix(github, owner, repo, pr, settings) {
+  const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
+  if (runs.some((check) => check.status !== 'completed')) return { outcome: 'ci-pending' };
+  const failed = runs
+    .filter((check) => check.conclusion === 'failure'
+      && check.app && check.app.slug === 'github-actions'
+      && !settings.skip.test(check.name))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  if (!failed.length) return { outcome: 'noop' };
+  const check = failed[0];
+  const runId = ciFixRunId(check);
+  if (!runId) return { outcome: 'ci-fix-no-run', check: check.name };
+  try {
+    await github.rest.actions.createWorkflowDispatch({
+      owner, repo,
+      workflow_id: settings.workflow,
+      ref: pr.base.repo.default_branch,
+      inputs: { failure_run_id: runId, failure_head_branch: pr.head.ref },
+    });
+  } catch (error) {
+    // A missing caller workflow is reported once per head via record below; anything else retries next sweep.
+    if (error.status === 404) return { outcome: 'ci-fix-no-caller', check: check.name };
+    return { outcome: `error:${error.status || 'unknown'}`, check: check.name };
+  }
+  return { outcome: 'ci-fix-dispatched', check: check.name };
+}
+
+async function reconcile({ github, core, owner, repo, number, ciFix }) {
   const pr = await getPr(github, owner, repo, number);
   const decision = classify(pr);
   let outcome = 'noop';
   let held = false;
   let statuses = [];
+  let action = decision.action;
+  let check;
   if (!['closed', 'fork'].includes(decision.state)) {
     statuses = await headStatuses(github, owner, repo, pr.head.sha);
     held = await setHold(github, owner, repo, pr, statuses);
@@ -157,11 +220,29 @@ async function reconcile({ github, core, owner, repo, number }) {
         outcome = `error:${error.status || 'unknown'}`;
       }
     }
+  } else if (ciFix.workflow && decision.action === 'none' && decision.state !== 'closed' && ciFixEligible(pr, held)) {
+    action = 'ci-fix';
+    if (alreadyDone(statuses, 'ci-fix')) {
+      outcome = 'already-done';
+    } else {
+      try {
+        const fix = await startCiFix(github, owner, repo, pr, ciFix);
+        outcome = fix.outcome;
+        check = fix.check;
+        // A missing caller workflow is final, so it is recorded like a taken action and not retried every sweep.
+        if (['ci-fix-dispatched', 'ci-fix-no-caller'].includes(outcome)) {
+          await record(github, owner, repo, pr.head.sha, 'ci-fix');
+        }
+      } catch (error) {
+        outcome = `error:${error.status || 'unknown'}`;
+      }
+    }
   }
   const event = {
     event: 'pr_reconcile', repository: `${owner}/${repo}`, pr: number, head_sha: pr.head.sha,
-    state: decision.state, action: decision.action, outcome, held,
+    state: decision.state, action, outcome, held,
   };
+  if (check) event.check = check;
   core.info(JSON.stringify(event));
   return event;
 }
@@ -207,6 +288,7 @@ module.exports = async function run({ github, context, core }) {
   const events = [];
   const resolver = process.env.RESOLVER_REPO || '';
   if (resolver && !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(resolver)) throw new Error(`invalid RESOLVER_REPO: ${resolver}`);
+  const ciFix = ciFixSettings();
   const started = Date.now();
   retryDeadline = started + module.exports.retryBudgetMs;
   const exclusions = excludedRepositories();
@@ -226,7 +308,7 @@ module.exports = async function run({ github, context, core }) {
       break;
     }
     try {
-      events.push(await reconcile({ github, core, ...target }));
+      events.push(await reconcile({ github, core, ...target, ciFix }));
     } catch (error) {
       // One PR that vanished or failed to read must not stop the rest of the sweep.
       const event = {

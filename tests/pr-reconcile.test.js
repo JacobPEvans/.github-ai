@@ -19,6 +19,18 @@ function pr(overrides = {}) {
   };
 }
 
+function checkRun(overrides = {}) {
+  return {
+    name: 'ci-unit',
+    status: 'completed',
+    conclusion: 'failure',
+    app: { slug: 'github-actions' },
+    details_url: 'https://github.com/test-owner/test-repo/actions/runs/424242',
+    html_url: 'https://github.com/test-owner/test-repo/actions/runs/424242',
+    ...overrides,
+  };
+}
+
 function github(prData, { statuses = [], files = [] } = {}) {
   const gh = createMockGithub();
   gh.rest.pulls.get.mockResolvedValue({ data: prData });
@@ -30,6 +42,7 @@ function github(prData, { statuses = [], files = [] } = {}) {
   gh.rest.repos.getCombinedStatusForRef = mock().mockResolvedValue({ data: { statuses } });
   gh.rest.repos.createCommitStatus = mock().mockResolvedValue({});
   gh.rest.repos.createDispatchEvent = mock().mockResolvedValue({});
+  gh.rest.actions.createWorkflowDispatch = mock().mockResolvedValue({});
   gh.paginate.mockResolvedValue(files);
   return gh;
 }
@@ -67,6 +80,8 @@ describe('reconcile', () => {
     run.runBudgetMs = 4 * 60 * 1000;
     delete process.env.RESOLVER_REPO;
     delete process.env.PR_RECONCILE_EXCLUDE_REPOS;
+    delete process.env.CI_FIX_WORKFLOW;
+    delete process.env.CI_FIX_SKIP_CHECKS;
     delete process.env.BASE_REF;
     delete process.env.SWEEP_OWNER;
     process.env.PR_NUMBER = '7';
@@ -353,5 +368,178 @@ describe('reconcile', () => {
   it('refuses a resolver that is not owner/repo', async () => {
     process.env.RESOLVER_REPO = 'ctl-owner/';
     await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid RESOLVER_REPO');
+  });
+
+  it('lists no check runs when the CI fix workflow is unset', async () => {
+    const gh = github(pr());
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.paginate).not.toHaveBeenCalled();
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ action: 'none', outcome: 'noop' });
+    expect('check' in event).toBe(false);
+  });
+
+  it('dispatches the CI fix workflow once for a failed check and records it', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr({ base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }));
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+    expect(gh.rest.actions.createWorkflowDispatch.mock.calls[0][0]).toEqual({
+      owner: 'test-owner', repo: 'test-repo', workflow_id: 'openhands-ci-fix.yml', ref: 'main',
+      inputs: { failure_run_id: '424242', failure_head_branch: 'feat/x' },
+    });
+    expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0])).toContainEqual(expect.objectContaining({ sha: 'head1', context: 'pr-reconcile', description: 'ci-fix' }));
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched', check: 'ci-unit' });
+  });
+
+  it('waits while a check run is not completed', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ status: 'in_progress' })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-pending' });
+    expect('check' in event).toBe(false);
+  });
+
+  it('ignores a failed check whose name matches the skip pattern', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'Semantic Pull Request' })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'noop' });
+  });
+
+  it('ignores failing checks that are not github-actions', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ app: { slug: 'other-ci' } })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(event.outcome).toBe('noop');
+  });
+
+  it('replaces the default skip pattern with CI_FIX_SKIP_CHECKS', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    process.env.CI_FIX_SKIP_CHECKS = '^docs';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([
+      checkRun({ name: 'codeql' }),
+      checkRun({ name: 'docs build' }),
+    ]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+    expect(event.check).toBe('codeql');
+  });
+
+  it('picks the alphabetically first failed check so the choice is stable', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr({ base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }));
+    gh.paginate.mockResolvedValueOnce([
+      checkRun({ name: 'zeta job', details_url: 'https://github.com/test-owner/test-repo/actions/runs/111' }),
+      checkRun({ name: 'alpha job', details_url: 'https://github.com/test-owner/test-repo/actions/runs/222' }),
+    ]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch.mock.calls[0][0].inputs).toEqual({ failure_run_id: '222', failure_head_branch: 'feat/x' });
+    expect(event.check).toBe('alpha job');
+  });
+
+  it('reports a failed check whose URLs carry no workflow run id', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ details_url: 'https://github.com/test-owner/test-repo/check-run/1', html_url: 'https://github.com/test-owner/test-repo/check-run/1' })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-no-run', check: 'ci-unit' });
+  });
+
+  it('records ci-fix-no-caller when the repository has no such workflow', async () => {
+    process.env.CI_FIX_WORKFLOW = 'missing-ci-fix.yml';
+    const gh = github(pr({ base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }));
+    gh.paginate.mockResolvedValueOnce([checkRun()]);
+    gh.rest.actions.createWorkflowDispatch.mockRejectedValue(Object.assign(new Error('not found'), { status: 404 }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-no-caller', check: 'ci-unit' });
+    expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0])).toContainEqual(expect.objectContaining({ context: 'pr-reconcile', description: 'ci-fix' }));
+  });
+
+  it('reports a 403 dispatch error without recording it', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr({ base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }));
+    gh.paginate.mockResolvedValueOnce([checkRun()]);
+    gh.rest.actions.createWorkflowDispatch.mockRejectedValue(Object.assign(new Error('forbidden'), { status: 403 }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'error:403' });
+    expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0].description)).not.toContain('ci-fix');
+  });
+
+  it('does not start a CI fix for a held, promotion, fork, release or Renovate pull request', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const held = github(pr({ labels: [{ name: 'merge-hold' }] }));
+    await run({ github: held, context: createMockContext(), core });
+    expect(held.paginate).not.toHaveBeenCalled();
+    expect(held.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+
+    const promotion = github(pr({ head: { ref: 'develop', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } }, base: { ref: 'main', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }));
+    await run({ github: promotion, context: createMockContext(), core });
+    expect(promotion.paginate).not.toHaveBeenCalled();
+    expect(promotion.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+
+    const fork = github(pr({ head: { ref: 'feat/x', sha: 'head1', repo: { full_name: 'fork-owner/test-repo' } } }));
+    await run({ github: fork, context: createMockContext(), core });
+    expect(fork.paginate).not.toHaveBeenCalled();
+    expect(fork.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+
+    const release = github(pr({ head: { ref: 'release-please--branches--main', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }));
+    await run({ github: release, context: createMockContext(), core });
+    expect(release.paginate).not.toHaveBeenCalled();
+    expect(release.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+
+    const renovate = github(pr({ user: { login: 'renovate[bot]' } }));
+    await run({ github: renovate, context: createMockContext(), core });
+    expect(renovate.paginate).not.toHaveBeenCalled();
+    expect(renovate.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+  });
+
+  it('does not start a CI fix when classify acts, even with failed checks', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr({ mergeable_state: 'behind' }));
+    gh.paginate.mockResolvedValueOnce([checkRun()]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.pulls.updateBranch).toHaveBeenCalledTimes(1);
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(event.outcome).toBe('updated');
+  });
+
+  it('does not start a CI fix for a closed pull request', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr({ state: 'closed' }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.paginate).not.toHaveBeenCalled();
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ state: 'closed', action: 'none', outcome: 'noop' });
+  });
+
+  it('reports already-done on a second sweep at the same head without listing checks', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix' }] });
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.paginate).not.toHaveBeenCalled();
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'already-done' });
+  });
+
+  it('refuses a CI fix workflow name that is not a plain file name', async () => {
+    process.env.CI_FIX_WORKFLOW = 'ci fix.yml';
+    await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid CI_FIX_WORKFLOW');
+  });
+
+  it('refuses an invalid CI_FIX_SKIP_CHECKS pattern', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    process.env.CI_FIX_SKIP_CHECKS = 'unbalanced(';
+    await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid CI_FIX_SKIP_CHECKS');
   });
 });
