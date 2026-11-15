@@ -241,25 +241,28 @@ jobs:
           HAS_OVERRIDE: ${{ steps.override.outputs.has_override }}
           VERDICT_OUTCOME: ${{ steps.verdict.outcome }}
           RESPONSE_FILE: ${{ steps.verdict.outputs.response-file }}
-          # The reviewer model is the model id this workflow called the router
-          # with - the same input the inference step receives. The response
-          # file holds only the message content, so the id cannot be read
-          # from it. The AI Merge Gate compares this id's family against the
-          # author's families.
-          REVIEWER_MODEL: ${{ inputs.model }}
+          # inputs.model is a router role alias, and the response file holds
+          # only the message content, so neither names the model. The router's
+          # model list gives the model ids behind the alias; the AI Merge Gate
+          # compares their families against the author's families.
+          REVIEWER_ALIAS: ${{ inputs.model }}
+          LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+          LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
         run: |
           mkdir -p handoff
           if [ "$HAS_OVERRIDE" = "true" ]; then
             echo "status=override" >> "$GITHUB_OUTPUT"
           elif [ "$VERDICT_OUTCOME" = "success" ]; then
             cp "$RESPONSE_FILE" handoff/verdict.json
-            # Never publish the literal "null": an empty or "null" id is an
+            # A failed lookup or an alias the router does not list gives an
             # empty output, which the merge gate reports as an unknown
-            # reviewer model.
-            reviewer_model="$REVIEWER_MODEL"
-            case "$reviewer_model" in
-              ("" | "null") reviewer_model="" ;;
-            esac
+            # reviewer model and refuses.
+            reviewer_model="$(curl -fsS --max-time 20 \
+              -H @<(printf 'Authorization: Bearer %s\n' "$LLM_ROUTER_API_KEY") \
+              "${LLM_ROUTER_BASE_URL%/}/model/info" \
+              | jq -r --arg alias "$REVIEWER_ALIAS" \
+                '[.data[] | select(.model_name == $alias) | .litellm_params.model | strings | sub("^[^/]+/"; "")] | unique | join(", ")')" \
+              || reviewer_model=""
             echo "reviewer_model=$reviewer_model" >> "$GITHUB_OUTPUT"
             echo "status=ok" >> "$GITHUB_OUTPUT"
           else
