@@ -39,6 +39,16 @@ test('cc-ci-fix applies no daily run cap to OpenHands or local-only runs', () =>
   expect(job.steps.find((step) => step.id === 'check').if).toBe(`\${{ !${uncapped} }}`);
 });
 
+test('cc-ci-fix takes Renovate failures only for OpenHands or local-only runs', () => {
+  const condition = ciFix.jobs['should-fix'].if.replace(/\s+/g, ' ');
+  expect(condition).toContain(
+    "((inputs.failure_actor || github.actor) != 'renovate[bot]' || inputs.local_only || " +
+      "(inputs.agent || vars.GH_ACTION_AI_AGENT) == 'openhands')",
+  );
+  expect(condition).toContain("(inputs.failure_actor || github.actor) != 'dependabot[bot]'");
+  expect(condition).toContain("(inputs.failure_actor || github.actor) != 'copilot[bot]'");
+});
+
 test('suite-ci declares only the credentials passed by caller workflows', () => {
   expect(secrets).toEqual({
     LLM_ROUTER_BASE_URL: { required: true },
