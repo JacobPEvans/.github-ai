@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.11.2](https://github.com/JacobPEvans/.github-ai/compare/v2.11.1...v2.11.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **ci-fix:** apply no daily run cap to OpenHands and local-only runs ([25a2b9d](https://github.com/JacobPEvans/.github-ai/commit/25a2b9d5cadf12ffd23998becc8488a1148d87a1))
+* **ci-fix:** skip the daily run count for OpenHands runs ([#147](https://github.com/JacobPEvans/.github-ai/issues/147)) ([25a2b9d](https://github.com/JacobPEvans/.github-ai/commit/25a2b9d5cadf12ffd23998becc8488a1148d87a1))
+
 ## [2.11.1](https://github.com/JacobPEvans/.github-ai/compare/v2.11.0...v2.11.1) (2026-11-15)
 
 
