@@ -16,7 +16,7 @@ runs:
       with:
         repository: jpe-ai-agents/ai-llm-prompts
         # renovate: datasource=github-tags depName=jpe-ai-agents/ai-llm-prompts
-        ref: 734739692fdc7e03acc81027da31a59f511a3f45  # v1.112.1
+        ref: cfafd40de7d940b1f7c92ad30ac8270b1a8b19e1  # v1.115.0
         sparse-checkout: ${{ inputs.sparse-checkout }}
         sparse-checkout-cone-mode: false
         path: ${{ inputs.path }}

@@ -146,6 +146,26 @@ jobs:
       NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
       GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
+  # Advisory: posts its comment and check, never fails, and the final check does not wait for it.
+  code:
+    name: Code review
+    needs: router
+    if: needs.router.outputs.available == 'true'
+    uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      rubric: code
+      model: standard
+      blocking: false
+      runner_label: ${{ inputs.runner_label }}
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
   gate:
     name: AI Merge Gate
     if: always()

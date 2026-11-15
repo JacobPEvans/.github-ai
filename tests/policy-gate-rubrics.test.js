@@ -26,6 +26,11 @@ const rubrics = {
     model: 'standard',
     checks: ['claim_mismatch', 'omitted_behavior'],
   },
+  code: {
+    prompt: 'code-review',
+    model: 'standard',
+    checks: ['correctness', 'regression', 'missing_test', 'native_first'],
+  },
 };
 
 test('policy-gate.yml takes a rubric input that defaults to policy', () => {
@@ -36,7 +41,7 @@ test('policy-gate.yml takes a rubric input that defaults to policy', () => {
 
 test('policy-gate.yml validates the rubric against every rubric it supports', () => {
   const text = readFileSync(join('.github', 'workflows', 'policy-gate.yml'), 'utf8');
-  expect(text).toContain('printf \'%s\\n\' policy security leak semantic');
+  expect(text).toContain('printf \'%s\\n\' policy security leak semantic code |');
 });
 
 test('policy-gate.yml passes the selected rubric to the collector', () => {
