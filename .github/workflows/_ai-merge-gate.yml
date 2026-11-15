@@ -183,7 +183,7 @@ jobs:
   code:
     name: Code review
     needs: router
-    if: needs.router.outputs.available == 'true'
+    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true'
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
