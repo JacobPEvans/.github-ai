@@ -192,12 +192,11 @@ test('policy-gate publishes the model that wrote the review to its caller', () =
   expect(review.outputs.reviewer_model).toBe('$' + '{{ steps.handoff.outputs.reviewer_model }}');
   const handoff = review.steps.find((step) => step.id === 'handoff');
   expect(handoff.env.RESPONSE_FILE).toBe('$' + '{{ steps.verdict.outputs.response-file }}');
-  // The reviewer model is the model id the router is called with - the same
-  // input the inference step receives. The response file holds only the
-  // message content, so the model never comes from there.
-  expect(handoff.env.REVIEWER_MODEL).toBe('$' + '{{ inputs.model }}');
+  // inputs.model is a router role alias and the response file holds only the
+  // message content, so the model ids come from the router's model list.
+  expect(handoff.env.REVIEWER_ALIAS).toBe('$' + '{{ inputs.model }}');
+  expect(handoff.run).toContain('/model/info');
   expect(handoff.run).toContain('reviewer_model=');
-  expect(handoff.run).not.toContain('.model');
 });
 
 test('policy-gate exposes how each review settled to its caller', () => {
@@ -280,6 +279,21 @@ test('the real handoff and verdict steps pass a cross-family review from a respo
     const response = join(dir, 'response.json');
     writeFileSync(response, JSON.stringify({ summary: 'No suspected leaks.', findings: [] }));
 
+    // A stub curl answers the router's model list and records the URL.
+    const routerBin = join(dir, 'router-bin');
+    mkdirSync(routerBin, { recursive: true });
+    writeFileSync(join(routerBin, 'curl'), [
+      '#!/bin/bash',
+      `printf '%s\\n' "\${@: -1}" > '${routerBin}/url'`,
+      `cat <<'JSON'`,
+      JSON.stringify({ data: [
+        { model_name: 'review', litellm_params: { model: 'openai/glm-4.7' } },
+        { model_name: 'other', litellm_params: { model: 'openai/qwen-max' } },
+      ] }),
+      'JSON',
+      '',
+    ].join('\n'));
+    chmodSync(join(routerBin, 'curl'), 0o755);
     const handoffOutput = join(dir, 'handoff-output');
     writeFileSync(handoffOutput, '');
     const handoff = Bun.spawnSync(['/bin/bash', '-c', policy.jobs.review.steps.find((step) => step.id === 'handoff').run], {
@@ -290,14 +304,18 @@ test('the real handoff and verdict steps pass a cross-family review from a respo
         HAS_OVERRIDE: 'false',
         VERDICT_OUTCOME: 'success',
         RESPONSE_FILE: response,
-        REVIEWER_MODEL: 'glm-4.7',
+        REVIEWER_ALIAS: 'review',
+        LLM_ROUTER_BASE_URL: 'https://router.example/v1/',
+        LLM_ROUTER_API_KEY: 'test-key',
+        PATH: `${routerBin}:${process.env.PATH}`,
       },
     });
     expect(handoff.exitCode, handoff.stderr.toString()).toBe(0);
     const handoffOutputs = readOutputs(handoffOutput);
     expect(handoffOutputs.status).toBe('ok');
-    // The reviewer model is the configured value, not anything read from the
-    // response file, so it is non-empty on a real run.
+    // The alias resolves to the model ids the router lists for it, without
+    // the provider path; other aliases are left out.
+    expect(readFileSync(join(routerBin, 'url'), 'utf8').trim()).toBe('https://router.example/v1/model/info');
     expect(handoffOutputs.reviewer_model).toBe('glm-4.7');
 
     const model = handoffOutputs.reviewer_model;
