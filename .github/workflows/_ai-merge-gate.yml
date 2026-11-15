@@ -23,7 +23,8 @@
 # A merge_group run carries no reviews of its own: one mechanical job reads
 # the queue entry's pull request head and reports the required check name on
 # the queue commit, passing only when the reviewer App's verdict check run
-# is already successful there with VERDICT: MERGE or VERDICT: DEFERRED.
+# already concluded there: success with VERDICT: MERGE, or neutral with
+# VERDICT: DEFERRED.
 #
 # Usage:
 #   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate.yml@v1
@@ -566,11 +567,13 @@ jobs:
           fi
           CONCLUSION="$(jq -r '.conclusion // ""' <<< "$RUN")"
           SUMMARY="$(jq -r '.output.summary // ""' <<< "$RUN")"
-          if [ "$CONCLUSION" != "success" ]; then
-            refuse "verdict check run concluded '${CONCLUSION:-none}', not success"
-          fi
           if ! VERDICT_LINE="$(grep -xE 'VERDICT: (MERGE|DEFERRED)' <<< "$SUMMARY" | tail -n 1)"; then
-            refuse "verdict summary carries no 'VERDICT: MERGE' or 'VERDICT: DEFERRED' line"
+            refuse "verdict summary carries no 'VERDICT: MERGE' or 'VERDICT: DEFERRED' line (check run concluded '${CONCLUSION:-none}')"
+          fi
+          # The gate publishes MERGE as success and DEFERRED as neutral; any
+          # other pairing is not a verdict the gate wrote.
+          if [[ "$CONCLUSION/$VERDICT_LINE" != "success/VERDICT: MERGE" && "$CONCLUSION/$VERDICT_LINE" != "neutral/VERDICT: DEFERRED" ]]; then
+            refuse "verdict check run concluded '${CONCLUSION:-none}' with '$VERDICT_LINE'"
           fi
           echo "AI Merge Gate: pull request #$PR_NUMBER (head $HEAD_SHA) carries an accepted verdict: $VERDICT_LINE"
           bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
