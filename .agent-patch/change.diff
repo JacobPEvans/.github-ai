@@ -1,0 +1,474 @@
+diff --git a/.github/scripts/policy-gate/family-of.jq b/.github/scripts/policy-gate/family-of.jq
+new file mode 100644
+index 0000000..209705c
+--- /dev/null
++++ b/.github/scripts/policy-gate/family-of.jq
+@@ -0,0 +1,9 @@
++# The one definition of family_of: the family of a model id, matched by
++# case-insensitive prefix from the shared map in model-families.json. A model
++# id may carry a "provider/" path, which is ignored for matching. $families is
++# the slurped map; every caller passes it with --slurpfile families.
++def family_of:
++  (gsub("^\\s+|\\s+$"; "") | sub("^[^/]+/"; "") | ascii_downcase) as $id
++  | (($families[0]
++     | map(select((.prefix | ascii_downcase) as $prefix | $id | startswith($prefix)))
++     | first | .family) // "unknown");
+diff --git a/.github/scripts/policy-gate/validate-verdict.sh b/.github/scripts/policy-gate/validate-verdict.sh
+index a9a5c96..136b657 100644
+--- a/.github/scripts/policy-gate/validate-verdict.sh
++++ b/.github/scripts/policy-gate/validate-verdict.sh
+@@ -24,7 +24,8 @@ case "$RUBRIC" in
+   leak) names='credential private_host_or_ip internal_topology incident_detail'; exact=0 ;;
+   semantic) names='claim_mismatch omitted_behavior'; exact=1 ;;
+   merge-gate)
+-    families_file="${MODEL_FAMILIES_FILE:-$(dirname -- "${BASH_SOURCE[0]}")/model-families.json}"
++    families_dir="$(dirname -- "${BASH_SOURCE[0]}")"
++    families_file="${MODEL_FAMILIES_FILE:-$families_dir/model-families.json}"
+     [[ -r "$families_file" ]] || {
+       echo "::error::The model family map is missing: $families_file" >&2
+       exit 1
+@@ -39,29 +40,33 @@ case "$RUBRIC" in
+     ' "$RESPONSE_FILE" > /dev/null; then
+       exit 1
+     fi
+-    decision="$(jq -r --slurpfile families "$families_file" --arg reason "${MERGE_GATE_REASON:-}" '
+-      def family_of:
+-        (gsub("^\\s+|\\s+$"; "") | sub("^[^/]+/"; "") | ascii_downcase) as $id
+-        | ($families[0]
+-           | map(select((.prefix | ascii_downcase) as $prefix | $id | startswith($prefix)))
+-           | first | .family) // "unknown";
++    decision="$(jq -r -L "$families_dir" --slurpfile families "$families_file" --arg reason "${MERGE_GATE_REASON:-}" '
++      include "family-of";
+       if .model == "" then
+         {verdict: "CHANGES", reason: "reviewer model unknown"}
+       elif .model == "none" then
+         {verdict: .verdict, reason: $reason}
+       else
+-        (.model | split(", ") | map(family_of)) as $reviewers
+-        | (.author_family | split("+")) as $authors
+-        | if ($reviewers | any(. == "unknown")) then
+-            {verdict: "CHANGES", reason: "reviewer family unknown"}
+-          elif ($authors == ["unknown"]) then
++        # A review that passed through its override label counts as passed
++        # and is named "override" in the model line; the family rule does
++        # not apply to it.
++        (.model | split(", ") | map(select(. != "override"))) as $reviewers
++        | if ($reviewers | length) == 0 then
+             {verdict: .verdict, reason: $reason}
+           else
+-            ($reviewers | unique | map(select(. as $f | $authors | index($f) != null)) | sort) as $shared
+-            | if ($shared | length) > 0 then
+-                {verdict: "CHANGES", reason: ("reviewer and author share the family " + $shared[0])}
+-              else
++            ($reviewers | map(family_of)) as $reviewers
++            | (.author_family | split("+")) as $authors
++            | if ($reviewers | any(. == "unknown")) then
++                {verdict: "CHANGES", reason: "reviewer family unknown"}
++              elif ($authors == ["unknown"]) then
+                 {verdict: .verdict, reason: $reason}
++              else
++                ($reviewers | unique | map(select(. as $f | $authors | index($f) != null)) | sort) as $shared
++                | if ($shared | length) > 0 then
++                    {verdict: "CHANGES", reason: ("reviewer and author share the family " + $shared[0])}
++                  else
++                    {verdict: .verdict, reason: $reason}
++                  end
+               end
+           end
+       end
+diff --git a/.github/workflows/_ai-merge-gate.yml b/.github/workflows/_ai-merge-gate.yml
+index ee99d04..6760ffd 100644
+--- a/.github/workflows/_ai-merge-gate.yml
++++ b/.github/workflows/_ai-merge-gate.yml
+@@ -7,13 +7,14 @@
+ # "AI Merge Gate" on the pull request head, posted with the reviewer App
+ # token so rulesets can pin the App. Its summary prepends the first rubric
+ # line and carries exactly these contract lines:
+-#   model:         the model ids the router reported for the reviews that ran
++#   model:         the model ids the reviews ran on, "override" for a review
++#                  that passed through its rubric's override label, else "none"
+ #   author_family: the author's families, from the Assisted-by commit
+ #                  trailers of the pull request, else "unknown"
+ #   head:          the pull request head commit
+ #   VERDICT:       MERGE, CHANGES or DEFERRED
+ # The reviewer family is the family of the MODEL that wrote the review -
+-# the "model" field of the router's chat completion, never the identity of
++# the model id policy-gate called the router with, never the identity of
+ # the App that posts the check. A review from one of the author's own
+ # families is refused: no model reviews its own work. The comparison lives
+ # in the merge-gate mode of .github/scripts/policy-gate/validate-verdict.sh,
+@@ -179,12 +180,17 @@ jobs:
+       LEAK_RESULT: ${{ needs.leak.result }}
+       SECURITY_RESULT: ${{ needs.security.result }}
+       SEMANTIC_RESULT: ${{ needs.semantic.result }}
+-      # The model id each review's router response reported, passed through
+-      # policy-gate.yml's reviewer_model output. Empty for a review that
+-      # never ran.
++      # The model id each review ran on, passed through policy-gate.yml's
++      # reviewer_model output. Empty for a review that never ran or was
++      # overridden. The status says which: "override" marks a review that
++      # passed through its rubric's override label, which counts as passed
++      # without the reviewer family rule.
+       LEAK_MODEL: ${{ needs.leak.outputs.reviewer_model }}
+       SECURITY_MODEL: ${{ needs.security.outputs.reviewer_model }}
+       SEMANTIC_MODEL: ${{ needs.semantic.outputs.reviewer_model }}
++      LEAK_STATUS: ${{ needs.leak.outputs.verdict_status }}
++      SECURITY_STATUS: ${{ needs.security.outputs.verdict_status }}
++      SEMANTIC_STATUS: ${{ needs.semantic.outputs.verdict_status }}
+       GH_TOKEN: ${{ github.token }}
+       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+     steps:
+@@ -247,15 +253,13 @@ jobs:
+           FAMILIES_FILE: .ai-workflows/.github/scripts/policy-gate/model-families.json
+         run: |
+           set -euo pipefail
+-          # One family per model vendor, from the shared map. A model id may
+-          # carry a "provider/" path, which is ignored for matching.
++          # One family per model vendor, from the shared map. The definition
++          # of family_of lives once, in family-of.jq next to
++          # model-families.json; validate-verdict.sh includes the same file.
++          families_dir="${FAMILIES_FILE%/*}"
+           family_of() {
+-            jq -rn --slurpfile families "$FAMILIES_FILE" --arg model "$1" '
+-              ($model | gsub("^\\s+|\\s+$"; "") | sub("^[^/]+/"; "") | ascii_downcase) as $id
+-              | ($families[0]
+-                 | map(select((.prefix | ascii_downcase) as $prefix | $id | startswith($prefix)))
+-                 | first | .family) // "unknown"
+-            '
++            jq -rnL "$families_dir" --slurpfile families "$FAMILIES_FILE" --arg model "$1" \
++              'include "family-of"; $model | family_of'
+           }
+ 
+           # A human-pushed pull request can still carry agent-written commits:
+@@ -326,21 +330,29 @@ jobs:
+             esac
+           done
+ 
+-          # The reviewer is the MODEL that wrote each review, taken from the
+-          # "model" field of the router's chat completion - never the App that
+-          # posts the check. A review that ran without one leaves the model
+-          # list empty and refuses the gate below; with no review at all the
+-          # family rule has nothing to compare and the model line reads "none".
++          # The reviewer is the MODEL that wrote each review, the model id
++          # policy-gate called the router with - never the App that posts the
++          # check. A review that passed through its rubric's override label
++          # counts as passed and is named "override"; the family rule in the
++          # validator does not apply to it. A review that ran without a model
++          # id leaves the model list empty and refuses the gate below; with
++          # no review at all the family rule has nothing to compare and the
++          # model line reads "none".
+           models=""
+           missing_model=false
+-          for pair in "$LEAK_RESULT|$LEAK_MODEL" "$SECURITY_RESULT|$SECURITY_MODEL" "$SEMANTIC_RESULT|$SEMANTIC_MODEL"; do
++          for pair in "$LEAK_RESULT|$LEAK_STATUS|$LEAK_MODEL" "$SECURITY_RESULT|$SECURITY_STATUS|$SECURITY_MODEL" "$SEMANTIC_RESULT|$SEMANTIC_STATUS|$SEMANTIC_MODEL"; do
+             result="${pair%%|*}"
+-            model="${pair#*|}"
+-            [[ "$result" == "success" ]] || continue
+-            if [[ -n "$model" ]]; then
+-              models+="$model"$'\n'
+-            else
+-              missing_model=true
++            model_status="${pair#*|}"
++            status="${model_status%%|*}"
++            model="${model_status#*|}"
++            if [[ "$status" == "override" ]]; then
++              models+="override"$'\n'
++            elif [[ "$result" == "success" ]]; then
++              if [[ -n "$model" ]]; then
++                models+="$model"$'\n'
++              else
++                missing_model=true
++              fi
+             fi
+           done
+           if [[ "$missing_model" == true ]]; then
+diff --git a/.github/workflows/policy-gate.yml b/.github/workflows/policy-gate.yml
+index ca8060d..978a9fd 100644
+--- a/.github/workflows/policy-gate.yml
++++ b/.github/workflows/policy-gate.yml
+@@ -96,9 +96,16 @@ on:
+     outputs:
+       reviewer_model:
+         description: >-
+-          The model id the router reported for this rubric's review, taken
+-          from the chat completion response. Empty when no review ran.
++          The model id this workflow called the router with for this rubric's
++          review, the same input the inference step receives. Empty when no
++          review ran or the rubric's override label skipped the router call.
+         value: ${{ jobs.review.outputs.reviewer_model }}
++      verdict_status:
++        description: >-
++          How the review settled: ok for a staged verdict, override when the
++          rubric's override label skipped the router call, and
++          router-request-failed when no verdict was produced.
++        value: ${{ jobs.review.outputs.verdict_status }}
+     secrets:
+       LLM_ROUTER_BASE_URL:
+         description: >-
+@@ -234,17 +241,25 @@ jobs:
+           HAS_OVERRIDE: ${{ steps.override.outputs.has_override }}
+           VERDICT_OUTCOME: ${{ steps.verdict.outcome }}
+           RESPONSE_FILE: ${{ steps.verdict.outputs.response-file }}
++          # The reviewer model is the model id this workflow called the router
++          # with - the same input the inference step receives. The response
++          # file holds only the message content, so the id cannot be read
++          # from it. The AI Merge Gate compares this id's family against the
++          # author's families.
++          REVIEWER_MODEL: ${{ inputs.model }}
+         run: |
+           mkdir -p handoff
+           if [ "$HAS_OVERRIDE" = "true" ]; then
+             echo "status=override" >> "$GITHUB_OUTPUT"
+           elif [ "$VERDICT_OUTCOME" = "success" ]; then
+             cp "$RESPONSE_FILE" handoff/verdict.json
+-            # The model that wrote the review, as the router resolved the role
+-            # alias in its chat completion. The AI Merge Gate compares the
+-            # family of this model id against the author's families, so it
+-            # needs the real id, not the alias this workflow was called with.
+-            reviewer_model="$(jq -r 'if (.model | type == "string") then .model else "" end | split("\n")[0]' handoff/verdict.json)"
++            # Never publish the literal "null": an empty or "null" id is an
++            # empty output, which the merge gate reports as an unknown
++            # reviewer model.
++            reviewer_model="$REVIEWER_MODEL"
++            case "$reviewer_model" in
++              ("" | "null") reviewer_model="" ;;
++            esac
+             echo "reviewer_model=$reviewer_model" >> "$GITHUB_OUTPUT"
+             echo "status=ok" >> "$GITHUB_OUTPUT"
+           else
+diff --git a/tests/ai-merge-gate.test.js b/tests/ai-merge-gate.test.js
+index c026a7e..3a56ff3 100644
+--- a/tests/ai-merge-gate.test.js
++++ b/tests/ai-merge-gate.test.js
+@@ -163,6 +163,17 @@ test('the reviewer family comes from the router responses, and the comparison li
+   // logic read the App slug and the bot login to name families.
+   expect(text).not.toContain('MODEL_LANES');
+   expect(text).not.toMatch(/REVIEWER_SLUG|PR_AUTHOR_TYPE|app-slug.*family/);
++  // family_of is defined exactly once, in family-of.jq, and both consumers
++  // include that file instead of carrying their own copy of the definition.
++  const familiesDir = join('.github', 'scripts', 'policy-gate');
++  const shared = readFileSync(join(familiesDir, 'family-of.jq'), 'utf8');
++  expect(shared.match(/def family_of/g)).toHaveLength(1);
++  const validator = readFileSync(join(familiesDir, 'validate-verdict.sh'), 'utf8');
++  expect(validator).toContain('include "family-of"');
++  expect(validator).not.toContain('def family_of');
++  const authorFamily = stepById('author-family').run;
++  expect(authorFamily).toContain('include "family-of"');
++  expect(authorFamily).not.toContain('def family_of');
+ });
+ 
+ test('policy-gate publishes the model that wrote the review to its caller', () => {
+@@ -172,8 +183,20 @@ test('policy-gate publishes the model that wrote the review to its caller', () =
+   expect(review.outputs.reviewer_model).toBe('$' + '{{ steps.handoff.outputs.reviewer_model }}');
+   const handoff = review.steps.find((step) => step.id === 'handoff');
+   expect(handoff.env.RESPONSE_FILE).toBe('$' + '{{ steps.verdict.outputs.response-file }}');
+-  expect(handoff.run).toContain('.model');
++  // The reviewer model is the model id the router is called with - the same
++  // input the inference step receives. The response file holds only the
++  // message content, so the model never comes from there.
++  expect(handoff.env.REVIEWER_MODEL).toBe('$' + '{{ inputs.model }}');
+   expect(handoff.run).toContain('reviewer_model=');
++  expect(handoff.run).not.toContain('.model');
++});
++
++test('policy-gate exposes how each review settled to its caller', () => {
++  expect(policy.on.workflow_call.outputs.verdict_status.value).toBe('$' + '{{ jobs.review.outputs.verdict_status }}');
++  expect(policy.jobs.review.outputs.verdict_status).toBe('$' + '{{ steps.handoff.outputs.status }}');
++  for (const job of ['leak', 'security', 'semantic']) {
++    expect(gate.jobs.gate.env[`${job.toUpperCase()}_STATUS`]).toBe(`\${{ needs.${job}.outputs.verdict_status }}`);
++  }
+ });
+ 
+ test('the verdict check run is published with the reviewer App token', () => {
+@@ -195,6 +218,7 @@ test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFER
+   for (const scenario of fixture.gate_scenarios) {
+     const [gitleaks, leak, security, semantic] = scenario.results;
+     const [leakModel, securityModel, semanticModel] = scenario.models;
++    const [leakStatus, securityStatus, semanticStatus] = scenario.statuses ?? [];
+     withGateWorkspace((dir) => {
+       const { result, outputs } = runGateStep('verdict', dir, {
+         IS_DRAFT: String(scenario.draft),
+@@ -207,6 +231,9 @@ test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFER
+         LEAK_MODEL: leakModel,
+         SECURITY_MODEL: securityModel,
+         SEMANTIC_MODEL: semanticModel,
++        LEAK_STATUS: leakStatus ?? '',
++        SECURITY_STATUS: securityStatus ?? '',
++        SEMANTIC_STATUS: semanticStatus ?? '',
+         COPILOT_OUTCOME: 'success',
+         COPILOT_FAILURES: scenario.copilot_failures ?? '0',
+         AUTHOR_FAMILY: scenario.author_family ?? 'human',
+@@ -235,6 +262,89 @@ test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFER
+   }
+ });
+ 
++test('the real handoff and verdict steps pass a cross-family review from a response file the action writes', () => {
++  withGateWorkspace((dir) => {
++    // actions/ai-inference writes only the message content to its response
++    // file: the verdict, {summary, findings} - no envelope, no model field.
++    const response = join(dir, 'response.json');
++    writeFileSync(response, JSON.stringify({ summary: 'No suspected leaks.', findings: [] }));
++
++    const handoffOutput = join(dir, 'handoff-output');
++    writeFileSync(handoffOutput, '');
++    const handoff = Bun.spawnSync(['/bin/bash', '-c', policy.jobs.review.steps.find((step) => step.id === 'handoff').run], {
++      cwd: dir,
++      env: {
++        ...process.env,
++        GITHUB_OUTPUT: handoffOutput,
++        HAS_OVERRIDE: 'false',
++        VERDICT_OUTCOME: 'success',
++        RESPONSE_FILE: response,
++        REVIEWER_MODEL: 'glm-4.7',
++      },
++    });
++    expect(handoff.exitCode, handoff.stderr.toString()).toBe(0);
++    const handoffOutputs = readOutputs(handoffOutput);
++    expect(handoffOutputs.status).toBe('ok');
++    // The reviewer model is the configured value, not anything read from the
++    // response file, so it is non-empty on a real run.
++    expect(handoffOutputs.reviewer_model).toBe('glm-4.7');
++
++    const model = handoffOutputs.reviewer_model;
++    const { result, outputs } = runGateStep('verdict', dir, {
++      IS_DRAFT: 'false',
++      REPO_PRIVATE: 'false',
++      ROUTER_AVAILABLE: 'true',
++      GITLEAKS_RESULT: 'success',
++      LEAK_RESULT: 'success',
++      SECURITY_RESULT: 'success',
++      SEMANTIC_RESULT: 'success',
++      LEAK_MODEL: model,
++      SECURITY_MODEL: model,
++      SEMANTIC_MODEL: model,
++      LEAK_STATUS: 'ok',
++      SECURITY_STATUS: 'ok',
++      SEMANTIC_STATUS: 'ok',
++      COPILOT_OUTCOME: 'success',
++      COPILOT_FAILURES: '0',
++      AUTHOR_FAMILY: 'human',
++      HEAD_SHA: 'b'.repeat(40),
++    });
++    expect(result.exitCode, result.stderr.toString()).toBe(0);
++    expect(outputs.conclusion, result.stderr.toString()).toBe('success');
++    const contract = JSON.parse(readFileSync(join(dir, 'ai-merge-gate.verdict.json'), 'utf8'));
++    expect(contract.model).toBe(model);
++    expect(contract.verdict).toBe('MERGE');
++
++    // The published summary shows that non-empty model line and the MERGE verdict.
++    const helperDir = join(dir, '.ai-workflows', '.github', 'scripts', 'shared');
++    const summaryArg = join(dir, 'captured-summary');
++    writeFileSync(join(helperDir, 'check-run.sh'), [
++      '#!/bin/sh',
++      `printf '%s' "$5" > '${summaryArg}'`,
++      '',
++    ].join('\n'));
++    chmodSync(join(helperDir, 'check-run.sh'), 0o755);
++    const publish = Bun.spawnSync(['/bin/bash', '-c', stepById('publish').run], {
++      cwd: dir,
++      env: {
++        ...process.env,
++        GH_TOKEN: 'app-token',
++        CHECK_APP_SLUG: 'jpe-claude-bot',
++        CHECK_HEAD_SHA: 'b'.repeat(40),
++        GATE_CONCLUSION: outputs.conclusion,
++        GATE_REASON: '',
++        VERDICT_FILE: 'ai-merge-gate.verdict.json',
++        SUMMARY_FILE: 'ai-merge-gate.summary.md',
++        RUBRIC_LINE: fixture.rubric_line,
++      },
++    });
++    expect(publish.exitCode, publish.stderr.toString()).toBe(0);
++    const summary = readFileSync(summaryArg, 'utf8');
++    expect(summary.split('\n').find((line) => line.startsWith('model: '))).toBe(`model: ${model}`);
++    expect(summary).toContain('VERDICT: MERGE');
++  });
++});
++
+ test('the author family comes from the Assisted-by trailers of the commits in the change', () => {
+   const FAMILIES_FILE = '.ai-workflows/.github/scripts/policy-gate/model-families.json';
+   const cases = [
+diff --git a/tests/fixtures/ai-merge-gate.json b/tests/fixtures/ai-merge-gate.json
+index f52ab45..63e7f12 100644
+--- a/tests/fixtures/ai-merge-gate.json
++++ b/tests/fixtures/ai-merge-gate.json
+@@ -144,6 +144,39 @@
+       "model_line": "claude-opus-5-5, glm-4.7",
+       "reason_contains": "share the family anthropic"
+     },
++    {
++      "name": "every review passed by override",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "models": ["", "", ""],
++      "statuses": ["override", "override", "override"],
++      "exit_code": 0,
++      "verdict": "MERGE",
++      "model_line": "override"
++    },
++    {
++      "name": "one review passed by override, the others cross-family",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "models": ["", "claude-opus-5-5", "glm-4.7"],
++      "statuses": ["override", "ok", "ok"],
++      "author_family": "openai",
++      "exit_code": 0,
++      "verdict": "MERGE",
++      "model_line": "claude-opus-5-5, glm-4.7, override"
++    },
++    {
++      "name": "override beside a same-family review is still refused",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "models": ["", "glm-4.7", "glm-4.7"],
++      "statuses": ["override", "ok", "ok"],
++      "author_family": "zhipu",
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "glm-4.7, override",
++      "reason_contains": "share the family zhipu"
++    },
+     {
+       "name": "reviewer model unknown refused",
+       "draft": false,
+diff --git a/tests/policy-gate-verdict.test.js b/tests/policy-gate-verdict.test.js
+index b74cf79..1b53676 100644
+--- a/tests/policy-gate-verdict.test.js
++++ b/tests/policy-gate-verdict.test.js
+@@ -261,6 +261,35 @@ test('a model of none keeps the scan verdict and the scan reason', () => {
+   });
+ });
+ 
++test('keeps the verdict when every review passed through its override label', () => {
++  // An override has no reviewer model, so the family rule cannot and must
++  // not apply - even against an author family the map would otherwise
++  // refuse.
++  const result = mergeResult(mergeVerdict({ model: 'override', author_family: 'zhipu' }));
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('MERGE');
++  expect(result.outputs).toEqual({ verdict: 'MERGE', reason: '' });
++});
++
++test('an override keeps the scan verdict and the scan reason', () => {
++  const result = mergeResult(mergeVerdict({ model: 'override', verdict: 'DEFERRED' }), {
++    MERGE_GATE_REASON: '2 Copilot agent check(s) failed',
++  });
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('DEFERRED');
++  expect(result.outputs.reason).toBe('2 Copilot agent check(s) failed');
++});
++
++test('applies the family rule to the non-override reviewers only', () => {
++  const shared = mergeResult(mergeVerdict({ model: 'override, glm-4.7', author_family: 'zhipu' }));
++  expect(shared.exitCode).toBe(0);
++  expect(shared.verdict).toBe('CHANGES');
++  expect(shared.outputs.reason).toBe('reviewer and author share the family zhipu');
++  const cross = mergeResult(mergeVerdict({ model: 'override, glm-4.7', author_family: 'anthropic' }));
++  expect(cross.exitCode).toBe(0);
++  expect(cross.verdict).toBe('MERGE');
++});
++
+ test('keeps the scan reason when the family check passes', () => {
+   const result = mergeResult(mergeVerdict({}), { MERGE_GATE_REASON: '2 Copilot agent check(s) failed' });
+   expect(result.exitCode).toBe(0);
