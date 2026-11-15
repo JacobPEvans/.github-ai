@@ -3,6 +3,14 @@
 # Reusable workflow: called by consumer repos when CI fails on a PR branch.
 # Analyzes failure logs and pushes fixes (max 2 attempts per PR).
 #
+# A caller starts it from a workflow_run of its gate, or from the "ci-fix"
+# label on a pull request (pull_request, types: [labeled]). Repositories
+# tagged with the merge_tier=hot custom property act only on failed
+# merge_group gate runs or the label; any other tier (the empty custom
+# property reads as legacy) keeps fixing pull-request failures exactly as
+# before. Before pushing, the publisher skips PRs that sit in a
+# merge queue (pullRequest.mergeQueueEntry).
+#
 # Security: The fix job includes a fork guard before checking out the failed
 # branch, regardless of whether the caller uses workflow_run or workflow_call.
 
@@ -105,21 +113,31 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: ci-fix-${{ github.repository }}-${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.ref }}
+  group: ci-fix-${{ github.repository }}-${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref || github.ref }}
   cancel-in-progress: false  # Never cancel — queue instead to avoid wasting AI tokens
 
+# Per-PR write serialization lives on the writing jobs (post-attempt-comment,
+# publish, notify-failure) so a queued pull request never receives writes from
+# two runs at once. Agent and read jobs stay parallel.
 jobs:
   should-fix:
     name: Check if fix needed
     # Gate on CI failure so direct importers no-op on green builds. suite-ci
-    # applies the same conclusion gate one level up.
+    # applies the same conclusion gate one level up. The ci-fix label is an
+    # explicit fix request, so it bypasses the conclusion gate. Hot-tier
+    # repositories (custom property merge_tier=hot) only act on merge_group
+    # gate failures or the label; any other tier keeps today's behavior.
     if: >-
-      (inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure' &&
+      ((inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'ci-fix')) &&
       (inputs.failure_actor || github.actor) != 'renovate[bot]' &&
       (inputs.failure_actor || github.actor) != 'dependabot[bot]' &&
-      (inputs.failure_actor || github.actor) != 'copilot[bot]'
+      (inputs.failure_actor || github.actor) != 'copilot[bot]' &&
+      ((github.event.repository.custom_properties.merge_tier || 'legacy') != 'hot' ||
+      github.event.workflow_run.event == 'merge_group' ||
+      github.event_name == 'pull_request')
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
     permissions:
       pull-requests: read
       issues: read
@@ -140,7 +158,7 @@ jobs:
         id: find-pr
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          FAILURE_HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+          FAILURE_HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
         with:
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/find-pr.js');
@@ -159,8 +177,19 @@ jobs:
 
   check-daily-limit:
     name: Check daily run limit
+    # Same gate as should-fix: runs that cannot act (green gate runs, other
+    # labels) must not consume the daily budget.
+    if: >-
+      ((inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'ci-fix')) &&
+      (inputs.failure_actor || github.actor) != 'renovate[bot]' &&
+      (inputs.failure_actor || github.actor) != 'dependabot[bot]' &&
+      (inputs.failure_actor || github.actor) != 'copilot[bot]' &&
+      ((github.event.repository.custom_properties.merge_tier || 'legacy') != 'hot' ||
+      github.event.workflow_run.event == 'merge_group' ||
+      github.event_name == 'pull_request')
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
     permissions:
       actions: read
     outputs:
@@ -189,14 +218,18 @@ jobs:
     name: Post attempt marker
     needs: [should-fix, check-daily-limit]
     if: >-
-      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
+      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository ||
+      github.event.pull_request.head.repo.full_name) == github.repository &&
       needs.should-fix.outputs.should_run == 'true' &&
       needs.check-daily-limit.outputs.should_run == 'true'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
     permissions:
       pull-requests: write
       issues: write
+    concurrency:
+      group: pr-writer-${{ github.repository }}-${{ needs.should-fix.outputs.pr_number }}
+      cancel-in-progress: false
     steps:
       - name: Checkout ai-workflows scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -221,11 +254,12 @@ jobs:
     name: Get failure logs
     needs: [should-fix, check-daily-limit]
     if: >-
-      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
+      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository ||
+      github.event.pull_request.head.repo.full_name) == github.repository &&
       needs.should-fix.outputs.should_run == 'true' &&
       needs.check-daily-limit.outputs.should_run == 'true'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
     permissions:
       actions: read
     outputs:
@@ -244,6 +278,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           FAILURE_RUN_ID: ${{ inputs.failure_run_id || github.event.workflow_run.id }}
+          FAILURE_HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
         with:
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/get-failure-logs.js');
@@ -256,7 +291,8 @@ jobs:
     # Also require upstream gate jobs to have passed (explicit `if` replaces the default
     # dependency-success check, so all conditions must be listed here).
     if: >-
-      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
+      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository ||
+      github.event.pull_request.head.repo.full_name) == github.repository &&
       needs.should-fix.outputs.should_run == 'true' &&
       needs.check-daily-limit.outputs.should_run == 'true'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
@@ -266,7 +302,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
     outputs:
       fix_base_sha: ${{ steps.fix-base.outputs.sha }}
     steps:
@@ -280,7 +316,7 @@ jobs:
       - name: Checkout PR branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -371,14 +407,17 @@ jobs:
     needs: [should-fix, fix]
     if: ${{ !inputs.dry_run }}
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
     permissions:
       contents: write
+    concurrency:
+      group: pr-writer-${{ github.repository }}-${{ needs.should-fix.outputs.pr_number }}
+      cancel-in-progress: false
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -403,7 +442,8 @@ jobs:
           fi
           rm agent.patch
 
-      # The fresh publisher alone receives the App token.
+      # The fresh publisher alone receives the App token. The queue skip below
+      # reads the PR through GraphQL, so the token also needs pull-requests read.
       - name: Mint commit token
         id: commit-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
@@ -411,13 +451,15 @@ jobs:
           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}
           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
           permission-contents: write
+          permission-pull-requests: read
 
       - name: Commit fix to PR branch
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+          HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
           FIX_BASE_SHA: ${{ needs.fix.outputs.fix_base_sha }}
           COMMIT_MESSAGE: "fix: resolve CI failure (auto-fix attempt ${{ needs.should-fix.outputs.attempt }})"
+          PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
         with:
           github-token: ${{ steps.commit-token.outputs.token }}
           script: |
@@ -429,9 +471,12 @@ jobs:
     needs: [should-fix, fix, publish]
     if: failure() && !inputs.dry_run
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
     permissions:
       pull-requests: write
+    concurrency:
+      group: pr-writer-${{ github.repository }}-${{ needs.should-fix.outputs.pr_number }}
+      cancel-in-progress: false
     steps:
       - name: Comment on failure
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9

@@ -7,16 +7,19 @@ function createMockCore() {
   const infos = [];
   const warnings = [];
   const failures = [];
+  const notices = [];
   return {
     setOutput: mock((key, value) => outputs.set(key, value)),
     setFailed: mock((msg) => failures.push(msg)),
     info: mock((msg) => infos.push(msg)),
     warning: mock((msg) => warnings.push(msg)),
+    notice: mock((msg) => notices.push(msg)),
     getOutput: (key) => outputs.get(key),
     outputs,
     infos,
     warnings,
     failures,
+    notices,
   };
 }
 
@@ -62,6 +65,7 @@ function createMockGithub() {
         listJobsForWorkflowRun: mock(),
         downloadJobLogsForWorkflowRun: mock(),
         listWorkflowRuns: mock(),
+        listWorkflowRunsForRepo: mock(),
       },
     },
     paginate,
