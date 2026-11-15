@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.11.1](https://github.com/JacobPEvans/.github-ai/compare/v2.11.0...v2.11.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **ci-fix:** drop a fix whose pull request head moved ([#145](https://github.com/JacobPEvans/.github-ai/issues/145)) ([6ec6593](https://github.com/JacobPEvans/.github-ai/commit/6ec6593313c1257e1f6a9ee30a9a85e876cd5e20))
+
 ## [2.11.0](https://github.com/JacobPEvans/.github-ai/compare/v2.10.0...v2.11.0) (2026-11-15)
 
 
