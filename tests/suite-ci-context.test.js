@@ -32,6 +32,13 @@ test('cc-ci-fix uses caller conclusion before workflow_run fallback', () => {
   );
 });
 
+test('cc-ci-fix applies no daily run cap to OpenHands or local-only runs', () => {
+  const uncapped = "(inputs.local_only || (inputs.agent || vars.GH_ACTION_AI_AGENT) == 'openhands')";
+  const job = ciFix.jobs['check-daily-limit'];
+  expect(job.outputs.should_run).toBe(`\${{ ${uncapped} && 'true' || steps.check.outputs.should_run }}`);
+  expect(job.steps.find((step) => step.id === 'check').if).toBe(`\${{ !${uncapped} }}`);
+});
+
 test('suite-ci declares only the credentials passed by caller workflows', () => {
   expect(secrets).toEqual({
     LLM_ROUTER_BASE_URL: { required: true },
