@@ -1,0 +1,62 @@
+name: Run OpenHands
+description: >-
+  Run the OpenHands agent on the org's model router with the OpenHands SDK's
+  own task runner. The agent edits files in the working directory and does
+  not commit or push.
+
+inputs:
+  prompt:
+    description: Rendered prompt content sent to the agent.
+    required: true
+  model:
+    description: Router role alias the agent requests.
+    required: true
+  base_url:
+    description: Router base URL ending in /v1.
+    required: true
+  api_key:
+    description: Router key sent as the bearer token.
+    required: true
+  version:
+    description: Release tag of OpenHands/software-agent-sdk to install and run.
+    required: true
+  working_directory:
+    description: Directory the agent works in. Empty means the workspace.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+      with:
+        python-version: "3.13"
+
+    - name: Install the OpenHands SDK and its task runner
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        repo="https://github.com/OpenHands/software-agent-sdk"
+        python -m pip install --disable-pip-version-check --quiet \
+          "openhands-sdk @ git+$repo.git@$VERSION#subdirectory=openhands-sdk" \
+          "openhands-tools @ git+$repo.git@$VERSION#subdirectory=openhands-tools"
+        curl -fsSL --retry 2 -o "$RUNNER_TEMP/openhands_agent_script.py" \
+          "https://raw.githubusercontent.com/OpenHands/software-agent-sdk/$VERSION/examples/03_github_workflows/01_basic_action/agent_script.py"
+
+    - name: Run OpenHands
+      shell: bash
+      working-directory: ${{ inputs.working_directory || github.workspace }}
+      env:
+        PROMPT: ${{ inputs.prompt }}
+        MODEL: ${{ inputs.model }}
+        LLM_BASE_URL: ${{ inputs.base_url }}
+        LLM_API_KEY: ${{ inputs.api_key }}
+        PYTHONPATH: ""
+      run: |
+        set -euo pipefail
+        printf '%s' "$PROMPT" > "$RUNNER_TEMP/openhands_prompt.md"
+        # The SDK names an OpenAI-compatible endpoint's model with this prefix.
+        LLM_MODEL="openai/$MODEL" python "$RUNNER_TEMP/openhands_agent_script.py" "$RUNNER_TEMP/openhands_prompt.md"
