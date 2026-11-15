@@ -1,0 +1,389 @@
+diff --git a/.github/workflows/ci-digest.yml b/.github/workflows/ci-digest.yml
+new file mode 100644
+index 0000000..42fa980
+--- /dev/null
++++ b/.github/workflows/ci-digest.yml
+@@ -0,0 +1,383 @@
++# CI Digest
++#
++# One daily digest of merge-queue activity across the owner's repositories,
++# plus two at-once alerts: a stalled merge queue and an opened auto-revert
++# pull request. Every fact is computed with `gh` reads under the default
++# token, so coverage reaches the repositories that token can read; nothing
++# is created, deleted, merged, or pushed.
++#
++# Triggers:
++#   17 9 * * *     daily digest for the previous 24 hours
++#   5-55/10 * * *  stall sweep: a queue with waiting entries and no merge in
++#                  the last 60 minutes alerts at once
++#   pull_request labeled auto-revert
++#                  the revert alert posts at once
++#
++# The digest reports exactly: merges per repository and lane, median queue
++# time, ejections, and every land-first merge with how it ended. A lane is
++# the merge queue of the pull request's base branch; "direct" marks merges
++# into branches without a queue. A land-first merge is a pull request that
++# merged without ever entering a merge queue; how it ended names the base
++# branch and the merge commit. An ejection is a removal from a merge queue
++# inside the window, with the queue's reason when one is given.
++#
++# The chat post is skipped with a notice while the
++# GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION secret is absent; the digest and
++# the stall report are still written to the job summary.
++
++name: CI Digest
++
++on:
++  schedule:
++    # Daily digest at an odd minute.
++    - cron: "17 9 * * *"
++    # Stall sweep every ten minutes on odd minutes.
++    - cron: "5-55/10 * * * *"
++  pull_request:
++    types: [labeled]
++
++permissions:
++  contents: read
++  pull-requests: read
++
++concurrency:
++  group: ci-digest-${{ github.repository }}-${{ github.event.pull_request.number || github.event.schedule || github.run_id }}
++  cancel-in-progress: false
++
++jobs:
++  digest:
++    name: Daily merge digest
++    if: github.event_name == 'schedule' && github.event.schedule == '17 9 * * *'
++    runs-on: ubuntu-24.04
++    timeout-minutes: 20
++    permissions:
++      contents: read
++      pull-requests: read
++    env:
++      OWNER: ${{ vars.CI_DIGEST_OWNER || github.repository_owner }}
++      CHAT_WEBHOOK_URL: ${{ secrets.GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION }}
++    steps:
++      - name: Collect merge facts
++        id: facts
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          set -euo pipefail
++          since=$(date -u -d "24 hours ago" +%Y-%m-%dT%H:%M:%SZ)
++          since_day=$(date -u -d "24 hours ago" +%Y-%m-%d)
++          {
++            echo "since=$since"
++            echo "now=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
++          } >> "$GITHUB_OUTPUT"
++
++          # Non-fork, non-archived repositories of the owner.
++          gh repo list "$OWNER" --limit 200 --json name,isFork,isArchived \
++            --jq '.[] | select(.isFork == false and .isArchived == false) | .name' > repos.txt
++
++          # Pull requests updated in the window cover every merge in it
++          # (merging updates the pull request) and every queue ejection (a
++          # removal updates it too). Search dates are day-granular, so the
++          # GraphQL pass below applies the exact window.
++          : > prs.ndjson
++          while read -r repo; do
++            # shellcheck disable=SC2016  # $repo is a jq variable, not a shell one
++            gh search prs --repo "$OWNER/$repo" --updated ">=$since_day" --limit 200 \
++              --json number,title,url \
++              | jq -c --arg repo "$repo" '.[] | {repo: $repo, number, title, url}' >> prs.ndjson
++          done < repos.txt
++
++          # Queue facts per pull request: merge state plus every merge-queue
++          # add and removal event in its timeline.
++          # shellcheck disable=SC2016  # $owner etc. are GraphQL variables, not shell ones
++          query='
++          query($owner: String!, $name: String!, $number: Int!) {
++            repository(owner: $owner, name: $name) {
++              pullRequest(number: $number) {
++                number
++                title
++                url
++                state
++                baseRefName
++                mergedAt
++                mergeCommit { oid }
++                mergeQueue { url }
++                timelineItems(last: 50, itemTypes: [ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT]) {
++                  nodes {
++                    __typename
++                    ... on AddedToMergeQueueEvent { createdAt }
++                    ... on RemovedFromMergeQueueEvent { createdAt reason }
++                  }
++                }
++              }
++            }
++          }'
++
++          : > facts.ndjson
++          while read -r line; do
++            pr_repo=$(jq -r .repo <<<"$line")
++            pr_number=$(jq -r .number <<<"$line")
++            # shellcheck disable=SC2016  # $repo, $q etc. are jq variables, not shell ones
++            gh api graphql -f query="$query" -f owner="$OWNER" -f name="$pr_repo" -F number="$pr_number" \
++              | jq -c --arg repo "$pr_repo" '
++                .data.repository.pullRequest
++                | (.mergeQueue.url // "") as $q
++                | {repo: $repo, number, title, url, state, baseRefName, mergedAt,
++                   mergeCommit: (.mergeCommit.oid // ""),
++                   lane: (if $q == "" then "direct" else ($q | split("/") | last) end),
++                   adds: [.timelineItems.nodes[]
++                     | select(.__typename == "AddedToMergeQueueEvent") | .createdAt],
++                   removals: [.timelineItems.nodes[]
++                     | select(.__typename == "RemovedFromMergeQueueEvent")
++                     | {at: .createdAt, reason}]}' >> facts.ndjson
++          done < prs.ndjson
++
++      - name: Summarize and render the digest
++        env:
++          SINCE: ${{ steps.facts.outputs.since }}
++          NOW: ${{ steps.facts.outputs.now }}
++        run: |
++          set -euo pipefail
++
++          # Merged inside the exact window, with queue time from the last
++          # enqueue to the merge; pull requests that never queued have no
++          # queue time.
++          # shellcheck disable=SC2016  # $since, $enq etc. are jq variables, not shell ones
++          jq -c --arg since "$SINCE" '
++            def iso: sub("\\.[0-9]+Z$"; "Z");
++            select(.mergedAt != null and (.mergedAt | iso) >= $since)
++            | ((.adds | sort | last) // "") as $enq
++            | . + {
++              queued: ($enq != ""),
++              queueMinutes: (if $enq == "" then null
++                else (((.mergedAt | iso | fromdate) - ($enq | iso | fromdate)) / 60 | floor) end)}' \
++            facts.ndjson > merges.ndjson
++
++          # Ejections: removals from a merge queue inside the window.
++          # shellcheck disable=SC2016  # $pr, $since are jq variables, not shell ones
++          jq -c --arg since "$SINCE" '
++            def iso: sub("\\.[0-9]+Z$"; "Z");
++            . as $pr
++            | .removals[]
++            | select((.at | iso) >= $since)
++            | {repo: $pr.repo, number: $pr.number, title: $pr.title, url: $pr.url,
++               lane: $pr.lane, at: (.at | iso), reason: (.reason // "not given"),
++               mergedAfterwards: ($pr.mergedAt != null)}' \
++            facts.ndjson > ejections.ndjson
++
++          # Land-first merges: merged inside the window without ever
++          # entering a merge queue; how it ended names the base branch and
++          # the merge commit.
++          # shellcheck disable=SC2016  # $since is a jq variable, not a shell one
++          jq -c --arg since "$SINCE" '
++            def iso: sub("\\.[0-9]+Z$"; "Z");
++            select(.mergedAt != null and (.mergedAt | iso) >= $since and (.adds | length) == 0)
++            | {repo, number, title, url, baseRefName, mergedAt: (.mergedAt | iso),
++               sha: (if .mergeCommit == "" then "unknown" else .mergeCommit[0:7] end)}' \
++            facts.ndjson > landfirst.ndjson
++
++          {
++            printf '*CI digest — %s*\n_%s .. %s_\n\n' "$OWNER" "$SINCE" "$NOW"
++
++            printf '*Merges per repository and lane*\n'
++            if test -s merges.ndjson; then
++              jq -s -r 'group_by([.repo, .lane])[]
++                | "• \(.[0].repo) lane \(.[0].lane): \(length)"' merges.ndjson
++            else
++              printf '• none\n'
++            fi
++
++            printf '\n*Median queue time*\n'
++            if test -s merges.ndjson; then
++              # shellcheck disable=SC2016  # $t, $i are jq variables, not shell ones
++              jq -s -r 'map(select(.queueMinutes != null) | .queueMinutes) | sort as $t |
++                if ($t | length) == 0 then "• none (no queued merges)"
++                else
++                  (($t | length) / 2 | floor) as $i
++                  | if ($t | length) % 2 == 1 then "• \($t[$i]) min"
++                    else "• \(($t[$i - 1] + $t[$i]) / 2 | round) min"
++                    end
++                end' merges.ndjson
++            else
++              printf '• none (no queued merges)\n'
++            fi
++
++            printf '\n*Ejections*\n'
++            if test -s ejections.ndjson; then
++              jq -r 'if .mergedAfterwards
++                then "• \(.repo)#\(.number) \(.title) — ejected at \(.at) (reason: \(.reason)); merged afterwards"
++                else "• \(.repo)#\(.number) \(.title) — ejected at \(.at) (reason: \(.reason)); not merged"
++                end' ejections.ndjson
++            else
++              printf '• none\n'
++            fi
++
++            printf '\n*Land-first merges*\n'
++            if test -s landfirst.ndjson; then
++              jq -r '"• \(.repo)#\(.number) \(.title) — merged directly to \(.baseRefName) as \(.sha) at \(.mergedAt)"' \
++                landfirst.ndjson
++            else
++              printf '• none\n'
++            fi
++          } > digest.md
++
++          jq -Rs '{text: .}' digest.md > ci-digest-payload.json
++          cat digest.md >> "$GITHUB_STEP_SUMMARY"
++
++      - name: Notice when the chat webhook secret is absent
++        if: env.CHAT_WEBHOOK_URL == ''
++        run: echo "::notice::GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION is not set; the digest went to the job summary and the chat post was skipped"
++
++      - name: Post the digest
++        if: env.CHAT_WEBHOOK_URL != ''
++        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
++        with:
++          webhook: ${{ secrets.GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION }}
++          webhook-type: incoming-webhook
++          errors: true
++          payload-file-path: ci-digest-payload.json
++
++  stall-check:
++    name: Merge queue stall check
++    if: github.event_name == 'schedule' && github.event.schedule == '5-55/10 * * * *'
++    runs-on: ubuntu-24.04
++    timeout-minutes: 10
++    permissions:
++      contents: read
++      pull-requests: read
++    env:
++      OWNER: ${{ vars.CI_DIGEST_OWNER || github.repository_owner }}
++      CHAT_WEBHOOK_URL: ${{ secrets.GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION }}
++    steps:
++      - name: Check merge queues for a stall
++        id: check
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          set -euo pipefail
++          cutoff=$(date -u -d "60 minutes ago" +%Y-%m-%dT%H:%M:%SZ)
++          today=$(date -u +%Y-%m-%d)
++
++          # shellcheck disable=SC2016  # $owner etc. are GraphQL variables, not shell ones
++          query='
++          query($owner: String!, $name: String!) {
++            repository(owner: $owner, name: $name) {
++              mergeQueue {
++                url
++                entries(first: 100) {
++                  totalCount
++                  nodes {
++                    enqueuedAt
++                    position
++                    state
++                    pullRequest { number url }
++                  }
++                }
++              }
++              recentMerges: pullRequests(states: MERGED, first: 25, orderBy: {field: UPDATED_AT, direction: DESC}) {
++                nodes { number mergedAt }
++              }
++            }
++          }'
++
++          gh repo list "$OWNER" --limit 200 --json name,isFork,isArchived \
++            --jq '.[] | select(.isFork == false and .isArchived == false) | .name' > repos.txt
++
++          : > stalls.ndjson
++          while read -r repo; do
++            # Search is day-granular, so it only bounds the stall sweep:
++            # nothing merged today means nothing merged in the last hour. A
++            # merge earlier today is timestamped exactly by the GraphQL
++            # reads below before any alert is written.
++            merged_today=$(gh search prs --repo "$OWNER/$repo" --merged \
++              --merged-at ">=$today" --limit 1 --json number | jq "length")
++
++            # shellcheck disable=SC2016  # $repo, $q etc. are jq variables, not shell ones
++            gh api graphql -f query="$query" -f owner="$OWNER" -f name="$repo" \
++              | jq -c --arg repo "$repo" --arg cutoff "$cutoff" \
++                --argjson mergedToday "$merged_today" '
++                def iso: sub("\\.[0-9]+Z$"; "Z");
++                .data.repository as $r
++                | select($r.mergeQueue != null)
++                | ($r.mergeQueue.entries.nodes | sort_by(.enqueuedAt)) as $nodes
++                | select(($nodes | length) > 0)
++                | select(($nodes | first | .enqueuedAt | iso) < $cutoff)
++                | select($mergedToday == 0 or
++                    ([$r.recentMerges.nodes[]
++                      | select(.mergedAt != null and (.mergedAt | iso) >= $cutoff)]
++                      | length) == 0)
++                | ($nodes | first) as $first
++                | {repo: $repo, lane: ($r.mergeQueue.url | split("/") | last),
++                   waiting: $r.mergeQueue.entries.totalCount,
++                   oldestNumber: ($first.pullRequest.number // 0),
++                   oldestUrl: ($first.pullRequest.url // ""),
++                   oldestState: $first.state,
++                   oldestEnqueuedAt: ($first.enqueuedAt | iso)}' >> stalls.ndjson
++          done < repos.txt
++
++          if test -s stalls.ndjson; then
++            {
++              printf '*Stalled merge queue — %s*\n\n' "$OWNER"
++              jq -r '"• \(.repo) lane \(.lane): \(.waiting) waiting entries; oldest <\(.oldestUrl)|#\(.oldestNumber)> waiting since \(.oldestEnqueuedAt) (\(.oldestState)); no merge in the last 60 minutes"' \
++                stalls.ndjson
++            } > stall.md
++            jq -Rs '{text: .}' stall.md > stall-payload.json
++            echo "stalled=$(jq -s length stalls.ndjson)" >> "$GITHUB_OUTPUT"
++            cat stall.md >> "$GITHUB_STEP_SUMMARY"
++          else
++            echo "stalled=0" >> "$GITHUB_OUTPUT"
++            printf '*Merge queue stall check — %s*\nNo queue is stalled; nothing alerted.\n' "$OWNER" >> "$GITHUB_STEP_SUMMARY"
++          fi
++
++      - name: Notice when no queue is stalled
++        if: steps.check.outputs.stalled == '0'
++        run: echo "::notice::No merge queue is stalled; no alert posted"
++
++      - name: Notice when the chat webhook secret is absent
++        if: steps.check.outputs.stalled != '0' && env.CHAT_WEBHOOK_URL == ''
++        run: echo "::notice::GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION is not set; the stall report went to the job summary and the chat post was skipped"
++
++      - name: Post the stall alert
++        if: steps.check.outputs.stalled != '0' && env.CHAT_WEBHOOK_URL != ''
++        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
++        with:
++          webhook: ${{ secrets.GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION }}
++          webhook-type: incoming-webhook
++          errors: true
++          payload-file-path: stall-payload.json
++
++  auto-revert-alert:
++    name: Auto-revert alert
++    if: github.event_name == 'pull_request' && github.event.label.name == 'auto-revert'
++    runs-on: ubuntu-24.04
++    timeout-minutes: 5
++    permissions:
++      contents: read
++    env:
++      CHAT_WEBHOOK_URL: ${{ secrets.GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION }}
++    steps:
++      - name: Build the alert payload
++        env:
++          PR_NUMBER: ${{ github.event.pull_request.number }}
++          PR_TITLE: ${{ github.event.pull_request.title }}
++          PR_URL: ${{ github.event.pull_request.html_url }}
++          PR_SENDER: ${{ github.event.sender.login }}
++          PR_SHA: ${{ github.event.pull_request.head.sha }}
++          REPO: ${{ github.repository }}
++        run: |
++          set -euo pipefail
++          # shellcheck disable=SC2016  # $text is a jq variable, not a shell one
++          jq -n --arg text "*Auto-revert opened* — <${PR_URL}|${REPO}#${PR_NUMBER}> ${PR_TITLE} (opened by ${PR_SENDER}, head ${PR_SHA:0:7})" \
++            '{text: $text}' > auto-revert-payload.json
++
++      - name: Notice when the chat webhook secret is absent
++        if: env.CHAT_WEBHOOK_URL == ''
++        run: echo "::notice::GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION is not set; the auto-revert alert was skipped"
++
++      - name: Post the auto-revert alert
++        if: env.CHAT_WEBHOOK_URL != ''
++        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
++        with:
++          webhook: ${{ secrets.GH_SLACK_WEBHOOK_URL_GITHUB_AUTOMATION }}
++          webhook-type: incoming-webhook
++          errors: true
++          payload-file-path: auto-revert-payload.json
