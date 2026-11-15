@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.11.3](https://github.com/JacobPEvans/.github-ai/compare/v2.11.2...v2.11.3) (2026-11-15)
+
+
+### Bug Fixes
+
+* **ci-fix:** let OpenHands and local-only runs take Renovate failures ([71ffda5](https://github.com/JacobPEvans/.github-ai/commit/71ffda546a69a266494431222107cff159337965))
+* **ci-fix:** run the OpenHands fixer on Renovate pull requests ([#151](https://github.com/JacobPEvans/.github-ai/issues/151)) ([71ffda5](https://github.com/JacobPEvans/.github-ai/commit/71ffda546a69a266494431222107cff159337965))
+
 ## [2.11.2](https://github.com/JacobPEvans/.github-ai/compare/v2.11.1...v2.11.2) (2026-11-15)
 
 
