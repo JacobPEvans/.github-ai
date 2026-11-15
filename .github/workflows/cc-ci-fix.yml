@@ -20,7 +20,7 @@ on:
         required: false
         default: ubuntu-24.04
       daily_run_limit:
-        description: "Maximum workflow runs per day"
+        description: "Maximum workflow runs per day. Not applied to OpenHands or local-only runs."
         type: string
         default: "5"
       local_only:
@@ -164,7 +164,8 @@ jobs:
     permissions:
       actions: read
     outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
+      # OpenHands and local-only runs spend the router key's budget, not a daily run count.
+      should_run: ${{ (inputs.local_only || (inputs.agent || vars.GH_ACTION_AI_AGENT) == 'openhands') && 'true' || steps.check.outputs.should_run }}
     steps:
       - name: Checkout ai-workflows scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -176,6 +177,7 @@ jobs:
 
       - name: Check daily run limit
         id: check
+        if: ${{ !(inputs.local_only || (inputs.agent || vars.GH_ACTION_AI_AGENT) == 'openhands') }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           DAILY_RUN_LIMIT: ${{ inputs.daily_run_limit }}
