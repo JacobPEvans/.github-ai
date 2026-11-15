@@ -381,15 +381,17 @@ test('the verdict defers skipped reviews only for modern-tier fast lanes before 
     { name: 'empty lane behaves as normal', env: { LANE: '', TIER: '' }, verdict: 'CHANGES' },
     { name: 'legacy tier ignores the bot lane', env: { LANE: 'bot', TIER: 'legacy' }, verdict: 'CHANGES' },
     { name: 'a failed classifier keeps the full rule', env: { LANE: 'tiny', TIER: 'standard', LANE_RESULT: 'failure' }, verdict: 'CHANGES' },
+    { name: 'a cancelled classifier keeps the full rule', env: { LANE: 'tiny', TIER: 'standard', LANE_RESULT: 'cancelled' }, verdict: 'CHANGES' },
+    { name: 'a skipped classifier keeps the full rule', env: { LANE: 'tiny', TIER: 'standard', LANE_RESULT: 'skipped' }, verdict: 'CHANGES' },
     {
       name: 'post-merge run ignores the lane and the draft flag',
-      env: { LANE: 'tiny', TIER: 'standard', POST_MERGE: 'true', IS_DRAFT: 'true' },
+      env: { LANE: '', TIER: '', LANE_RESULT: 'skipped', POST_MERGE: 'true', IS_DRAFT: 'true' },
       verdict: 'CHANGES',
     },
     {
       name: 'post-merge run with every review passed merges',
       env: {
-        LANE: 'tiny', TIER: 'standard', POST_MERGE: 'true', IS_DRAFT: 'true',
+        LANE: '', TIER: '', LANE_RESULT: 'skipped', POST_MERGE: 'true', IS_DRAFT: 'true',
         LEAK_RESULT: 'success', SECURITY_RESULT: 'success', SEMANTIC_RESULT: 'success',
         LEAK_MODEL: 'glm-4.7', SECURITY_MODEL: 'glm-4.7', SEMANTIC_MODEL: 'glm-4.7',
         LEAK_STATUS: 'ok', SECURITY_STATUS: 'ok', SEMANTIC_STATUS: 'ok',
