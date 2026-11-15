@@ -93,6 +93,12 @@ on:
         type: boolean
         required: false
         default: false
+    outputs:
+      reviewer_model:
+        description: >-
+          The model id the router reported for this rubric's review, taken
+          from the chat completion response. Empty when no review ran.
+        value: ${{ jobs.review.outputs.reviewer_model }}
     secrets:
       LLM_ROUTER_BASE_URL:
         description: >-
@@ -135,6 +141,7 @@ jobs:
     outputs:
       has_override: ${{ steps.override.outputs.has_override }}
       verdict_status: ${{ steps.handoff.outputs.status }}
+      reviewer_model: ${{ steps.handoff.outputs.reviewer_model }}
     steps:
       - name: Check the rubric name
         env:
@@ -233,6 +240,12 @@ jobs:
             echo "status=override" >> "$GITHUB_OUTPUT"
           elif [ "$VERDICT_OUTCOME" = "success" ]; then
             cp "$RESPONSE_FILE" handoff/verdict.json
+            # The model that wrote the review, as the router resolved the role
+            # alias in its chat completion. The AI Merge Gate compares the
+            # family of this model id against the author's families, so it
+            # needs the real id, not the alias this workflow was called with.
+            reviewer_model="$(jq -r 'if (.model | type == "string") then .model else "" end | split("\n")[0]' handoff/verdict.json)"
+            echo "reviewer_model=$reviewer_model" >> "$GITHUB_OUTPUT"
             echo "status=ok" >> "$GITHUB_OUTPUT"
           else
             echo "status=router-request-failed" >> "$GITHUB_OUTPUT"

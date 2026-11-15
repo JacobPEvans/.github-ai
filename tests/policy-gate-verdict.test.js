@@ -94,6 +94,49 @@ const makeFinding = (check, result = 'pass', overrides = {}) => ({
   ...overrides,
 });
 
+const mergeVerdict = (overrides = {}) => JSON.stringify({
+  model: 'claude-opus-5-5',
+  author_family: 'human',
+  head: headSha,
+  verdict: 'MERGE',
+  ...overrides,
+});
+
+// Runs the validator in merge-gate mode and reports the exit code, the verdict
+// left in the response file, and the step outputs the workflow reads.
+function mergeResult(response, extraEnv = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'policy-merge-gate-'));
+  try {
+    const file = join(dir, 'response.json');
+    const output = join(dir, 'step-output');
+    writeFileSync(file, response);
+    writeFileSync(output, '');
+    const run = Bun.spawnSync(['bash', script], {
+      env: { ...process.env, RUBRIC: 'merge-gate', RESPONSE_FILE: file, GITHUB_OUTPUT: output, ...extraEnv },
+    });
+    return {
+      exitCode: run.exitCode,
+      stderr: run.stderr.toString(),
+      verdict: JSON.parse(readFileSync(file, 'utf8')).verdict,
+      outputs: readOutputs(output),
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const readOutputs = (file) =>
+  Object.fromEntries(
+    readFileSync(file, 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const eq = line.indexOf('=');
+        return [line.slice(0, eq), line.slice(eq + 1)];
+      }),
+  );
+
 const POLICY = ['dry', 'native_first', 'disclosure', 'missing_test', 'token_budget'];
 const SECURITY = ['auth', 'injection', 'permission_widening', 'unsafe_trigger', 'secret_handling'];
 const SEMANTIC = ['claim_mismatch', 'omitted_behavior'];
@@ -119,6 +162,121 @@ test('accepts a code verdict with exactly one finding per code check', () => {
 
 test('accepts a leak verdict with no findings, which is a clean review', () => {
   expect(exitCodeFor('leak', JSON.stringify({ summary: 'clean', findings: [] }))).toBe(0);
+});
+
+test.each(['MERGE', 'CHANGES', 'DEFERRED'])('accepts the merge-gate verdict %s', (verdict) => {
+  expect(exitCodeFor('merge-gate', mergeVerdict({ verdict }))).toBe(0);
+});
+
+test('rejects a merge-gate verdict outside the contract enum', () => {
+  expect(exitCodeFor('merge-gate', mergeVerdict({ verdict: 'PASS' }))).toBe(1);
+});
+
+test('rejects a merge-gate verdict whose head is not a full sha', () => {
+  expect(exitCodeFor('merge-gate', mergeVerdict({ head: 'b'.repeat(20) }))).toBe(1);
+});
+
+test('rejects a merge-gate verdict with a multiline model', () => {
+  expect(exitCodeFor('merge-gate', mergeVerdict({ model: 'standard\ncritical' }))).toBe(1);
+});
+
+test('rejects a merge-gate verdict whose family is not a lowercase slug', () => {
+  expect(exitCodeFor('merge-gate', mergeVerdict({ author_family: 'Claude' }))).toBe(1);
+  expect(exitCodeFor('merge-gate', mergeVerdict({ author_family: 'claude bot' }))).toBe(1);
+});
+
+test('rejects a merge-gate verdict with keys outside the contract', () => {
+  expect(exitCodeFor('merge-gate', mergeVerdict({ reason: 'extra' }))).toBe(1);
+});
+
+test('accepts a reviewer model from a different family than the author', () => {
+  const result = mergeResult(mergeVerdict({ model: 'glm-4.7', author_family: 'human' }));
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('MERGE');
+  expect(result.outputs).toEqual({ verdict: 'MERGE', reason: '' });
+});
+
+test('refuses when the reviewer and the author share one family', () => {
+  const result = mergeResult(mergeVerdict({ model: 'claude-opus-5-5', author_family: 'anthropic' }));
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('CHANGES');
+  expect(result.outputs.verdict).toBe('CHANGES');
+  expect(result.outputs.reason).toBe('reviewer and author share the family anthropic');
+});
+
+test('refuses a reviewer model that matches no family in the map', () => {
+  const result = mergeResult(mergeVerdict({ model: 'mystery-model-9', author_family: 'human' }));
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('CHANGES');
+  expect(result.outputs.reason).toBe('reviewer family unknown');
+});
+
+test('refuses with reviewer model unknown when the response has no model field', () => {
+  const result = mergeResult(mergeVerdict({ model: '' }));
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('CHANGES');
+  expect(result.outputs.reason).toBe('reviewer model unknown');
+});
+
+test('accepts when the author family is unknown', () => {
+  const result = mergeResult(mergeVerdict({ model: 'claude-opus-5-5', author_family: 'unknown', verdict: 'DEFERRED' }));
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('DEFERRED');
+});
+
+test('refuses when one of two author families matches the reviewer', () => {
+  const result = mergeResult(mergeVerdict({ model: 'openai/gpt-5.5', author_family: 'anthropic+openai' }));
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('CHANGES');
+  expect(result.outputs.reason).toBe('reviewer and author share the family openai');
+});
+
+test('maps a model id with a provider prefix by its model part', () => {
+  const accepted = mergeResult(mergeVerdict({ model: 'openai/gpt-5.5', author_family: 'human' }));
+  expect(accepted.exitCode).toBe(0);
+  expect(accepted.verdict).toBe('MERGE');
+  const refused = mergeResult(mergeVerdict({ model: 'openai/gpt-5.5', author_family: 'openai' }));
+  expect(refused.verdict).toBe('CHANGES');
+  expect(refused.outputs.reason).toBe('reviewer and author share the family openai');
+});
+
+test('maps an upper-case model id case-insensitively', () => {
+  const result = mergeResult(mergeVerdict({ model: 'GLM-4.7', author_family: 'zhipu' }));
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('CHANGES');
+  expect(result.outputs.reason).toBe('reviewer and author share the family zhipu');
+});
+
+test('reviews across several models are refused when any one shares the author family', () => {
+  const result = mergeResult(mergeVerdict({ model: 'glm-4.7, claude-opus-5-5', author_family: 'anthropic' }));
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('CHANGES');
+  expect(result.outputs.reason).toBe('reviewer and author share the family anthropic');
+});
+
+test('a model of none keeps the scan verdict and the scan reason', () => {
+  const result = mergeResult(mergeVerdict({ model: 'none', verdict: 'DEFERRED' }), {
+    MERGE_GATE_REASON: 'a required scan or review was skipped for a non-draft pull request',
+  });
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('DEFERRED');
+  expect(result.outputs).toEqual({
+    verdict: 'DEFERRED',
+    reason: 'a required scan or review was skipped for a non-draft pull request',
+  });
+});
+
+test('keeps the scan reason when the family check passes', () => {
+  const result = mergeResult(mergeVerdict({}), { MERGE_GATE_REASON: '2 Copilot agent check(s) failed' });
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('MERGE');
+  expect(result.outputs.reason).toBe('2 Copilot agent check(s) failed');
+});
+
+test('fails closed when the model family map is missing', () => {
+  const result = mergeResult(mergeVerdict({}), { MODEL_FAMILIES_FILE: '/nonexistent/model-families.json' });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr).toContain('model family map is missing');
 });
 
 test('accepts a leak verdict with several findings in one category', () => {

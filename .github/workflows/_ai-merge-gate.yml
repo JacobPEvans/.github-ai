@@ -3,6 +3,22 @@
 # Status aggregator for secret scanning and blocking AI reviews.
 # Branch protection requires only "AI Merge Gate" as the single AI check.
 #
+# The gate job publishes the verdict contract as one check run named
+# "AI Merge Gate" on the pull request head, posted with the reviewer App
+# token so rulesets can pin the App. Its summary prepends the first rubric
+# line and carries exactly these contract lines:
+#   model:         the model ids the router reported for the reviews that ran
+#   author_family: the author's families, from the Assisted-by commit
+#                  trailers of the pull request, else "unknown"
+#   head:          the pull request head commit
+#   VERDICT:       MERGE, CHANGES or DEFERRED
+# The reviewer family is the family of the MODEL that wrote the review -
+# the "model" field of the router's chat completion, never the identity of
+# the App that posts the check. A review from one of the author's own
+# families is refused: no model reviews its own work. The comparison lives
+# in the merge-gate mode of .github/scripts/policy-gate/validate-verdict.sh,
+# with the model-to-family map in model-families.json next to it.
+#
 # Usage:
 #   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate.yml@v1
 name: _ai-merge-gate
@@ -183,52 +199,240 @@ jobs:
       LEAK_RESULT: ${{ needs.leak.result }}
       SECURITY_RESULT: ${{ needs.security.result }}
       SEMANTIC_RESULT: ${{ needs.semantic.result }}
+      # The model id each review's router response reported, passed through
+      # policy-gate.yml's reviewer_model output. Empty for a review that
+      # never ran.
+      LEAK_MODEL: ${{ needs.leak.outputs.reviewer_model }}
+      SECURITY_MODEL: ${{ needs.security.outputs.reviewer_model }}
+      SEMANTIC_MODEL: ${{ needs.semantic.outputs.reviewer_model }}
       GH_TOKEN: ${{ github.token }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - name: Verify Copilot agent checks
+      # The pull request checkout below is metadata only: the gate reads
+      # commit trailers with git log and never executes anything from it.
+      # The full history is needed so the base commit is present for the
+      # base..head range.
+      - name: Checkout the pull request head for commit metadata
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout ai-workflows scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+          persist-credentials: false
+
+      # The check run is posted with the Claude bot App token, so rulesets can
+      # require the "AI Merge Gate" check from that App. Same mint as the
+      # policy-gate gate job; a failed mint is named by the publish step.
+      - name: Mint the check-run token
+        id: check-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+          permission-checks: write
+
+      # The API occasionally returns a transient HTML error page; piping it
+      # straight into --jq crashed the gate (false-negative merge block).
+      # Retry with backoff and require a numeric answer before judging. The
+      # count feeds the verdict step, so failed Copilot checks still yield a
+      # published CHANGES verdict instead of dying before the check run.
+      - name: Count failed Copilot agent checks
+        id: copilot
+        continue-on-error: true
         run: |
-          # The API occasionally returns a transient HTML error page; piping it
-          # straight into --jq crashed the gate (false-negative merge block).
-          # Retry with backoff and require a numeric answer before judging.
           for i in 1 2 3; do
             FAILED=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/check-runs" \
               --jq '[.check_runs[] | select(.app.slug | test("copilot"; "i")) | select(.conclusion == "failure" or .conclusion == "timed_out")] | length') && break
             sleep $((i * 5))
           done
           if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then
-            echo "::error::check-runs API unreadable after retries"
-            exit 1
+            echo "copilot_failures=unreadable" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          echo "Copilot agent failures: $FAILED"
-          if [ "$FAILED" -gt "0" ]; then
-            echo "::error::$FAILED Copilot agent check(s) failed"
-            exit 1
-          fi
-      - name: Enforce scan and review conclusions
+          echo "copilot_failures=$FAILED" >> "$GITHUB_OUTPUT"
+
+      - name: Determine the author family
+        id: author-family
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          FAMILIES_FILE: .ai-workflows/.github/scripts/policy-gate/model-families.json
         run: |
           set -euo pipefail
-          if [[ "$REPO_PRIVATE" == "true" && "$LEAK_RESULT" == "skipped" ]]; then
-            LEAK_RESULT=success
+          # One family per model vendor, from the shared map. A model id may
+          # carry a "provider/" path, which is ignored for matching.
+          family_of() {
+            jq -rn --slurpfile families "$FAMILIES_FILE" --arg model "$1" '
+              ($model | gsub("^\\s+|\\s+$"; "") | sub("^[^/]+/"; "") | ascii_downcase) as $id
+              | ($families[0]
+                 | map(select((.prefix | ascii_downcase) as $prefix | $id | startswith($prefix)))
+                 | first | .family) // "unknown"
+            '
+          }
+
+          # A human-pushed pull request can still carry agent-written commits:
+          # the Assisted-by trailer names the model that wrote each one, and
+          # the range between the base and the head is the whole change.
+          if ! trailers="$(git log --format='%(trailers:key=Assisted-by,valueonly)' "$BASE_SHA..$HEAD_SHA")"; then
+            echo "::error::Could not read the pull request commits to determine the author family"
+            exit 1
           fi
-          for result in "$GITLEAKS_RESULT" "$LEAK_RESULT" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
+          author_family="$(printf '%s\n' "$trailers" |
+            while IFS= read -r trailer; do
+              case "$trailer" in
+                (*:*) family_of "${trailer#*:}" ;;
+              esac
+            done |
+            sort -u | paste -sd+ -)"
+          [[ -n "$author_family" ]] || author_family=unknown
+          echo "author_family=$author_family" >> "$GITHUB_OUTPUT"
+
+      - name: Compute the merge gate verdict
+        id: verdict
+        env:
+          COPILOT_FAILURES: ${{ steps.copilot.outputs.copilot_failures }}
+          COPILOT_OUTCOME: ${{ steps.copilot.outcome }}
+          AUTHOR_FAMILY: ${{ steps.author-family.outputs.author_family }}
+        run: |
+          set -euo pipefail
+          # CHANGES when any required scan or review failed, was skipped for a
+          # non-draft pull request with a router, when a Copilot agent check
+          # failed or was unreadable, or when the reviewer family is unknown
+          # or shared with the author family. DEFERRED when the gate otherwise
+          # passed with reviews skipped on a draft pull request or without a
+          # router. MERGE only when every review ran and passed.
+          leak_result="$LEAK_RESULT"
+          if [[ "$REPO_PRIVATE" == "true" && "$leak_result" == "skipped" ]]; then
+            leak_result=success
+          fi
+          verdict=MERGE
+          reason=""
+          deferred=false
+          if [[ "$COPILOT_OUTCOME" != "success" || "$COPILOT_FAILURES" == "unreadable" ]]; then
+            verdict=CHANGES
+            reason="the Copilot agent checks could not be read"
+          elif [[ "$COPILOT_FAILURES" != "0" ]]; then
+            verdict=CHANGES
+            reason="$COPILOT_FAILURES Copilot agent check(s) failed"
+          fi
+          for result in "$GITLEAKS_RESULT" "$leak_result" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
             case "$result" in
               success)
                 ;;
               skipped)
                 if [[ "$IS_DRAFT" != "true" && "$ROUTER_AVAILABLE" == "true" ]]; then
-                  echo "::error::A required scan or review was skipped for a non-draft pull request."
-                  exit 1
+                  verdict=CHANGES
+                  reason="${reason:-a required scan or review was skipped for a non-draft pull request}"
+                else
+                  deferred=true
                 fi
                 ;;
               failure|cancelled)
-                echo "::error::A required scan or review concluded with $result."
-                exit 1
+                verdict=CHANGES
+                reason="${reason:-a required scan or review concluded with $result}"
                 ;;
               *)
-                echo "::error::A required scan or review has an unexpected conclusion: $result"
-                exit 1
+                verdict=CHANGES
+                reason="${reason:-a required scan or review has an unexpected conclusion: $result}"
                 ;;
             esac
           done
-          echo "All required scans and reviews passed or were skipped on a draft pull request."
+
+          # The reviewer is the MODEL that wrote each review, taken from the
+          # "model" field of the router's chat completion - never the App that
+          # posts the check. A review that ran without one leaves the model
+          # list empty and refuses the gate below; with no review at all the
+          # family rule has nothing to compare and the model line reads "none".
+          models=""
+          missing_model=false
+          for pair in "$LEAK_RESULT|$LEAK_MODEL" "$SECURITY_RESULT|$SECURITY_MODEL" "$SEMANTIC_RESULT|$SEMANTIC_MODEL"; do
+            result="${pair%%|*}"
+            model="${pair#*|}"
+            [[ "$result" == "success" ]] || continue
+            if [[ -n "$model" ]]; then
+              models+="$model"$'\n'
+            else
+              missing_model=true
+            fi
+          done
+          if [[ "$missing_model" == true ]]; then
+            model_value=""
+          elif [[ -z "$models" ]]; then
+            model_value="none"
+          else
+            model_value="$(printf '%s' "$models" | jq -rRs 'rtrimstr("\n") | split("\n") | unique | join(", ")')"
+          fi
+          if [[ "$verdict" == MERGE && "$deferred" == true ]]; then
+            verdict=DEFERRED
+          fi
+          jq -n \
+            --arg model "$model_value" \
+            --arg author_family "$AUTHOR_FAMILY" \
+            --arg head "$HEAD_SHA" \
+            --arg verdict "$verdict" \
+            '{model: $model, author_family: $author_family, head: $head, verdict: $verdict}' \
+            > ai-merge-gate.verdict.json
+          # validate-verdict.sh merge-gate mode owns the family comparison. It
+          # refuses with CHANGES when the reviewer family is unknown or in the
+          # author's set, keeps the scan reason otherwise, and rewrites the
+          # verdict in place when it refuses.
+          RUBRIC=merge-gate RESPONSE_FILE=ai-merge-gate.verdict.json MERGE_GATE_REASON="$reason" \
+            bash .ai-workflows/.github/scripts/policy-gate/validate-verdict.sh
+          verdict="$(jq -r '.verdict' ai-merge-gate.verdict.json)"
+          case "$verdict" in
+            MERGE) conclusion=success ;;
+            CHANGES) conclusion=failure ;;
+            DEFERRED) conclusion=neutral ;;
+          esac
+          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the AI Merge Gate verdict
+        id: publish
+        env:
+          GH_TOKEN: ${{ steps.check-token.outputs.token }}
+          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
+          CHECK_HEAD_SHA: ${{ env.HEAD_SHA }}
+          GATE_CONCLUSION: ${{ steps.verdict.outputs.conclusion }}
+          GATE_REASON: ${{ steps.verdict.outputs.reason }}
+          VERDICT_FILE: ai-merge-gate.verdict.json
+          SUMMARY_FILE: ai-merge-gate.summary.md
+          RUBRIC_LINE: A change that adds or edits a script or custom unit where a native or maintained way exists is CHANGES.
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::ai-merge-gate: cannot publish the verdict check run without an App token"
+            exit 0
+          fi
+          {
+            printf '%s\n\n' "$RUBRIC_LINE"
+            printf 'model: %s\n' "$(jq -r '.model' "$VERDICT_FILE")"
+            printf 'author_family: %s\n' "$(jq -r '.author_family' "$VERDICT_FILE")"
+            printf 'head: %s\n' "$(jq -r '.head' "$VERDICT_FILE")"
+            # On a refusal the reason is the last summary line before VERDICT.
+            if [ -n "$GATE_REASON" ]; then
+              printf 'reason: %s\n' "$GATE_REASON"
+            fi
+            printf 'VERDICT: %s\n' "$(jq -r '.verdict' "$VERDICT_FILE")"
+          } > "$SUMMARY_FILE"
+          bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
+            "AI Merge Gate" "$GATE_CONCLUSION" "AI Merge Gate" "$(cat "$SUMMARY_FILE")"
+
+      - name: Enforce the gate verdict
+        id: enforce
+        env:
+          GATE_VERDICT: ${{ steps.verdict.outputs.verdict }}
+          GATE_REASON: ${{ steps.verdict.outputs.reason }}
+        run: |
+          if [ "$GATE_VERDICT" = "CHANGES" ]; then
+            echo "::error::AI Merge Gate: CHANGES - ${GATE_REASON:-the verdict requires changes}."
+            exit 1
+          fi
+          echo "AI Merge Gate verdict: $GATE_VERDICT"
