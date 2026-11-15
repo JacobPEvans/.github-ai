@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.8.0](https://github.com/JacobPEvans/.github-ai/compare/v2.7.0...v2.8.0) (2026-11-15)
+
+
+### Features
+
+* **agent:** zcode run j-551838561a0da3ce ([7fd670c](https://github.com/JacobPEvans/.github-ai/commit/7fd670c9c1aa7e6e34a4352a0111488cdc61da63))
+* **pr-reconcile:** start the CI fix workflow for a failed check ([#134](https://github.com/JacobPEvans/.github-ai/issues/134)) ([7fd670c](https://github.com/JacobPEvans/.github-ai/commit/7fd670c9c1aa7e6e34a4352a0111488cdc61da63))
+
 ## [2.7.0](https://github.com/JacobPEvans/.github-ai/compare/v2.6.2...v2.7.0) (2026-11-15)
 
 
