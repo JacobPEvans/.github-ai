@@ -260,12 +260,20 @@ jobs:
             # A failed lookup or an alias the router does not list gives an
             # empty output, which the merge gate reports as an unknown
             # reviewer model and refuses.
-            reviewer_model="$(curl -fsS --max-time 20 \
+            model_info="$(curl -fsS --max-time 20 \
               -H @<(printf 'Authorization: Bearer %s\n' "$LLM_ROUTER_API_KEY") \
-              "${LLM_ROUTER_BASE_URL%/}/model/info" \
-              | jq -r --arg alias "$REVIEWER_ALIAS" \
-                '[.data[] | select(.model_name == $alias) | .litellm_params.model | strings | sub("^[^/]+/"; "")] | unique | join(", ")')" \
-              || reviewer_model=""
+              "${LLM_ROUTER_BASE_URL%/}/model/info")" || model_info=""
+            reviewer_model="$(jq -r --arg alias "$REVIEWER_ALIAS" \
+              '[.data[] | select(.model_name == $alias) | .litellm_params.model | strings | sub("^[^/]+/"; "")] | unique | join(", ")' \
+              <<<"$model_info")" || reviewer_model=""
+            if [ -z "$reviewer_model" ]; then
+              # Counts and field names only: enough to tell an unlisted alias
+              # from a response that carries no model field.
+              shape="$(jq -r --arg alias "$REVIEWER_ALIAS" \
+                '"entries=\(.data | length) alias_entries=\([.data[] | select(.model_name == $alias)] | length) fields=\([.data[] | select(.model_name == $alias) | .litellm_params | keys[]?] | unique | join("+"))"' \
+                <<<"$model_info" 2>/dev/null)" || shape=""
+              echo "::warning::No reviewer model for router role $REVIEWER_ALIAS (${shape:-no readable model list})."
+            fi
             echo "reviewer_model=$reviewer_model" >> "$GITHUB_OUTPUT"
             echo "status=ok" >> "$GITHUB_OUTPUT"
           else

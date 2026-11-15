@@ -329,7 +329,7 @@ jobs:
           # model-families.json; validate-verdict.sh includes the same file.
           families_dir="${FAMILIES_FILE%/*}"
           family_of() {
-            jq -rnL "$families_dir" --slurpfile families "$FAMILIES_FILE" --arg model "$1" \
+            jq -rn -L "$families_dir" --slurpfile families "$FAMILIES_FILE" --arg model "$1" \
               'include "family-of"; $model | family_of'
           }
 
