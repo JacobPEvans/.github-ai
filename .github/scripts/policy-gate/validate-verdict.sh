@@ -25,7 +25,8 @@ case "$RUBRIC" in
   leak) names='credential private_host_or_ip internal_topology incident_detail'; exact=0 ;;
   semantic) names='claim_mismatch omitted_behavior'; exact=1 ;;
   merge-gate)
-    families_file="${MODEL_FAMILIES_FILE:-$(dirname -- "${BASH_SOURCE[0]}")/model-families.json}"
+    families_dir="$(dirname -- "${BASH_SOURCE[0]}")"
+    families_file="${MODEL_FAMILIES_FILE:-$families_dir/model-families.json}"
     [[ -r "$families_file" ]] || {
       echo "::error::The model family map is missing: $families_file" >&2
       exit 1
@@ -40,29 +41,33 @@ case "$RUBRIC" in
     ' "$RESPONSE_FILE" > /dev/null; then
       exit 1
     fi
-    decision="$(jq -r --slurpfile families "$families_file" --arg reason "${MERGE_GATE_REASON:-}" '
-      def family_of:
-        (gsub("^\\s+|\\s+$"; "") | sub("^[^/]+/"; "") | ascii_downcase) as $id
-        | ($families[0]
-           | map(select((.prefix | ascii_downcase) as $prefix | $id | startswith($prefix)))
-           | first | .family) // "unknown";
+    decision="$(jq -r -L "$families_dir" --slurpfile families "$families_file" --arg reason "${MERGE_GATE_REASON:-}" '
+      include "family-of";
       if .model == "" then
         {verdict: "CHANGES", reason: "reviewer model unknown"}
       elif .model == "none" then
         {verdict: .verdict, reason: $reason}
       else
-        (.model | split(", ") | map(family_of)) as $reviewers
-        | (.author_family | split("+")) as $authors
-        | if ($reviewers | any(. == "unknown")) then
-            {verdict: "CHANGES", reason: "reviewer family unknown"}
-          elif ($authors == ["unknown"]) then
+        # A review that passed through its override label counts as passed
+        # and is named "override" in the model line; the family rule does
+        # not apply to it.
+        (.model | split(", ") | map(select(. != "override"))) as $reviewers
+        | if ($reviewers | length) == 0 then
             {verdict: .verdict, reason: $reason}
           else
-            ($reviewers | unique | map(select(. as $f | $authors | index($f) != null)) | sort) as $shared
-            | if ($shared | length) > 0 then
-                {verdict: "CHANGES", reason: ("reviewer and author share the family " + $shared[0])}
-              else
+            ($reviewers | map(family_of)) as $reviewers
+            | (.author_family | split("+")) as $authors
+            | if ($reviewers | any(. == "unknown")) then
+                {verdict: "CHANGES", reason: "reviewer family unknown"}
+              elif ($authors == ["unknown"]) then
                 {verdict: .verdict, reason: $reason}
+              else
+                ($reviewers | unique | map(select(. as $f | $authors | index($f) != null)) | sort) as $shared
+                | if ($shared | length) > 0 then
+                    {verdict: "CHANGES", reason: ("reviewer and author share the family " + $shared[0])}
+                  else
+                    {verdict: .verdict, reason: $reason}
+                  end
               end
           end
       end

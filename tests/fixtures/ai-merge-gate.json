@@ -145,6 +145,39 @@
       "reason_contains": "share the family anthropic"
     },
     {
+      "name": "every review passed by override",
+      "draft": false,
+      "results": ["success", "success", "success", "success"],
+      "models": ["", "", ""],
+      "statuses": ["override", "override", "override"],
+      "exit_code": 0,
+      "verdict": "MERGE",
+      "model_line": "override"
+    },
+    {
+      "name": "one review passed by override, the others cross-family",
+      "draft": false,
+      "results": ["success", "success", "success", "success"],
+      "models": ["", "claude-opus-5-5", "glm-4.7"],
+      "statuses": ["override", "ok", "ok"],
+      "author_family": "openai",
+      "exit_code": 0,
+      "verdict": "MERGE",
+      "model_line": "claude-opus-5-5, glm-4.7, override"
+    },
+    {
+      "name": "override beside a same-family review is still refused",
+      "draft": false,
+      "results": ["success", "success", "success", "success"],
+      "models": ["", "glm-4.7", "glm-4.7"],
+      "statuses": ["override", "ok", "ok"],
+      "author_family": "zhipu",
+      "exit_code": 1,
+      "verdict": "CHANGES",
+      "model_line": "glm-4.7, override",
+      "reason_contains": "share the family zhipu"
+    },
+    {
       "name": "reviewer model unknown refused",
       "draft": false,
       "results": ["success", "success", "success", "success"],
