@@ -267,6 +267,8 @@ jobs:
       contents: read
       pull-requests: read
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    outputs:
+      fix_base_sha: ${{ steps.fix-base.outputs.sha }}
     steps:
       # The local-only key flow is Claude-specific.
       - name: Reject another agent with the local-only key flow
@@ -281,6 +283,12 @@ jobs:
           ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
           fetch-depth: 0
           persist-credentials: false
+
+      # The head the agent's fix was made from; publish drops the fix if the
+      # branch has moved past it before the commit lands.
+      - name: Record checked-out head
+        id: fix-base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout ai-workflows prompts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -408,6 +416,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+          FIX_BASE_SHA: ${{ needs.fix.outputs.fix_base_sha }}
           COMMIT_MESSAGE: "fix: resolve CI failure (auto-fix attempt ${{ needs.should-fix.outputs.attempt }})"
         with:
           github-token: ${{ steps.commit-token.outputs.token }}
