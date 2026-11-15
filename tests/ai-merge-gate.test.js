@@ -97,7 +97,7 @@ function buildTrailerRepo(dir, messages) {
 test('the public workflow starts the gate for the required pull request events and passes named secrets', () => {
   expect(frontdoor.on.pull_request.types).toEqual(fixture.pull_request_types);
   expect(frontdoor.jobs.gate.with.runner_label).toContain("&& 'review' || 'ubuntu-latest'");
-  expect(Object.keys(frontdoor.jobs.gate.secrets).sort()).toEqual([...fixture.router_secrets, 'GH_APP_CLAUDE_BOT_PRIVATE_KEY', 'GH_APP_PRIVATE_KEY', 'GITLEAKS_LICENSE_KEY', 'NTFY_BASE_URL'].sort());
+  expect(Object.keys(frontdoor.jobs.gate.secrets).sort()).toEqual([...fixture.router_secrets, 'AUTOMATION_APP_PRIVATE_KEY', 'GH_APP_CLAUDE_BOT_PRIVATE_KEY', 'GITLEAKS_LICENSE_KEY', 'NTFY_BASE_URL'].sort());
 });
 
 test('the reusable workflow exposes router and check credentials to its caller', () => {
@@ -112,11 +112,11 @@ test('the lane job classifies non-closed pull requests with read permissions and
   const lane = gate.jobs.lane;
   expect(lane.uses).toBe('JacobPEvans/.github/.github/workflows/_lane.yml@topic/merge-flow-r2');
   expect(lane.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' });
-  expect(lane.secrets).toEqual({ GH_APP_PRIVATE_KEY: '${{ secrets.GH_APP_PRIVATE_KEY }}' });
+  expect(lane.secrets).toEqual({ AUTOMATION_APP_PRIVATE_KEY: '${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}' });
   expect(lane.if).toBe("github.event_name == 'pull_request' && github.event.action != 'closed'");
   // The classifier never runs on the post-merge (closed) event.
   expect(lane.if).not.toContain(POST_MERGE_CLAUSE);
-  const secret = gate.on.workflow_call.secrets.GH_APP_PRIVATE_KEY;
+  const secret = gate.on.workflow_call.secrets.AUTOMATION_APP_PRIVATE_KEY;
   expect(secret.required).toBe(false);
   expect(secret.description).toContain('fast lanes');
   const text = readFileSync(join('.github', 'workflows', '_ai-merge-gate.yml'), 'utf8');

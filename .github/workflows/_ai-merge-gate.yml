@@ -76,7 +76,7 @@ on:
       GITLEAKS_LICENSE_KEY:
         description: Org gitleaks-action license key; the scan fails closed without it.
         required: false
-      GH_APP_PRIVATE_KEY:
+      AUTOMATION_APP_PRIVATE_KEY:
         description: lets the lane classifier grant the fast lanes; without it reviews run before merge
         required: false
 
@@ -98,7 +98,7 @@ jobs:
       contents: read
       pull-requests: read
     secrets:
-      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
 
   gitleaks:
     name: Gitleaks secret scan
