@@ -55,7 +55,7 @@ on:
       rubric:
         description: >-
           Which review to run: policy (the default five-check policy gate),
-          security, leak, or semantic. Each has its own check name, comment
+          security, leak, semantic, or code. Each has its own check name, comment
           marker and override label.
         type: string
         required: false
@@ -140,7 +140,7 @@ jobs:
         env:
           RUBRIC: ${{ inputs.rubric }}
         run: |
-          printf '%s\n' policy security leak semantic | grep -qx -- "$RUBRIC" || { echo "::error::Unknown rubric: $RUBRIC"; exit 1; }
+          printf '%s\n' policy security leak semantic code | grep -qx -- "$RUBRIC" || { echo "::error::Unknown rubric: $RUBRIC"; exit 1; }
 
       - name: Require the router secrets
         env:
@@ -256,7 +256,7 @@ jobs:
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     env:
       REVIEW_NAME: ${{ inputs.rubric == 'policy' && 'policy-gate' || format('{0}-review', inputs.rubric) }}
-      REVIEW_TITLE: ${{ inputs.rubric == 'security' && 'Security review' || inputs.rubric == 'leak' && 'Leak review' || inputs.rubric == 'semantic' && 'Semantic review' || 'Policy gate' }}
+      REVIEW_TITLE: ${{ inputs.rubric == 'security' && 'Security review' || inputs.rubric == 'leak' && 'Leak review' || inputs.rubric == 'semantic' && 'Semantic review' || inputs.rubric == 'code' && 'Code review' || 'Policy gate' }}
       OVERRIDE_LABEL: ${{ inputs.rubric == 'policy' && 'policy-gate-override' || format('{0}-review-override', inputs.rubric) }}
     steps:
       - name: Require the review job to succeed

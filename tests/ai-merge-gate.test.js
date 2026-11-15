@@ -33,6 +33,15 @@ test('the three policy reviews use dogfood rubrics, models, and blocking mode', 
   }
 });
 
+test('the code review is advisory and the final check does not wait for it', () => {
+  const review = gate.jobs.code;
+  expect(review.uses).toBe('./.github/workflows/policy-gate.yml');
+  expect(review.with).toMatchObject({ rubric: 'code', model: 'standard', blocking: false });
+  expect(review.if).toBe(gate.jobs.semantic.if);
+  expect(review.secrets).toEqual(gate.jobs.semantic.secrets);
+  expect(gate.jobs.gate.needs).not.toContain('code');
+});
+
 test('the leak reviews raise only their completion ceiling to 4000 tokens', () => {
   expect(gate.jobs.leak.with.max_tokens).toBe(4000);
   expect(gate.jobs.leak.with).toMatchObject({ model: 'standard', max_diff_kb: 150 });
