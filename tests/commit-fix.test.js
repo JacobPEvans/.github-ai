@@ -27,8 +27,15 @@ function initRepo() {
   return dir;
 }
 
-function makeGithub(commit = { oid: 'newoid', url: 'https://x/commit/newoid' }) {
-  return { graphql: mock(async () => ({ createCommitOnBranch: { commit } })) };
+function makeGithub(commit = { oid: 'newoid', url: 'https://x/commit/newoid' }, currentHeadSha = null) {
+  const getRef = mock(async () => {
+    if (currentHeadSha === null) throw new Error('getRef called unexpectedly');
+    return { data: { object: { sha: currentHeadSha } } };
+  });
+  return {
+    graphql: mock(async () => ({ createCommitOnBranch: { commit } })),
+    rest: { git: { getRef } },
+  };
 }
 
 // Run the script with cwd pointed at the temp repo, restoring cwd afterwards.
@@ -51,6 +58,7 @@ describe('commit-fix', () => {
     dir = initRepo();
     process.env.HEAD_BRANCH = 'feat/x';
     process.env.COMMIT_MESSAGE = 'fix: resolve CI failure (auto-fix attempt 1)';
+    delete process.env.FIX_BASE_SHA;
   });
 
   afterEach(() => {
@@ -166,5 +174,50 @@ describe('commit-fix', () => {
 
     expect(core.failures.length).toBe(1);
     expect(github.graphql).not.toHaveBeenCalled();
+  });
+
+  it('drops the fix when the PR head moved since the fix was made', async () => {
+    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n');
+    const base = git(dir, ['rev-parse', 'HEAD']).trim();
+    const moved = 'deadbeef'.repeat(5); // 40-char sha
+    process.env.FIX_BASE_SHA = base;
+    const github = makeGithub(undefined, moved);
+
+    try {
+      await runIn(dir, { github, context, core });
+    } finally {
+      delete process.env.FIX_BASE_SHA;
+    }
+
+    expect(github.rest.git.getRef).toHaveBeenCalledTimes(1);
+    expect(github.graphql).not.toHaveBeenCalled();
+    expect(core.infos).toContain(`head moved from ${base} to ${moved}; fix dropped`);
+  });
+
+  it('commits when the PR head is unchanged since the fix was made', async () => {
+    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n');
+    const head = git(dir, ['rev-parse', 'HEAD']).trim();
+    process.env.FIX_BASE_SHA = head;
+    const github = makeGithub(undefined, head);
+
+    try {
+      await runIn(dir, { github, context, core });
+    } finally {
+      delete process.env.FIX_BASE_SHA;
+    }
+
+    expect(github.graphql).toHaveBeenCalledTimes(1);
+    expect(core.getOutput('committed')).toBe('true');
+  });
+
+  it('commits without a head check when FIX_BASE_SHA is unset', async () => {
+    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n');
+    delete process.env.FIX_BASE_SHA;
+    const github = makeGithub();
+
+    await runIn(dir, { github, context, core });
+
+    expect(github.rest.git.getRef).not.toHaveBeenCalled();
+    expect(github.graphql).toHaveBeenCalledTimes(1);
   });
 });
