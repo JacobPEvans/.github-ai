@@ -112,10 +112,12 @@ jobs:
   should-fix:
     name: Check if fix needed
     # Gate on CI failure so direct importers no-op on green builds. suite-ci
-    # applies the same conclusion gate one level up.
+    # applies the same conclusion gate one level up. Dependency-update pull
+    # requests from Renovate are fixed only by OpenHands or local-only runs.
     if: >-
       (inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure' &&
-      (inputs.failure_actor || github.actor) != 'renovate[bot]' &&
+      ((inputs.failure_actor || github.actor) != 'renovate[bot]' ||
+       inputs.local_only || (inputs.agent || vars.GH_ACTION_AI_AGENT) == 'openhands') &&
       (inputs.failure_actor || github.actor) != 'dependabot[bot]' &&
       (inputs.failure_actor || github.actor) != 'copilot[bot]'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
