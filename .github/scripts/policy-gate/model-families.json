@@ -1,0 +1,15 @@
+[
+  { "prefix": "claude", "family": "anthropic" },
+  { "prefix": "gpt", "family": "openai" },
+  { "prefix": "o1", "family": "openai" },
+  { "prefix": "o3", "family": "openai" },
+  { "prefix": "o4", "family": "openai" },
+  { "prefix": "codex", "family": "openai" },
+  { "prefix": "gemini", "family": "google" },
+  { "prefix": "qwen", "family": "alibaba" },
+  { "prefix": "glm", "family": "zhipu" },
+  { "prefix": "deepseek", "family": "deepseek" },
+  { "prefix": "llama", "family": "meta" },
+  { "prefix": "mistral", "family": "mistral" },
+  { "prefix": "grok", "family": "xai" }
+]

@@ -8,6 +8,11 @@
 # verdict must name each of its checks once and no other. The leak rubric returns one finding
 # per suspected item, and an empty array when nothing matches, so its verdict may repeat a
 # category and may have no findings. Every rubric accepts only the keys the renderer reads.
+#
+# The merge-gate rubric is not a model reply: it is the AI Merge Gate verdict contract
+# document, and it must carry exactly the four keys its check-run summary renders. The
+# reviewer family is the family of the model that wrote the review - never the identity of
+# the App that posts the check - and the gate refuses a review from the author's own family.
 set -euo pipefail
 
 : "${RUBRIC:?RUBRIC is required}"
@@ -18,6 +23,62 @@ case "$RUBRIC" in
   security) names='auth injection permission_widening unsafe_trigger secret_handling'; exact=1 ;;
   leak) names='credential private_host_or_ip internal_topology incident_detail'; exact=0 ;;
   semantic) names='claim_mismatch omitted_behavior'; exact=1 ;;
+  merge-gate)
+    families_file="${MODEL_FAMILIES_FILE:-$(dirname -- "${BASH_SOURCE[0]}")/model-families.json}"
+    [[ -r "$families_file" ]] || {
+      echo "::error::The model family map is missing: $families_file" >&2
+      exit 1
+    }
+    if ! jq -e '
+      type == "object" and
+      ((keys - ["model", "author_family", "head", "verdict"]) | length == 0) and
+      (.model | type == "string" and (. == "" or test("^[A-Za-z0-9][A-Za-z0-9 .,_+/-]*$"))) and
+      (.author_family | type == "string" and test("^[a-z0-9][a-z0-9+-]*$")) and
+      (.head | type == "string" and test("^[0-9a-f]{40}$")) and
+      (.verdict | type == "string" and (. == "MERGE" or . == "CHANGES" or . == "DEFERRED"))
+    ' "$RESPONSE_FILE" > /dev/null; then
+      exit 1
+    fi
+    decision="$(jq -r --slurpfile families "$families_file" --arg reason "${MERGE_GATE_REASON:-}" '
+      def family_of:
+        (gsub("^\\s+|\\s+$"; "") | sub("^[^/]+/"; "") | ascii_downcase) as $id
+        | ($families[0]
+           | map(select((.prefix | ascii_downcase) as $prefix | $id | startswith($prefix)))
+           | first | .family) // "unknown";
+      if .model == "" then
+        {verdict: "CHANGES", reason: "reviewer model unknown"}
+      elif .model == "none" then
+        {verdict: .verdict, reason: $reason}
+      else
+        (.model | split(", ") | map(family_of)) as $reviewers
+        | (.author_family | split("+")) as $authors
+        | if ($reviewers | any(. == "unknown")) then
+            {verdict: "CHANGES", reason: "reviewer family unknown"}
+          elif ($authors == ["unknown"]) then
+            {verdict: .verdict, reason: $reason}
+          else
+            ($reviewers | unique | map(select(. as $f | $authors | index($f) != null)) | sort) as $shared
+            | if ($shared | length) > 0 then
+                {verdict: "CHANGES", reason: ("reviewer and author share the family " + $shared[0])}
+              else
+                {verdict: .verdict, reason: $reason}
+              end
+          end
+      end
+      | [.verdict, .reason] | @tsv
+    ' "$RESPONSE_FILE")"
+    final_verdict="${decision%%$'\t'*}"
+    reason="${decision#*$'\t'}"
+    jq --arg verdict "$final_verdict" '.verdict = $verdict' "$RESPONSE_FILE" > "$RESPONSE_FILE.merged"
+    mv -- "$RESPONSE_FILE.merged" "$RESPONSE_FILE"
+    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+      {
+        echo "verdict=$final_verdict"
+        echo "reason=$reason"
+      } >> "$GITHUB_OUTPUT"
+    fi
+    exit 0
+    ;;
   *) echo "::error::Unknown rubric: $RUBRIC" >&2; exit 2 ;;
 esac
 
