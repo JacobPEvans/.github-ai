@@ -266,6 +266,52 @@ test('policy-gate publishes the model that wrote the review to its caller', () =
   expect(handoff.env.REVIEWER_ALIAS).toBe('$' + '{{ inputs.model }}');
   expect(handoff.run).toContain('/model/info');
   expect(handoff.run).toContain('reviewer_model=');
+  expect(handoff.env.REVIEWER_CONTRACT_URL).toBe('$' + '{{ inputs.reviewer_contract_url }}');
+});
+
+test('the handoff step reads an alias role from the names contract when the model list does not name it', () => {
+  withGateWorkspace((dir) => {
+    const response = join(dir, 'response.json');
+    writeFileSync(response, JSON.stringify({ summary: 'No findings.', findings: [] }));
+    // The stub answers the model list without the role, and the contract with it.
+    const routerBin = join(dir, 'router-bin');
+    mkdirSync(routerBin, { recursive: true });
+    writeFileSync(join(routerBin, 'curl'), [
+      '#!/bin/bash',
+      'case "${@: -1}" in',
+      `  */model/info) echo '${JSON.stringify({ data: [{ model_name: 'other', litellm_params: { model: 'openai/qwen-max' } }] })}' ;;`,
+      `  *) echo '${JSON.stringify({ aliases: { standard: 'mlx-community/Qwen3.8-27B-4bit', critical: 'glm-4.7' } })}' ;;`,
+      'esac',
+      '',
+    ].join('\n'));
+    chmodSync(join(routerBin, 'curl'), 0o755);
+    const run = (alias) => {
+      const out = join(dir, `handoff-output-${alias}`);
+      writeFileSync(out, '');
+      const handoff = Bun.spawnSync(['/bin/bash', '-c', policy.jobs.review.steps.find((step) => step.id === 'handoff').run], {
+        cwd: dir,
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: out,
+          HAS_OVERRIDE: 'false',
+          VERDICT_OUTCOME: 'success',
+          RESPONSE_FILE: response,
+          REVIEWER_ALIAS: alias,
+          LLM_ROUTER_BASE_URL: 'https://router.example/v1/',
+          LLM_ROUTER_API_KEY: 'test-key',
+          REVIEWER_CONTRACT_URL: 'https://contract.example/servable-aliases.json',
+          PATH: `${routerBin}:${process.env.PATH}`,
+        },
+      });
+      expect(handoff.exitCode, handoff.stderr.toString()).toBe(0);
+      return { outputs: readOutputs(out), stdout: handoff.stdout.toString() };
+    };
+    expect(run('standard').outputs.reviewer_model).toBe('mlx-community/Qwen3.8-27B-4bit');
+    // A role neither source names stays empty, which the merge gate refuses.
+    const unknown = run('missing');
+    expect(unknown.outputs.reviewer_model).toBe('');
+    expect(unknown.stdout).toContain('::warning::No reviewer model for router role missing');
+  });
 });
 
 test('policy-gate exposes how each review settled to its caller', () => {

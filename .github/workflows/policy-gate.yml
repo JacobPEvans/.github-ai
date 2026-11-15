@@ -74,6 +74,11 @@ on:
         type: string
         required: false
         default: medium
+      reviewer_contract_url:
+        description: "Router names contract (JSON with an `aliases` map of role to model id), read when the router model list does not name the role"
+        type: string
+        required: false
+        default: https://github.com/dryvist/ansible-proxmox-ai/releases/latest/download/servable-aliases.json
       max_diff_kb:
         description: "Truncate the pull request diff at this many KiB"
         type: number
@@ -251,6 +256,7 @@ jobs:
           REVIEWER_ALIAS: ${{ inputs.model }}
           LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
           LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+          REVIEWER_CONTRACT_URL: ${{ inputs.reviewer_contract_url }}
         run: |
           mkdir -p handoff
           if [ "$HAS_OVERRIDE" = "true" ]; then
@@ -266,13 +272,14 @@ jobs:
             reviewer_model="$(jq -r --arg alias "$REVIEWER_ALIAS" \
               '[.data[] | select(.model_name == $alias) | .litellm_params.model | strings | sub("^[^/]+/"; "")] | unique | join(", ")' \
               <<<"$model_info")" || reviewer_model=""
+            # A role the router serves as an alias is not in its model list;
+            # the router's published names contract maps it to a model id.
+            if [ -z "$reviewer_model" ] && [ -n "$REVIEWER_CONTRACT_URL" ]; then
+              reviewer_model="$(curl -fsSL --max-time 20 "$REVIEWER_CONTRACT_URL" |
+                jq -r --arg alias "$REVIEWER_ALIAS" '.aliases[$alias] // empty | strings')" || reviewer_model=""
+            fi
             if [ -z "$reviewer_model" ]; then
-              # Counts and field names only: enough to tell an unlisted alias
-              # from a response that carries no model field.
-              shape="$(jq -r --arg alias "$REVIEWER_ALIAS" \
-                '"entries=\(.data | length) alias_entries=\([.data[] | select(.model_name == $alias)] | length) fields=\([.data[] | select(.model_name == $alias) | .litellm_params | keys[]?] | unique | join("+"))"' \
-                <<<"$model_info" 2>/dev/null)" || shape=""
-              echo "::warning::No reviewer model for router role $REVIEWER_ALIAS (${shape:-no readable model list})."
+              echo "::warning::No reviewer model for router role $REVIEWER_ALIAS in the router model list or the names contract."
             fi
             echo "reviewer_model=$reviewer_model" >> "$GITHUB_OUTPUT"
             echo "status=ok" >> "$GITHUB_OUTPUT"
