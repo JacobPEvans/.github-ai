@@ -1,0 +1,1171 @@
+diff --git a/.github/scripts/policy-gate/model-families.json b/.github/scripts/policy-gate/model-families.json
+new file mode 100644
+index 0000000..54622e1
+--- /dev/null
++++ b/.github/scripts/policy-gate/model-families.json
+@@ -0,0 +1,15 @@
++[
++  { "prefix": "claude", "family": "anthropic" },
++  { "prefix": "gpt", "family": "openai" },
++  { "prefix": "o1", "family": "openai" },
++  { "prefix": "o3", "family": "openai" },
++  { "prefix": "o4", "family": "openai" },
++  { "prefix": "codex", "family": "openai" },
++  { "prefix": "gemini", "family": "google" },
++  { "prefix": "qwen", "family": "alibaba" },
++  { "prefix": "glm", "family": "zhipu" },
++  { "prefix": "deepseek", "family": "deepseek" },
++  { "prefix": "llama", "family": "meta" },
++  { "prefix": "mistral", "family": "mistral" },
++  { "prefix": "grok", "family": "xai" }
++]
+diff --git a/.github/scripts/policy-gate/validate-verdict.sh b/.github/scripts/policy-gate/validate-verdict.sh
+index 3e8209e..a9a5c96 100644
+--- a/.github/scripts/policy-gate/validate-verdict.sh
++++ b/.github/scripts/policy-gate/validate-verdict.sh
+@@ -8,6 +8,11 @@
+ # verdict must name each of its checks once and no other. The leak rubric returns one finding
+ # per suspected item, and an empty array when nothing matches, so its verdict may repeat a
+ # category and may have no findings. Every rubric accepts only the keys the renderer reads.
++#
++# The merge-gate rubric is not a model reply: it is the AI Merge Gate verdict contract
++# document, and it must carry exactly the four keys its check-run summary renders. The
++# reviewer family is the family of the model that wrote the review - never the identity of
++# the App that posts the check - and the gate refuses a review from the author's own family.
+ set -euo pipefail
+ 
+ : "${RUBRIC:?RUBRIC is required}"
+@@ -18,6 +23,62 @@ case "$RUBRIC" in
+   security) names='auth injection permission_widening unsafe_trigger secret_handling'; exact=1 ;;
+   leak) names='credential private_host_or_ip internal_topology incident_detail'; exact=0 ;;
+   semantic) names='claim_mismatch omitted_behavior'; exact=1 ;;
++  merge-gate)
++    families_file="${MODEL_FAMILIES_FILE:-$(dirname -- "${BASH_SOURCE[0]}")/model-families.json}"
++    [[ -r "$families_file" ]] || {
++      echo "::error::The model family map is missing: $families_file" >&2
++      exit 1
++    }
++    if ! jq -e '
++      type == "object" and
++      ((keys - ["model", "author_family", "head", "verdict"]) | length == 0) and
++      (.model | type == "string" and (. == "" or test("^[A-Za-z0-9][A-Za-z0-9 .,_+/-]*$"))) and
++      (.author_family | type == "string" and test("^[a-z0-9][a-z0-9+-]*$")) and
++      (.head | type == "string" and test("^[0-9a-f]{40}$")) and
++      (.verdict | type == "string" and (. == "MERGE" or . == "CHANGES" or . == "DEFERRED"))
++    ' "$RESPONSE_FILE" > /dev/null; then
++      exit 1
++    fi
++    decision="$(jq -r --slurpfile families "$families_file" --arg reason "${MERGE_GATE_REASON:-}" '
++      def family_of:
++        (gsub("^\\s+|\\s+$"; "") | sub("^[^/]+/"; "") | ascii_downcase) as $id
++        | ($families[0]
++           | map(select((.prefix | ascii_downcase) as $prefix | $id | startswith($prefix)))
++           | first | .family) // "unknown";
++      if .model == "" then
++        {verdict: "CHANGES", reason: "reviewer model unknown"}
++      elif .model == "none" then
++        {verdict: .verdict, reason: $reason}
++      else
++        (.model | split(", ") | map(family_of)) as $reviewers
++        | (.author_family | split("+")) as $authors
++        | if ($reviewers | any(. == "unknown")) then
++            {verdict: "CHANGES", reason: "reviewer family unknown"}
++          elif ($authors == ["unknown"]) then
++            {verdict: .verdict, reason: $reason}
++          else
++            ($reviewers | unique | map(select(. as $f | $authors | index($f) != null)) | sort) as $shared
++            | if ($shared | length) > 0 then
++                {verdict: "CHANGES", reason: ("reviewer and author share the family " + $shared[0])}
++              else
++                {verdict: .verdict, reason: $reason}
++              end
++          end
++      end
++      | [.verdict, .reason] | @tsv
++    ' "$RESPONSE_FILE")"
++    final_verdict="${decision%%$'\t'*}"
++    reason="${decision#*$'\t'}"
++    jq --arg verdict "$final_verdict" '.verdict = $verdict' "$RESPONSE_FILE" > "$RESPONSE_FILE.merged"
++    mv -- "$RESPONSE_FILE.merged" "$RESPONSE_FILE"
++    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
++      {
++        echo "verdict=$final_verdict"
++        echo "reason=$reason"
++      } >> "$GITHUB_OUTPUT"
++    fi
++    exit 0
++    ;;
+   *) echo "::error::Unknown rubric: $RUBRIC" >&2; exit 2 ;;
+ esac
+ 
+diff --git a/.github/workflows/_ai-merge-gate.yml b/.github/workflows/_ai-merge-gate.yml
+index 12b5425..208f0fc 100644
+--- a/.github/workflows/_ai-merge-gate.yml
++++ b/.github/workflows/_ai-merge-gate.yml
+@@ -3,6 +3,22 @@
+ # Status aggregator for secret scanning and blocking AI reviews.
+ # Branch protection requires only "AI Merge Gate" as the single AI check.
+ #
++# The gate job publishes the verdict contract as one check run named
++# "AI Merge Gate" on the pull request head, posted with the reviewer App
++# token so rulesets can pin the App. Its summary prepends the first rubric
++# line and carries exactly these contract lines:
++#   model:         the model ids the router reported for the reviews that ran
++#   author_family: the author's families, from the Assisted-by commit
++#                  trailers of the pull request, else "unknown"
++#   head:          the pull request head commit
++#   VERDICT:       MERGE, CHANGES or DEFERRED
++# The reviewer family is the family of the MODEL that wrote the review -
++# the "model" field of the router's chat completion, never the identity of
++# the App that posts the check. A review from one of the author's own
++# families is refused: no model reviews its own work. The comparison lives
++# in the merge-gate mode of .github/scripts/policy-gate/validate-verdict.sh,
++# with the model-to-family map in model-families.json next to it.
++#
+ # Usage:
+ #   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate.yml@v1
+ name: _ai-merge-gate
+@@ -163,52 +179,240 @@ jobs:
+       LEAK_RESULT: ${{ needs.leak.result }}
+       SECURITY_RESULT: ${{ needs.security.result }}
+       SEMANTIC_RESULT: ${{ needs.semantic.result }}
++      # The model id each review's router response reported, passed through
++      # policy-gate.yml's reviewer_model output. Empty for a review that
++      # never ran.
++      LEAK_MODEL: ${{ needs.leak.outputs.reviewer_model }}
++      SECURITY_MODEL: ${{ needs.security.outputs.reviewer_model }}
++      SEMANTIC_MODEL: ${{ needs.semantic.outputs.reviewer_model }}
+       GH_TOKEN: ${{ github.token }}
+       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+     steps:
+-      - name: Verify Copilot agent checks
++      # The pull request checkout below is metadata only: the gate reads
++      # commit trailers with git log and never executes anything from it.
++      # The full history is needed so the base commit is present for the
++      # base..head range.
++      - name: Checkout the pull request head for commit metadata
++        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++        with:
++          ref: ${{ github.event.pull_request.head.sha || github.sha }}
++          fetch-depth: 0
++          persist-credentials: false
++
++      - name: Checkout ai-workflows scripts
++        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++        with:
++          repository: JacobPEvans/.github-ai
++          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
++          sparse-checkout: .github/scripts
++          path: .ai-workflows
++          persist-credentials: false
++
++      # The check run is posted with the Claude bot App token, so rulesets can
++      # require the "AI Merge Gate" check from that App. Same mint as the
++      # policy-gate gate job; a failed mint is named by the publish step.
++      - name: Mint the check-run token
++        id: check-token
++        continue-on-error: true
++        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
++        with:
++          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
++          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
++          permission-checks: write
++
++      # The API occasionally returns a transient HTML error page; piping it
++      # straight into --jq crashed the gate (false-negative merge block).
++      # Retry with backoff and require a numeric answer before judging. The
++      # count feeds the verdict step, so failed Copilot checks still yield a
++      # published CHANGES verdict instead of dying before the check run.
++      - name: Count failed Copilot agent checks
++        id: copilot
++        continue-on-error: true
+         run: |
+-          # The API occasionally returns a transient HTML error page; piping it
+-          # straight into --jq crashed the gate (false-negative merge block).
+-          # Retry with backoff and require a numeric answer before judging.
+           for i in 1 2 3; do
+             FAILED=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/check-runs" \
+               --jq '[.check_runs[] | select(.app.slug | test("copilot"; "i")) | select(.conclusion == "failure" or .conclusion == "timed_out")] | length') && break
+             sleep $((i * 5))
+           done
+           if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then
+-            echo "::error::check-runs API unreadable after retries"
+-            exit 1
++            echo "copilot_failures=unreadable" >> "$GITHUB_OUTPUT"
++            exit 0
+           fi
+-          echo "Copilot agent failures: $FAILED"
+-          if [ "$FAILED" -gt "0" ]; then
+-            echo "::error::$FAILED Copilot agent check(s) failed"
++          echo "copilot_failures=$FAILED" >> "$GITHUB_OUTPUT"
++
++      - name: Determine the author family
++        id: author-family
++        env:
++          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
++          FAMILIES_FILE: .ai-workflows/.github/scripts/policy-gate/model-families.json
++        run: |
++          set -euo pipefail
++          # One family per model vendor, from the shared map. A model id may
++          # carry a "provider/" path, which is ignored for matching.
++          family_of() {
++            jq -rn --slurpfile families "$FAMILIES_FILE" --arg model "$1" '
++              ($model | gsub("^\\s+|\\s+$"; "") | sub("^[^/]+/"; "") | ascii_downcase) as $id
++              | ($families[0]
++                 | map(select((.prefix | ascii_downcase) as $prefix | $id | startswith($prefix)))
++                 | first | .family) // "unknown"
++            '
++          }
++
++          # A human-pushed pull request can still carry agent-written commits:
++          # the Assisted-by trailer names the model that wrote each one, and
++          # the range between the base and the head is the whole change.
++          if ! trailers="$(git log --format='%(trailers:key=Assisted-by,valueonly)' "$BASE_SHA..$HEAD_SHA")"; then
++            echo "::error::Could not read the pull request commits to determine the author family"
+             exit 1
+           fi
+-      - name: Enforce scan and review conclusions
++          author_family="$(printf '%s\n' "$trailers" |
++            while IFS= read -r trailer; do
++              case "$trailer" in
++                *:*) family_of "${trailer#*:}" ;;
++              esac
++            done |
++            sort -u | paste -sd+ -)"
++          [[ -n "$author_family" ]] || author_family=unknown
++          echo "author_family=$author_family" >> "$GITHUB_OUTPUT"
++
++      - name: Compute the merge gate verdict
++        id: verdict
++        env:
++          COPILOT_FAILURES: ${{ steps.copilot.outputs.copilot_failures }}
++          COPILOT_OUTCOME: ${{ steps.copilot.outcome }}
++          AUTHOR_FAMILY: ${{ steps.author-family.outputs.author_family }}
+         run: |
+           set -euo pipefail
+-          if [[ "$REPO_PRIVATE" == "true" && "$LEAK_RESULT" == "skipped" ]]; then
+-            LEAK_RESULT=success
++          # CHANGES when any required scan or review failed, was skipped for a
++          # non-draft pull request with a router, when a Copilot agent check
++          # failed or was unreadable, or when the reviewer family is unknown
++          # or shared with the author family. DEFERRED when the gate otherwise
++          # passed with reviews skipped on a draft pull request or without a
++          # router. MERGE only when every review ran and passed.
++          leak_result="$LEAK_RESULT"
++          if [[ "$REPO_PRIVATE" == "true" && "$leak_result" == "skipped" ]]; then
++            leak_result=success
++          fi
++          verdict=MERGE
++          reason=""
++          deferred=false
++          if [[ "$COPILOT_OUTCOME" != "success" || "$COPILOT_FAILURES" == "unreadable" ]]; then
++            verdict=CHANGES
++            reason="the Copilot agent checks could not be read"
++          elif [[ "$COPILOT_FAILURES" != "0" ]]; then
++            verdict=CHANGES
++            reason="$COPILOT_FAILURES Copilot agent check(s) failed"
+           fi
+-          for result in "$GITLEAKS_RESULT" "$LEAK_RESULT" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
++          for result in "$GITLEAKS_RESULT" "$leak_result" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
+             case "$result" in
+               success)
+                 ;;
+               skipped)
+                 if [[ "$IS_DRAFT" != "true" && "$ROUTER_AVAILABLE" == "true" ]]; then
+-                  echo "::error::A required scan or review was skipped for a non-draft pull request."
+-                  exit 1
++                  verdict=CHANGES
++                  reason="${reason:-a required scan or review was skipped for a non-draft pull request}"
++                else
++                  deferred=true
+                 fi
+                 ;;
+               failure|cancelled)
+-                echo "::error::A required scan or review concluded with $result."
+-                exit 1
++                verdict=CHANGES
++                reason="${reason:-a required scan or review concluded with $result}"
+                 ;;
+               *)
+-                echo "::error::A required scan or review has an unexpected conclusion: $result"
+-                exit 1
++                verdict=CHANGES
++                reason="${reason:-a required scan or review has an unexpected conclusion: $result}"
+                 ;;
+             esac
+           done
+-          echo "All required scans and reviews passed or were skipped on a draft pull request."
++
++          # The reviewer is the MODEL that wrote each review, taken from the
++          # "model" field of the router's chat completion - never the App that
++          # posts the check. A review that ran without one leaves the model
++          # list empty and refuses the gate below; with no review at all the
++          # family rule has nothing to compare and the model line reads "none".
++          models=""
++          missing_model=false
++          for pair in "$LEAK_RESULT|$LEAK_MODEL" "$SECURITY_RESULT|$SECURITY_MODEL" "$SEMANTIC_RESULT|$SEMANTIC_MODEL"; do
++            result="${pair%%|*}"
++            model="${pair#*|}"
++            [[ "$result" == "success" ]] || continue
++            if [[ -n "$model" ]]; then
++              models+="$model"$'\n'
++            else
++              missing_model=true
++            fi
++          done
++          if [[ "$missing_model" == true ]]; then
++            model_value=""
++          elif [[ -z "$models" ]]; then
++            model_value="none"
++          else
++            model_value="$(printf '%s' "$models" | jq -rRs 'rtrimstr("\n") | split("\n") | unique | join(", ")')"
++          fi
++          if [[ "$verdict" == MERGE && "$deferred" == true ]]; then
++            verdict=DEFERRED
++          fi
++          jq -n \
++            --arg model "$model_value" \
++            --arg author_family "$AUTHOR_FAMILY" \
++            --arg head "$HEAD_SHA" \
++            --arg verdict "$verdict" \
++            '{model: $model, author_family: $author_family, head: $head, verdict: $verdict}' \
++            > ai-merge-gate.verdict.json
++          # validate-verdict.sh merge-gate mode owns the family comparison. It
++          # refuses with CHANGES when the reviewer family is unknown or in the
++          # author's set, keeps the scan reason otherwise, and rewrites the
++          # verdict in place when it refuses.
++          RUBRIC=merge-gate RESPONSE_FILE=ai-merge-gate.verdict.json MERGE_GATE_REASON="$reason" \
++            bash .ai-workflows/.github/scripts/policy-gate/validate-verdict.sh
++          verdict="$(jq -r '.verdict' ai-merge-gate.verdict.json)"
++          case "$verdict" in
++            MERGE) conclusion=success ;;
++            CHANGES) conclusion=failure ;;
++            DEFERRED) conclusion=neutral ;;
++          esac
++          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
++
++      - name: Publish the AI Merge Gate verdict
++        id: publish
++        env:
++          GH_TOKEN: ${{ steps.check-token.outputs.token }}
++          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
++          CHECK_HEAD_SHA: ${{ env.HEAD_SHA }}
++          GATE_CONCLUSION: ${{ steps.verdict.outputs.conclusion }}
++          GATE_REASON: ${{ steps.verdict.outputs.reason }}
++          VERDICT_FILE: ai-merge-gate.verdict.json
++          SUMMARY_FILE: ai-merge-gate.summary.md
++          RUBRIC_LINE: A change that adds or edits a script or custom unit where a native or maintained way exists is CHANGES.
++        run: |
++          set -euo pipefail
++          if [ -z "$GH_TOKEN" ]; then
++            echo "::warning::ai-merge-gate: cannot publish the verdict check run without an App token"
++            exit 0
++          fi
++          {
++            printf '%s\n\n' "$RUBRIC_LINE"
++            printf 'model: %s\n' "$(jq -r '.model' "$VERDICT_FILE")"
++            printf 'author_family: %s\n' "$(jq -r '.author_family' "$VERDICT_FILE")"
++            printf 'head: %s\n' "$(jq -r '.head' "$VERDICT_FILE")"
++            # On a refusal the reason is the last summary line before VERDICT.
++            if [ -n "$GATE_REASON" ]; then
++              printf 'reason: %s\n' "$GATE_REASON"
++            fi
++            printf 'VERDICT: %s\n' "$(jq -r '.verdict' "$VERDICT_FILE")"
++          } > "$SUMMARY_FILE"
++          bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
++            "AI Merge Gate" "$GATE_CONCLUSION" "AI Merge Gate" "$(cat "$SUMMARY_FILE")"
++
++      - name: Enforce the gate verdict
++        id: enforce
++        env:
++          GATE_VERDICT: ${{ steps.verdict.outputs.verdict }}
++          GATE_REASON: ${{ steps.verdict.outputs.reason }}
++        run: |
++          if [ "$GATE_VERDICT" = "CHANGES" ]; then
++            echo "::error::AI Merge Gate: CHANGES - ${GATE_REASON:-the verdict requires changes}."
++            exit 1
++          fi
++          echo "AI Merge Gate verdict: $GATE_VERDICT"
+diff --git a/.github/workflows/policy-gate.yml b/.github/workflows/policy-gate.yml
+index 84e2b83..ca8060d 100644
+--- a/.github/workflows/policy-gate.yml
++++ b/.github/workflows/policy-gate.yml
+@@ -93,6 +93,12 @@ on:
+         type: boolean
+         required: false
+         default: false
++    outputs:
++      reviewer_model:
++        description: >-
++          The model id the router reported for this rubric's review, taken
++          from the chat completion response. Empty when no review ran.
++        value: ${{ jobs.review.outputs.reviewer_model }}
+     secrets:
+       LLM_ROUTER_BASE_URL:
+         description: >-
+@@ -135,6 +141,7 @@ jobs:
+     outputs:
+       has_override: ${{ steps.override.outputs.has_override }}
+       verdict_status: ${{ steps.handoff.outputs.status }}
++      reviewer_model: ${{ steps.handoff.outputs.reviewer_model }}
+     steps:
+       - name: Check the rubric name
+         env:
+@@ -233,6 +240,12 @@ jobs:
+             echo "status=override" >> "$GITHUB_OUTPUT"
+           elif [ "$VERDICT_OUTCOME" = "success" ]; then
+             cp "$RESPONSE_FILE" handoff/verdict.json
++            # The model that wrote the review, as the router resolved the role
++            # alias in its chat completion. The AI Merge Gate compares the
++            # family of this model id against the author's families, so it
++            # needs the real id, not the alias this workflow was called with.
++            reviewer_model="$(jq -r 'if (.model | type == "string") then .model else "" end | split("\n")[0]' handoff/verdict.json)"
++            echo "reviewer_model=$reviewer_model" >> "$GITHUB_OUTPUT"
+             echo "status=ok" >> "$GITHUB_OUTPUT"
+           else
+             echo "status=router-request-failed" >> "$GITHUB_OUTPUT"
+diff --git a/tests/ai-merge-gate.test.js b/tests/ai-merge-gate.test.js
+index 38ab717..c026a7e 100644
+--- a/tests/ai-merge-gate.test.js
++++ b/tests/ai-merge-gate.test.js
+@@ -1,12 +1,88 @@
+ const { expect, test } = require('bun:test');
+ const { spawnSync } = require('child_process');
+-const { readFileSync } = require('fs');
++const {
++  chmodSync,
++  existsSync,
++  mkdirSync,
++  mkdtempSync,
++  readFileSync,
++  rmSync,
++  symlinkSync,
++  writeFileSync,
++} = require('fs');
+ const { join } = require('path');
++const { tmpdir } = require('os');
+ 
+ const fixture = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'ai-merge-gate.json'), 'utf8'));
+ const workflow = (name) => Bun.YAML.parse(readFileSync(join('.github', 'workflows', name), 'utf8'));
+ const frontdoor = workflow('ai-merge-gate.yml');
+ const gate = workflow('_ai-merge-gate.yml');
++const policy = workflow('policy-gate.yml');
++const stepById = (id) => gate.jobs.gate.steps.find((step) => step.id === id);
++const stepByName = (name) => gate.jobs.gate.steps.find((step) => step.name === name);
++
++const readOutputs = (file) =>
++  Object.fromEntries(
++    readFileSync(file, 'utf8')
++      .trim()
++      .split('\n')
++      .filter(Boolean)
++      .map((line) => {
++        const eq = line.indexOf('=');
++        return [line.slice(0, eq), line.slice(eq + 1)];
++      }),
++  );
++
++// Prepares a scratch workspace whose .ai-workflows scripts resolve to the
++// real ones - policy-gate through a symlink, shared as a real directory so a
++// stub written there never lands in the repository through the link. The
++// caller removes dir.
++function withGateWorkspace(run) {
++  const dir = mkdtempSync(join(tmpdir(), 'merge-gate-'));
++  const scripts = join(dir, '.ai-workflows', '.github', 'scripts');
++  mkdirSync(join(scripts, 'shared'), { recursive: true });
++  symlinkSync(join(process.cwd(), '.github', 'scripts', 'policy-gate'), join(scripts, 'policy-gate'));
++  try {
++    return run(dir);
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++}
++
++function runGateStep(stepId, dir, env) {
++  const output = join(dir, 'step-output');
++  writeFileSync(output, '');
++  const result = Bun.spawnSync(['/bin/bash', '-c', stepById(stepId).run], {
++    cwd: dir,
++    env: { ...process.env, GITHUB_OUTPUT: output, ...env },
++  });
++  return { result, outputs: readOutputs(output) };
++}
++
++// Builds a git repository in dir whose commit messages run from the base
++// commit to the head commit, and returns both full shas. A message is a
++// string or an array of paragraphs, as git commit -m joins them.
++function buildTrailerRepo(dir, messages) {
++  const run = (...args) => {
++    const created = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
++    if (created.status !== 0) throw new Error(`git ${args.join(' ')}: ${created.stderr}`);
++    return created.stdout;
++  };
++  run('init', '-q', '-b', 'main');
++  run('config', 'user.email', 'test@example.com');
++  run('config', 'user.name', 'Test');
++  for (const message of messages) {
++    const args = ['commit', '-q', '--allow-empty'];
++    for (const paragraph of Array.isArray(message) ? message : [message]) {
++      args.push('-m', paragraph);
++    }
++    run(...args);
++  }
++  return {
++    baseSha: messages.length > 1 ? run('rev-parse', `HEAD~${messages.length - 1}`).trim() : run('rev-parse', 'HEAD').trim(),
++    headSha: run('rev-parse', 'HEAD').trim(),
++  };
++}
+ 
+ test('the public workflow starts the gate for the required pull request events and passes named secrets', () => {
+   expect(frontdoor.on.pull_request.types).toEqual(fixture.pull_request_types);
+@@ -61,22 +137,66 @@ test('the leak review runs on public repos only', () => {
+   expect(gate.jobs.gate.env.REPO_PRIVATE).toBe('$' + '{{ github.event.repository.private }}');
+ });
+ 
+-test('the final check waits for every required job and only accepts draft skips', () => {
++test('the gate reads commit trailers from a metadata-only pull request checkout', () => {
++  const checkout = stepByName('Checkout the pull request head for commit metadata');
++  expect(checkout.with).toMatchObject({
++    ref: '${{ github.event.pull_request.head.sha || github.sha }}',
++    'fetch-depth': 0,
++    'persist-credentials': false,
++  });
++  const step = stepById('author-family');
++  expect(step.run).toContain("git log --format='%(trailers:key=Assisted-by,valueonly)'");
++  expect(step.run).toContain('$BASE_SHA..$HEAD_SHA');
++  expect(step.env.FAMILIES_FILE).toBe('.ai-workflows/.github/scripts/policy-gate/model-families.json');
++});
++
++test('the reviewer family comes from the router responses, and the comparison lives in the validator', () => {
++  expect(gate.jobs.gate.env.LEAK_MODEL).toBe('$' + '{{ needs.leak.outputs.reviewer_model }}');
++  expect(gate.jobs.gate.env.SECURITY_MODEL).toBe('$' + '{{ needs.security.outputs.reviewer_model }}');
++  expect(gate.jobs.gate.env.SEMANTIC_MODEL).toBe('$' + '{{ needs.semantic.outputs.reviewer_model }}');
++  expect(stepById('verdict').run).toContain('RUBRIC=merge-gate');
++  // The verdict step never maps or compares families itself; the validator
++  // owns the comparison and reads the shared map.
++  expect(stepById('verdict').run).not.toMatch(/family_of|FAMILIES_FILE/);
++  const text = readFileSync(join('.github', 'workflows', '_ai-merge-gate.yml'), 'utf8');
++  // No lane constants and no identity-derived family logic inline: the old
++  // logic read the App slug and the bot login to name families.
++  expect(text).not.toContain('MODEL_LANES');
++  expect(text).not.toMatch(/REVIEWER_SLUG|PR_AUTHOR_TYPE|app-slug.*family/);
++});
++
++test('policy-gate publishes the model that wrote the review to its caller', () => {
++  const outputs = policy.on.workflow_call.outputs;
++  expect(outputs.reviewer_model.value).toBe('$' + '{{ jobs.review.outputs.reviewer_model }}');
++  const review = policy.jobs.review;
++  expect(review.outputs.reviewer_model).toBe('$' + '{{ steps.handoff.outputs.reviewer_model }}');
++  const handoff = review.steps.find((step) => step.id === 'handoff');
++  expect(handoff.env.RESPONSE_FILE).toBe('$' + '{{ steps.verdict.outputs.response-file }}');
++  expect(handoff.run).toContain('.model');
++  expect(handoff.run).toContain('reviewer_model=');
++});
++
++test('the verdict check run is published with the reviewer App token', () => {
++  const mint = stepById('check-token');
++  const policyMint = policy.jobs.gate.steps.find((step) => step.id === 'check-token');
++  expect(mint.uses).toBe(policyMint.uses);
++  expect(mint.with).toEqual(policyMint.with);
++  expect(stepById('publish').env.GH_TOKEN).toBe('${{ steps.check-token.outputs.token }}');
++  expect(stepById('publish').env.CHECK_APP_SLUG).toBe('${{ steps.check-token.outputs.app-slug }}');
++});
++
++test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFERRED', () => {
+   const final = gate.jobs.gate;
+   expect(final.needs).toEqual(fixture.required_jobs);
+   expect(final.if).toBe('always()');
+-  expect(final.steps[0].run).toContain('copilot');
+-  const script = final.steps[1].run;
+-  expect(script).toContain('failure|cancelled)');
+-  expect(script).toContain('skipped)');
+-  expect(script).toContain('IS_DRAFT');
+-  expect(script).toContain('unexpected conclusion');
++  expect(stepById('copilot').run).toContain('copilot');
+ 
++  const conclusions = { MERGE: 'success', CHANGES: 'failure', DEFERRED: 'neutral' };
+   for (const scenario of fixture.gate_scenarios) {
+     const [gitleaks, leak, security, semantic] = scenario.results;
+-    const result = spawnSync('/bin/bash', ['-c', script], {
+-      encoding: 'utf8',
+-      env: {
++    const [leakModel, securityModel, semanticModel] = scenario.models;
++    withGateWorkspace((dir) => {
++      const { result, outputs } = runGateStep('verdict', dir, {
+         IS_DRAFT: String(scenario.draft),
+         REPO_PRIVATE: String(scenario.private ?? false),
+         ROUTER_AVAILABLE: 'true',
+@@ -84,8 +204,208 @@ test('the final check waits for every required job and only accepts draft skips'
+         LEAK_RESULT: leak,
+         SECURITY_RESULT: security,
+         SEMANTIC_RESULT: semantic,
+-      },
++        LEAK_MODEL: leakModel,
++        SECURITY_MODEL: securityModel,
++        SEMANTIC_MODEL: semanticModel,
++        COPILOT_OUTCOME: 'success',
++        COPILOT_FAILURES: scenario.copilot_failures ?? '0',
++        AUTHOR_FAMILY: scenario.author_family ?? 'human',
++        HEAD_SHA: 'b'.repeat(40),
++      });
++      expect(result.exitCode, `${scenario.name}: ${result.stderr.toString()}`).toBe(0);
++      expect(outputs.verdict, scenario.name).toBe(scenario.verdict);
++      expect(outputs.conclusion, scenario.name).toBe(conclusions[scenario.verdict]);
++      if (scenario.reason_contains) {
++        expect(outputs.reason, scenario.name).toContain(scenario.reason_contains);
++      }
++      const contract = JSON.parse(readFileSync(join(dir, 'ai-merge-gate.verdict.json'), 'utf8'));
++      expect(contract, scenario.name).toEqual({
++        model: scenario.model_line,
++        author_family: scenario.author_family ?? 'human',
++        head: 'b'.repeat(40),
++        verdict: scenario.verdict,
++      });
++
++      const enforce = Bun.spawnSync(['/bin/bash', '-c', stepById('enforce').run], {
++        cwd: dir,
++        env: { ...process.env, GATE_VERDICT: outputs.verdict, GATE_REASON: outputs.reason },
++      });
++      expect(enforce.exitCode, scenario.name).toBe(scenario.exit_code);
++    });
++  }
++});
++
++test('the author family comes from the Assisted-by trailers of the commits in the change', () => {
++  const FAMILIES_FILE = '.ai-workflows/.github/scripts/policy-gate/model-families.json';
++  const cases = [
++    {
++      name: 'one agent-written commit maps its model',
++      messages: ['chore: base', ['feat: add a helper', 'Assisted-by: Claude:claude-fable-5-2']],
++      expected: 'anthropic',
++    },
++    {
++      name: 'families from several commits join sorted',
++      messages: [
++        'docs: start',
++        ['feat: agent one', 'Assisted-by: Claude:claude-fable-5-2'],
++        ['feat: agent two', 'Assisted-by: Codex:gpt-5.5'],
++      ],
++      expected: 'anthropic+openai',
++    },
++    {
++      name: 'no trailer anywhere is unknown',
++      messages: ['fix: by hand', 'fix: by hand again'],
++      expected: 'unknown',
++    },
++    {
++      name: 'a provider-prefixed or upper-case model id still maps',
++      messages: [
++        'chore: base',
++        ['feat: mixed', 'Assisted-by: Codex:OpenAI/GPT-5.5'],
++        ['feat: more', 'Assisted-by: Claude:CLAUDE-SONNET-4-5'],
++      ],
++      expected: 'anthropic+openai',
++    },
++    {
++      name: 'a trailer without a model id is ignored',
++      messages: ['chore: base', ['feat: vague', 'Assisted-by: SomeAgentName']],
++      expected: 'unknown',
++    },
++    {
++      name: 'an unmappable model id is the unknown family',
++      messages: ['chore: base', ['feat: mystery', 'Assisted-by: Claude:mystery-model-x']],
++      expected: 'unknown',
++    },
++    {
++      name: 'the base commit is outside the range',
++      messages: [['chore: base', 'Assisted-by: Claude:claude-fable-5-2'], 'fix: clean head'],
++      expected: 'unknown',
++    },
++  ];
++  for (const { name, messages, expected } of cases) {
++    withGateWorkspace((dir) => {
++      expect(messages.length).toBeGreaterThan(1);
++      const { baseSha, headSha } = buildTrailerRepo(dir, messages);
++      const { result, outputs } = runGateStep('author-family', dir, {
++        BASE_SHA: baseSha,
++        HEAD_SHA: headSha,
++        FAMILIES_FILE,
++      });
++      expect(result.exitCode, `${name}: ${result.stderr.toString()}`).toBe(0);
++      expect(outputs.author_family, name).toBe(expected);
+     });
+-    expect(result.status, scenario.name).toBe(scenario.exit_code);
+   }
+ });
++
++test('an unreadable commit range fails the author family step closed', () => {
++  withGateWorkspace((dir) => {
++    buildTrailerRepo(dir, ['chore: base', 'fix: head']);
++    const { result } = runGateStep('author-family', dir, {
++      BASE_SHA: 'd'.repeat(40),
++      HEAD_SHA: 'b'.repeat(40),
++      FAMILIES_FILE: '.ai-workflows/.github/scripts/policy-gate/model-families.json',
++    });
++    // The ::error annotation goes to the step log; git's own failure to stderr.
++    expect(result.exitCode).not.toBe(0);
++    expect(result.stdout.toString()).toContain('Could not read the pull request commits');
++    expect(result.stderr.toString()).toContain('fatal:');
++  });
++});
++
++test('the published summary prepends the rubric line and carries the four contract lines in order', () => {
++  const contractLines = (summary) => summary.split('\n').filter((line) => /^(model|author_family|head|VERDICT):/.test(line));
++
++  const capture = (reason, token = 'app-token') =>
++    withGateWorkspace((dir) => {
++      const helperDir = join(dir, '.ai-workflows', '.github', 'scripts', 'shared');
++      mkdirSync(helperDir, { recursive: true });
++      const captured = join(dir, 'captured');
++      const summaryArg = join(dir, 'captured-summary');
++      writeFileSync(
++        join(helperDir, 'check-run.sh'),
++        [
++          '#!/bin/sh',
++          `printf '%s\\n' "$1" "$2" "$3" "$4" > '${captured}'`,
++          `printf '%s' "$5" > '${summaryArg}'`,
++          '',
++        ].join('\n'),
++      );
++      chmodSync(join(helperDir, 'check-run.sh'), 0o755);
++      writeFileSync(join(dir, 'ai-merge-gate.verdict.json'), JSON.stringify({
++        model: 'claude-opus-5-5',
++        author_family: 'human',
++        head: 'b'.repeat(40),
++        verdict: 'MERGE',
++      }));
++      const result = Bun.spawnSync(['/bin/bash', '-c', stepById('publish').run], {
++        cwd: dir,
++        env: {
++          ...process.env,
++          GH_TOKEN: token,
++          CHECK_APP_SLUG: 'jpe-claude-bot',
++          CHECK_HEAD_SHA: 'b'.repeat(40),
++          GATE_CONCLUSION: 'success',
++          GATE_REASON: reason,
++          VERDICT_FILE: 'ai-merge-gate.verdict.json',
++          SUMMARY_FILE: 'ai-merge-gate.summary.md',
++          RUBRIC_LINE: fixture.rubric_line,
++        },
++      });
++      return {
++        result,
++        invoked: existsSync(captured) ? readFileSync(captured, 'utf8').trim().split('\n') : null,
++        summary: existsSync(summaryArg) ? readFileSync(summaryArg, 'utf8') : null,
++      };
++    });
++
++  const published = capture('');
++  expect(published.result.exitCode, published.result.stderr.toString()).toBe(0);
++  expect(published.invoked).toEqual(['upsert', 'AI Merge Gate', 'success', 'AI Merge Gate']);
++  // $(cat ...) strips the trailing newline, so the API receives the summary
++  // without one. Exactly four contract lines, in order, nothing between them.
++  expect(published.summary).toBe(
++    [
++      fixture.rubric_line,
++      '',
++      'model: claude-opus-5-5',
++      'author_family: human',
++      `head: ${'b'.repeat(40)}`,
++      'VERDICT: MERGE',
++    ].join('\n'),
++  );
++  expect(contractLines(published.summary)).toEqual([
++    'model: claude-opus-5-5',
++    'author_family: human',
++    `head: ${'b'.repeat(40)}`,
++    'VERDICT: MERGE',
++  ]);
++
++  // On a refusal the reason is the last summary line before VERDICT, and the
++  // four contract lines keep their order around it.
++  const refused = capture('reviewer and author share the family anthropic');
++  expect(refused.result.exitCode).toBe(0);
++  const refusedLines = refused.summary.split('\n');
++  expect(refusedLines.at(-1)).toBe('VERDICT: MERGE');
++  expect(refusedLines.at(-2)).toBe('reason: reviewer and author share the family anthropic');
++  expect(contractLines(refused.summary)).toEqual([
++    'model: claude-opus-5-5',
++    'author_family: human',
++    `head: ${'b'.repeat(40)}`,
++    'VERDICT: MERGE',
++  ]);
++
++  const untokened = capture('', '');
++  expect(untokened.result.exitCode).toBe(0);
++  expect(untokened.result.stdout.toString()).toContain('cannot publish the verdict check run');
++  expect(untokened.invoked).toBeNull();
++});
++
++test('the contract shape fails when a summary line is missing', () => {
++  // The four contract lines must all be present and exactly once; dropping
++  // the head line leaves three and the shape assertion above would fail.
++  const contractLines = (summary) => summary.split('\n').filter((line) => /^(model|author_family|head|VERDICT):/.test(line));
++  const valid = ['model: a', 'author_family: human', `head: ${'b'.repeat(40)}`, 'VERDICT: MERGE'];
++  expect(contractLines(valid.join('\n'))).toHaveLength(4);
++  expect(contractLines(valid.filter((line) => !line.startsWith('head:')).join('\n'))).toHaveLength(3);
++  expect(contractLines(valid.concat(['model: a']).join('\n'))).toHaveLength(5);
++});
+diff --git a/tests/fixtures/ai-merge-gate.json b/tests/fixtures/ai-merge-gate.json
+index 65c8088..f52ab45 100644
+--- a/tests/fixtures/ai-merge-gate.json
++++ b/tests/fixtures/ai-merge-gate.json
+@@ -7,70 +7,172 @@
+   ],
+   "required_jobs": ["gitleaks", "router", "leak", "security", "semantic"],
+   "router_secrets": ["LLM_ROUTER_BASE_URL", "LLM_ROUTER_API_KEY"],
++  "rubric_line": "A change that adds or edits a script or custom unit where a native or maintained way exists is CHANGES.",
+   "gate_scenarios": [
+     {
+       "name": "all success",
+       "draft": false,
+       "results": ["success", "success", "success", "success"],
+-      "exit_code": 0
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 0,
++      "verdict": "MERGE",
++      "model_line": "claude-opus-5-5, glm-4.7"
+     },
+     {
+       "name": "failure",
+       "draft": false,
+       "results": ["failure", "success", "success", "success"],
+-      "exit_code": 1
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "claude-opus-5-5, glm-4.7"
+     },
+     {
+       "name": "cancellation",
+       "draft": false,
+       "results": ["success", "cancelled", "success", "success"],
+-      "exit_code": 1
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "claude-opus-5-5, glm-4.7"
+     },
+     {
+       "name": "draft skip",
+       "draft": true,
+       "results": ["success", "skipped", "success", "success"],
+-      "exit_code": 0
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 0,
++      "verdict": "DEFERRED",
++      "model_line": "claude-opus-5-5, glm-4.7"
+     },
+     {
+       "name": "non-draft skip",
+       "draft": false,
+       "results": ["success", "skipped", "success", "success"],
+-      "exit_code": 1
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "claude-opus-5-5, glm-4.7"
+     },
+     {
+       "name": "unknown result",
+       "draft": false,
+       "results": ["action_required", "success", "success", "success"],
+-      "exit_code": 1
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "claude-opus-5-5, glm-4.7"
+     },
+     {
+       "name": "private repo leak skip",
+       "draft": false,
+       "private": true,
+       "results": ["success", "skipped", "success", "success"],
+-      "exit_code": 0
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 0,
++      "verdict": "MERGE",
++      "model_line": "claude-opus-5-5, glm-4.7"
+     },
+     {
+       "name": "private repo leak failure",
+       "draft": false,
+       "private": true,
+       "results": ["success", "failure", "success", "success"],
+-      "exit_code": 1
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "claude-opus-5-5, glm-4.7"
+     },
+     {
+       "name": "private repo security skip",
+       "draft": false,
+       "private": true,
+       "results": ["success", "success", "skipped", "success"],
+-      "exit_code": 1
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "glm-4.7"
+     },
+     {
+       "name": "private repo gitleaks skip",
+       "draft": false,
+       "private": true,
+       "results": ["skipped", "skipped", "success", "success"],
+-      "exit_code": 1
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "claude-opus-5-5, glm-4.7"
++    },
++    {
++      "name": "all reviews skipped on a draft pull request",
++      "draft": true,
++      "results": ["success", "skipped", "skipped", "skipped"],
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 0,
++      "verdict": "DEFERRED",
++      "model_line": "none"
++    },
++    {
++      "name": "same-family review refused",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "models": ["glm-4.7", "glm-4.7", "glm-4.7"],
++      "author_family": "zhipu",
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "glm-4.7",
++      "reason_contains": "share the family zhipu"
++    },
++    {
++      "name": "cross-family review passes",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "models": ["glm-4.7", "deepseek-v4", "glm-4.7"],
++      "author_family": "anthropic",
++      "exit_code": 0,
++      "verdict": "MERGE",
++      "model_line": "deepseek-v4, glm-4.7"
++    },
++    {
++      "name": "one of two author families shared",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "author_family": "anthropic+zhipu",
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "claude-opus-5-5, glm-4.7",
++      "reason_contains": "share the family anthropic"
++    },
++    {
++      "name": "reviewer model unknown refused",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "models": ["glm-4.7", "", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "",
++      "reason_contains": "reviewer model unknown"
++    },
++    {
++      "name": "failed Copilot agent checks",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "claude-opus-5-5, glm-4.7",
++      "copilot_failures": "2"
++    },
++    {
++      "name": "unreadable Copilot agent checks",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "models": ["glm-4.7", "claude-opus-5-5", "glm-4.7"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "model_line": "claude-opus-5-5, glm-4.7",
++      "copilot_failures": "unreadable"
+     }
+   ]
+ }
+diff --git a/tests/policy-gate-verdict.test.js b/tests/policy-gate-verdict.test.js
+index 8d81e0d..b74cf79 100644
+--- a/tests/policy-gate-verdict.test.js
++++ b/tests/policy-gate-verdict.test.js
+@@ -94,6 +94,49 @@ const makeFinding = (check, result = 'pass', overrides = {}) => ({
+   ...overrides,
+ });
+ 
++const mergeVerdict = (overrides = {}) => JSON.stringify({
++  model: 'claude-opus-5-5',
++  author_family: 'human',
++  head: headSha,
++  verdict: 'MERGE',
++  ...overrides,
++});
++
++// Runs the validator in merge-gate mode and reports the exit code, the verdict
++// left in the response file, and the step outputs the workflow reads.
++function mergeResult(response, extraEnv = {}) {
++  const dir = mkdtempSync(join(tmpdir(), 'policy-merge-gate-'));
++  try {
++    const file = join(dir, 'response.json');
++    const output = join(dir, 'step-output');
++    writeFileSync(file, response);
++    writeFileSync(output, '');
++    const run = Bun.spawnSync(['bash', script], {
++      env: { ...process.env, RUBRIC: 'merge-gate', RESPONSE_FILE: file, GITHUB_OUTPUT: output, ...extraEnv },
++    });
++    return {
++      exitCode: run.exitCode,
++      stderr: run.stderr.toString(),
++      verdict: JSON.parse(readFileSync(file, 'utf8')).verdict,
++      outputs: readOutputs(output),
++    };
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++}
++
++const readOutputs = (file) =>
++  Object.fromEntries(
++    readFileSync(file, 'utf8')
++      .trim()
++      .split('\n')
++      .filter(Boolean)
++      .map((line) => {
++        const eq = line.indexOf('=');
++        return [line.slice(0, eq), line.slice(eq + 1)];
++      }),
++  );
++
+ const POLICY = ['dry', 'native_first', 'disclosure', 'missing_test', 'token_budget'];
+ const SECURITY = ['auth', 'injection', 'permission_widening', 'unsafe_trigger', 'secret_handling'];
+ const SEMANTIC = ['claim_mismatch', 'omitted_behavior'];
+@@ -116,6 +159,121 @@ test('accepts a leak verdict with no findings, which is a clean review', () => {
+   expect(exitCodeFor('leak', JSON.stringify({ summary: 'clean', findings: [] }))).toBe(0);
+ });
+ 
++test.each(['MERGE', 'CHANGES', 'DEFERRED'])('accepts the merge-gate verdict %s', (verdict) => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ verdict }))).toBe(0);
++});
++
++test('rejects a merge-gate verdict outside the contract enum', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ verdict: 'PASS' }))).toBe(1);
++});
++
++test('rejects a merge-gate verdict whose head is not a full sha', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ head: 'b'.repeat(20) }))).toBe(1);
++});
++
++test('rejects a merge-gate verdict with a multiline model', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ model: 'standard\ncritical' }))).toBe(1);
++});
++
++test('rejects a merge-gate verdict whose family is not a lowercase slug', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ author_family: 'Claude' }))).toBe(1);
++  expect(exitCodeFor('merge-gate', mergeVerdict({ author_family: 'claude bot' }))).toBe(1);
++});
++
++test('rejects a merge-gate verdict with keys outside the contract', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ reason: 'extra' }))).toBe(1);
++});
++
++test('accepts a reviewer model from a different family than the author', () => {
++  const result = mergeResult(mergeVerdict({ model: 'glm-4.7', author_family: 'human' }));
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('MERGE');
++  expect(result.outputs).toEqual({ verdict: 'MERGE', reason: '' });
++});
++
++test('refuses when the reviewer and the author share one family', () => {
++  const result = mergeResult(mergeVerdict({ model: 'claude-opus-5-5', author_family: 'anthropic' }));
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('CHANGES');
++  expect(result.outputs.verdict).toBe('CHANGES');
++  expect(result.outputs.reason).toBe('reviewer and author share the family anthropic');
++});
++
++test('refuses a reviewer model that matches no family in the map', () => {
++  const result = mergeResult(mergeVerdict({ model: 'mystery-model-9', author_family: 'human' }));
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('CHANGES');
++  expect(result.outputs.reason).toBe('reviewer family unknown');
++});
++
++test('refuses with reviewer model unknown when the response has no model field', () => {
++  const result = mergeResult(mergeVerdict({ model: '' }));
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('CHANGES');
++  expect(result.outputs.reason).toBe('reviewer model unknown');
++});
++
++test('accepts when the author family is unknown', () => {
++  const result = mergeResult(mergeVerdict({ model: 'claude-opus-5-5', author_family: 'unknown', verdict: 'DEFERRED' }));
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('DEFERRED');
++});
++
++test('refuses when one of two author families matches the reviewer', () => {
++  const result = mergeResult(mergeVerdict({ model: 'openai/gpt-5.5', author_family: 'anthropic+openai' }));
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('CHANGES');
++  expect(result.outputs.reason).toBe('reviewer and author share the family openai');
++});
++
++test('maps a model id with a provider prefix by its model part', () => {
++  const accepted = mergeResult(mergeVerdict({ model: 'openai/gpt-5.5', author_family: 'human' }));
++  expect(accepted.exitCode).toBe(0);
++  expect(accepted.verdict).toBe('MERGE');
++  const refused = mergeResult(mergeVerdict({ model: 'openai/gpt-5.5', author_family: 'openai' }));
++  expect(refused.verdict).toBe('CHANGES');
++  expect(refused.outputs.reason).toBe('reviewer and author share the family openai');
++});
++
++test('maps an upper-case model id case-insensitively', () => {
++  const result = mergeResult(mergeVerdict({ model: 'GLM-4.7', author_family: 'zhipu' }));
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('CHANGES');
++  expect(result.outputs.reason).toBe('reviewer and author share the family zhipu');
++});
++
++test('reviews across several models are refused when any one shares the author family', () => {
++  const result = mergeResult(mergeVerdict({ model: 'glm-4.7, claude-opus-5-5', author_family: 'anthropic' }));
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('CHANGES');
++  expect(result.outputs.reason).toBe('reviewer and author share the family anthropic');
++});
++
++test('a model of none keeps the scan verdict and the scan reason', () => {
++  const result = mergeResult(mergeVerdict({ model: 'none', verdict: 'DEFERRED' }), {
++    MERGE_GATE_REASON: 'a required scan or review was skipped for a non-draft pull request',
++  });
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('DEFERRED');
++  expect(result.outputs).toEqual({
++    verdict: 'DEFERRED',
++    reason: 'a required scan or review was skipped for a non-draft pull request',
++  });
++});
++
++test('keeps the scan reason when the family check passes', () => {
++  const result = mergeResult(mergeVerdict({}), { MERGE_GATE_REASON: '2 Copilot agent check(s) failed' });
++  expect(result.exitCode).toBe(0);
++  expect(result.verdict).toBe('MERGE');
++  expect(result.outputs.reason).toBe('2 Copilot agent check(s) failed');
++});
++
++test('fails closed when the model family map is missing', () => {
++  const result = mergeResult(mergeVerdict({}), { MODEL_FAMILIES_FILE: '/nonexistent/model-families.json' });
++  expect(result.exitCode).not.toBe(0);
++  expect(result.stderr).toContain('model family map is missing');
++});
++
+ test('accepts a leak verdict with several findings in one category', () => {
+   const verdict = {
+     summary: 'two',
