@@ -147,7 +147,7 @@ jobs:
   leak:
     name: Leak review
     needs: [router, lane]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) && !github.event.repository.private }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || needs.lane.result != 'success' || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) && !github.event.repository.private }}
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -168,7 +168,7 @@ jobs:
   security:
     name: Security review
     needs: [router, lane]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || needs.lane.result != 'success' || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) }}
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -187,7 +187,7 @@ jobs:
   semantic:
     name: Semantic review
     needs: [router, lane]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || needs.lane.result != 'success' || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) }}
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -207,7 +207,7 @@ jobs:
   code:
     name: Code review
     needs: [router, lane]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || needs.lane.result != 'success' || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) }}
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -238,6 +238,7 @@ jobs:
       ROUTER_AVAILABLE: ${{ needs.router.outputs.available }}
       LANE: ${{ needs.lane.outputs.lane }}
       TIER: ${{ needs.lane.outputs.tier }}
+      LANE_RESULT: ${{ needs.lane.result }}
       POST_MERGE: ${{ github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred') && 'true' || 'false' }}
       GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
       LEAK_RESULT: ${{ needs.leak.result }}
@@ -376,12 +377,15 @@ jobs:
           fi
           # The lane only excuses a skipped review before merge, and only in
           # the standard and hot tiers; legacy and an unclassified pull
-          # request keep the full rule. After merge the reviews always run.
+          # request keep the full rule, and so does a classifier that did not
+          # succeed. After merge the reviews always run; without a router
+          # they cannot, and the verdict stays DEFERRED, which the post-merge
+          # workflow treats as red once its wait ends.
           is_draft="$IS_DRAFT"
           lane_deferred=false
           if [[ "$POST_MERGE" == "true" ]]; then
             is_draft=false
-          elif [[ ( "$TIER" == "standard" || "$TIER" == "hot" ) && ( "$LANE" == "tiny" || "$LANE" == "land-first" || "$LANE" == "bot" ) ]]; then
+          elif [[ "$LANE_RESULT" == "success" && ( "$TIER" == "standard" || "$TIER" == "hot" ) && ( "$LANE" == "tiny" || "$LANE" == "land-first" || "$LANE" == "bot" ) ]]; then
             lane_deferred=true
           fi
           for entry in "gitleaks|$GITLEAKS_RESULT" "review|$leak_result" "review|$SECURITY_RESULT" "review|$SEMANTIC_RESULT"; do

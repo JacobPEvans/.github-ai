@@ -64,7 +64,7 @@ function runGateStep(stepId, dir, env) {
     // The lane classifier is skipped on the post-merge run, so its outputs
     // are empty there; default the lane env to the unclassified, pre-merge
     // case and let each scenario override it.
-    env: { ...process.env, GITHUB_OUTPUT: output, LANE: '', TIER: '', POST_MERGE: 'false', ...env },
+    env: { ...process.env, GITHUB_OUTPUT: output, LANE: '', TIER: '', LANE_RESULT: 'success', POST_MERGE: 'false', ...env },
   });
   return { result, outputs: readOutputs(output) };
 }
@@ -142,6 +142,8 @@ test('the review jobs need the router and lane and skip only modern-tier fast la
     expect(review.if.startsWith('${{ !cancelled() && '), job).toBe(true);
     expect(review.if, job).toContain("needs.router.outputs.available == 'true'");
     expect(review.if, job).toContain(`(${POST_MERGE_CLAUSE}) ||`);
+    // A classifier that did not succeed never excuses a review.
+    expect(review.if, job).toContain("needs.lane.result != 'success' || (needs.lane.outputs.tier != 'standard'");
     expect(review.if, job).toContain("needs.lane.outputs.tier != 'standard'");
     expect(review.if, job).toContain("needs.lane.outputs.tier != 'hot'");
     expect(review.if, job).toContain("needs.lane.outputs.lane != 'tiny'");
@@ -157,6 +159,8 @@ test('the gate needs the lane and passes LANE, TIER and POST_MERGE to the verdic
   expect(final.needs).toContain('lane');
   expect(final.env.LANE).toBe('${{ needs.lane.outputs.lane }}');
   expect(final.env.TIER).toBe('${{ needs.lane.outputs.tier }}');
+  expect(final.env.LANE_RESULT).toBe('${{ needs.lane.result }}');
+  expect(readFileSync(join('.github', 'workflows', '_ai-merge-gate.yml'), 'utf8')).toContain('elif [[ "$LANE_RESULT" == "success" && ( "$TIER" == "standard" || "$TIER" == "hot" )');
   expect(final.env.POST_MERGE).toBe('${{ ' + POST_MERGE_CLAUSE + " && 'true' || 'false' }}");
 });
 
@@ -376,6 +380,7 @@ test('the verdict defers skipped reviews only for modern-tier fast lanes before 
     { name: 'guarded lane keeps the full rule', env: { LANE: 'guarded', TIER: 'standard' }, verdict: 'CHANGES' },
     { name: 'empty lane behaves as normal', env: { LANE: '', TIER: '' }, verdict: 'CHANGES' },
     { name: 'legacy tier ignores the bot lane', env: { LANE: 'bot', TIER: 'legacy' }, verdict: 'CHANGES' },
+    { name: 'a failed classifier keeps the full rule', env: { LANE: 'tiny', TIER: 'standard', LANE_RESULT: 'failure' }, verdict: 'CHANGES' },
     {
       name: 'post-merge run ignores the lane and the draft flag',
       env: { LANE: 'tiny', TIER: 'standard', POST_MERGE: 'true', IS_DRAFT: 'true' },
