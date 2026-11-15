@@ -70,6 +70,9 @@ on:
       NTFY_BASE_URL:
         description: Optional base URL for policy-gate override audit notices.
         required: false
+      GH_APP_CLAUDE_BOT_ID:
+        description: App identifier, read when the organization variable of the same name is empty.
+        required: false
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         description: Private key used by policy-gate to publish review checks.
         required: false
@@ -163,6 +166,7 @@ jobs:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
       NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_ID: ${{ secrets.GH_APP_CLAUDE_BOT_ID }}
       GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
   security:
@@ -182,6 +186,7 @@ jobs:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
       NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_ID: ${{ secrets.GH_APP_CLAUDE_BOT_ID }}
       GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
   semantic:
@@ -201,6 +206,7 @@ jobs:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
       NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_ID: ${{ secrets.GH_APP_CLAUDE_BOT_ID }}
       GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
   # Advisory: posts its comment and check, never fails, and the final check does not wait for it.
@@ -221,6 +227,7 @@ jobs:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
       NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_ID: ${{ secrets.GH_APP_CLAUDE_BOT_ID }}
       GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
   gate:
@@ -286,7 +293,7 @@ jobs:
         continue-on-error: true
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
-          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}
           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
           permission-checks: write
 
@@ -534,7 +541,7 @@ jobs:
         continue-on-error: true
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
-          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}
           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
           permission-checks: write
 

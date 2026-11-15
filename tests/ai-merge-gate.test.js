@@ -97,7 +97,7 @@ function buildTrailerRepo(dir, messages) {
 test('the public workflow starts the gate for the required pull request events and passes named secrets', () => {
   expect(frontdoor.on.pull_request.types).toEqual(fixture.pull_request_types);
   expect(frontdoor.jobs.gate.with.runner_label).toContain("&& 'review' || 'ubuntu-latest'");
-  expect(Object.keys(frontdoor.jobs.gate.secrets).sort()).toEqual([...fixture.router_secrets, 'AUTOMATION_APP_PRIVATE_KEY', 'GH_APP_CLAUDE_BOT_PRIVATE_KEY', 'GITLEAKS_LICENSE_KEY', 'NTFY_BASE_URL'].sort());
+  expect(Object.keys(frontdoor.jobs.gate.secrets).sort()).toEqual([...fixture.router_secrets, 'AUTOMATION_APP_PRIVATE_KEY', 'GH_APP_CLAUDE_BOT_ID', 'GH_APP_CLAUDE_BOT_PRIVATE_KEY', 'GITLEAKS_LICENSE_KEY', 'NTFY_BASE_URL'].sort());
 });
 
 test('the reusable workflow exposes router and check credentials to its caller', () => {
@@ -106,6 +106,9 @@ test('the reusable workflow exposes router and check credentials to its caller',
   expect(fixture.router_secrets.every((name) => call.secrets[name].required === false)).toBe(true);
   expect(call.secrets.NTFY_BASE_URL.required).toBe(false);
   expect(call.secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY.required).toBe(false);
+  // The App id falls back to a secret where the organization holds no variable.
+  expect(call.secrets.GH_APP_CLAUDE_BOT_ID.required).toBe(false);
+  expect(readFileSync(join('.github', 'workflows', '_ai-merge-gate.yml'), 'utf8').split('client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}').length - 1).toBe(2);
 });
 
 test('the lane job classifies non-closed pull requests with read permissions and the optional App key', () => {
