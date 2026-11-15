@@ -1,0 +1,773 @@
+diff --git a/.github/scripts/policy-gate/validate-verdict.sh b/.github/scripts/policy-gate/validate-verdict.sh
+index 3e8209e..59c7d5b 100644
+--- a/.github/scripts/policy-gate/validate-verdict.sh
++++ b/.github/scripts/policy-gate/validate-verdict.sh
+@@ -8,6 +8,9 @@
+ # verdict must name each of its checks once and no other. The leak rubric returns one finding
+ # per suspected item, and an empty array when nothing matches, so its verdict may repeat a
+ # category and may have no findings. Every rubric accepts only the keys the renderer reads.
++#
++# The merge-gate rubric is not a model reply: it is the AI Merge Gate verdict contract
++# document, and it must carry exactly the four keys its check-run summary renders.
+ set -euo pipefail
+ 
+ : "${RUBRIC:?RUBRIC is required}"
+@@ -18,6 +21,17 @@ case "$RUBRIC" in
+   security) names='auth injection permission_widening unsafe_trigger secret_handling'; exact=1 ;;
+   leak) names='credential private_host_or_ip internal_topology incident_detail'; exact=0 ;;
+   semantic) names='claim_mismatch omitted_behavior'; exact=1 ;;
++  merge-gate)
++    jq -e '
++      type == "object" and
++      ((keys - ["model", "author_family", "head", "verdict"]) | length == 0) and
++      (.model | type == "string" and length > 0 and test("^[A-Za-z0-9][A-Za-z0-9 .,_+-]*$")) and
++      (.author_family | type == "string" and test("^[a-z0-9][a-z0-9-]*$")) and
++      (.head | type == "string" and test("^[0-9a-f]{40}$")) and
++      (.verdict | type == "string" and (. == "MERGE" or . == "CHANGES" or . == "DEFERRED"))
++    ' "$RESPONSE_FILE" > /dev/null || exit 1
++    exit 0
++    ;;
+   *) echo "::error::Unknown rubric: $RUBRIC" >&2; exit 2 ;;
+ esac
+ 
+diff --git a/.github/workflows/_ai-merge-gate.yml b/.github/workflows/_ai-merge-gate.yml
+index 12b5425..74a15a3 100644
+--- a/.github/workflows/_ai-merge-gate.yml
++++ b/.github/workflows/_ai-merge-gate.yml
+@@ -3,6 +3,18 @@
+ # Status aggregator for secret scanning and blocking AI reviews.
+ # Branch protection requires only "AI Merge Gate" as the single AI check.
+ #
++# The gate job publishes the verdict contract as one check run named
++# "AI Merge Gate" on the pull request head, posted with the reviewer App
++# token so rulesets can pin the App. Its summary prepends the first rubric
++# line and carries exactly these contract lines:
++#   model:         the distinct router lanes the reviews ran on
++#   author_family: the author's agent family - the bot identity, else the
++#                  Assisted-by commit trailer, else human
++#   head:          the pull request head commit
++#   VERDICT:       MERGE, CHANGES or DEFERRED
++# The review is refused when the reviewer family equals the author family:
++# no agent family reviews its own work.
++#
+ # Usage:
+ #   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate.yml@v1
+ name: _ai-merge-gate
+@@ -165,50 +177,225 @@ jobs:
+       SEMANTIC_RESULT: ${{ needs.semantic.result }}
+       GH_TOKEN: ${{ github.token }}
+       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
++      # The distinct router lanes the three reviews run on, in job order
++      # (leak, security, semantic). Kept in step with the review jobs above;
++      # the unit tests assert the two agree.
++      MODEL_LANES: standard, critical
+     steps:
+-      - name: Verify Copilot agent checks
++      # Only this job checks out the trusted scripts it runs with the App
++      # token. It never checks out the pull request.
++      - name: Checkout ai-workflows scripts
++        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++        with:
++          repository: JacobPEvans/.github-ai
++          ref: ${{ job.workflow_sha }}
++          sparse-checkout: .github/scripts
++          path: .ai-workflows
++          persist-credentials: false
++
++      # The check run is posted with the Claude bot App token, so rulesets can
++      # require the "AI Merge Gate" check from that App. Same mint as the
++      # policy-gate gate job; a failed mint is named by the publish step.
++      - name: Mint the check-run token
++        id: check-token
++        continue-on-error: true
++        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
++        with:
++          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
++          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
++          permission-checks: write
++
++      # The API occasionally returns a transient HTML error page; piping it
++      # straight into --jq crashed the gate (false-negative merge block).
++      # Retry with backoff and require a numeric answer before judging. The
++      # count feeds the verdict step, so failed Copilot checks still yield a
++      # published CHANGES verdict instead of dying before the check run.
++      - name: Count failed Copilot agent checks
++        id: copilot
++        continue-on-error: true
+         run: |
+-          # The API occasionally returns a transient HTML error page; piping it
+-          # straight into --jq crashed the gate (false-negative merge block).
+-          # Retry with backoff and require a numeric answer before judging.
+           for i in 1 2 3; do
+             FAILED=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/check-runs" \
+               --jq '[.check_runs[] | select(.app.slug | test("copilot"; "i")) | select(.conclusion == "failure" or .conclusion == "timed_out")] | length') && break
+             sleep $((i * 5))
+           done
+           if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then
+-            echo "::error::check-runs API unreadable after retries"
+-            exit 1
++            echo "copilot_failures=unreadable" >> "$GITHUB_OUTPUT"
++            exit 0
+           fi
+-          echo "Copilot agent failures: $FAILED"
+-          if [ "$FAILED" -gt "0" ]; then
+-            echo "::error::$FAILED Copilot agent check(s) failed"
+-            exit 1
++          echo "copilot_failures=$FAILED" >> "$GITHUB_OUTPUT"
++
++      - name: Determine the author family
++        id: author-family
++        env:
++          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
++          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
++          REVIEWER_SLUG: ${{ steps.check-token.outputs.app-slug }}
++        run: |
++          set -euo pipefail
++          # One family per AI agent vendor, matched on whole tokens so
++          # jpe-claude-bot and claude[bot] are one family. Unknown identities
++          # keep their distinctive tokens with the generic ones stripped, so
++          # two unknown families still differ.
++          family_of() {
++            local identity="${1,,}" token parts="" tokens=()
++            read -ra tokens <<< "${identity//[^a-z0-9]/ }"
++            for token in "${tokens[@]}"; do
++              case "$token" in
++                claude|copilot|codex|gemini|cursor|devin|windsurf|openhands|aider|jules|junie|amp)
++                  printf '%s' "$token"; return ;;
++              esac
++            done
++            for token in "${tokens[@]}"; do
++              case "$token" in
++                bot|app|github|actions|ai|agent) ;;
++                *) parts="${parts:+$parts-}$token" ;;
++              esac
++            done
++            printf '%s' "${parts:-unknown}"
++          }
++
++          author_family=human
++          if [[ "$PR_AUTHOR_TYPE" == "Bot" || "$PR_AUTHOR" == *"[bot]" ]]; then
++            author_family="$(family_of "$PR_AUTHOR")"
++          elif [[ -n "$PR_AUTHOR" ]]; then
++            # A human author can still ship agent-assisted commits; the
++            # Assisted-by trailer names the family that wrote the change.
++            if ! message="$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}" --jq '.commit.message' 2>/dev/null)" \
++              && ! message="$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}" --jq '.commit.message')"; then
++              echo "::error::Could not read the head commit message to determine the author family"
++              exit 1
++            fi
++            trailer="$(grep -im1 '^Assisted-by:' <<< "$message" || true)"
++            if [[ -n "$trailer" ]]; then
++              author_family="$(family_of "${trailer#*:}")"
++            fi
++          fi
++          reviewer_family=""
++          if [[ -n "$REVIEWER_SLUG" ]]; then
++            reviewer_family="$(family_of "$REVIEWER_SLUG")"
+           fi
+-      - name: Enforce scan and review conclusions
++          {
++            echo "author_family=$author_family"
++            echo "reviewer_family=$reviewer_family"
++          } >> "$GITHUB_OUTPUT"
++
++      - name: Compute the merge gate verdict
++        id: verdict
++        env:
++          COPILOT_FAILURES: ${{ steps.copilot.outputs.copilot_failures }}
++          COPILOT_OUTCOME: ${{ steps.copilot.outcome }}
++          AUTHOR_FAMILY: ${{ steps.author-family.outputs.author_family }}
++          REVIEWER_FAMILY: ${{ steps.author-family.outputs.reviewer_family }}
+         run: |
+           set -euo pipefail
+-          if [[ "$REPO_PRIVATE" == "true" && "$LEAK_RESULT" == "skipped" ]]; then
+-            LEAK_RESULT=success
++          # CHANGES when any required scan or review failed, was skipped for a
++          # non-draft pull request with a router, when a Copilot agent check
++          # failed or was unreadable, or when the reviewer family equals the
++          # author family. DEFERRED when the gate otherwise passed with
++          # reviews skipped on a draft pull request or without a router.
++          # MERGE only when every review ran and passed.
++          leak_result="$LEAK_RESULT"
++          if [[ "$REPO_PRIVATE" == "true" && "$leak_result" == "skipped" ]]; then
++            leak_result=success
++          fi
++          verdict=MERGE
++          reason=""
++          deferred=false
++          if [[ "$COPILOT_OUTCOME" != "success" || "$COPILOT_FAILURES" == "unreadable" ]]; then
++            verdict=CHANGES
++            reason="the Copilot agent checks could not be read"
++          elif [[ "$COPILOT_FAILURES" != "0" ]]; then
++            verdict=CHANGES
++            reason="$COPILOT_FAILURES Copilot agent check(s) failed"
+           fi
+-          for result in "$GITLEAKS_RESULT" "$LEAK_RESULT" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
++          for result in "$GITLEAKS_RESULT" "$leak_result" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
+             case "$result" in
+               success)
+                 ;;
+               skipped)
+                 if [[ "$IS_DRAFT" != "true" && "$ROUTER_AVAILABLE" == "true" ]]; then
+-                  echo "::error::A required scan or review was skipped for a non-draft pull request."
+-                  exit 1
++                  verdict=CHANGES
++                  reason="${reason:-a required scan or review was skipped for a non-draft pull request}"
++                else
++                  deferred=true
+                 fi
+                 ;;
+               failure|cancelled)
+-                echo "::error::A required scan or review concluded with $result."
+-                exit 1
++                verdict=CHANGES
++                reason="${reason:-a required scan or review concluded with $result}"
+                 ;;
+               *)
+-                echo "::error::A required scan or review has an unexpected conclusion: $result"
+-                exit 1
++                verdict=CHANGES
++                reason="${reason:-a required scan or review has an unexpected conclusion: $result}"
+                 ;;
+             esac
+           done
+-          echo "All required scans and reviews passed or were skipped on a draft pull request."
++          if [[ -n "$REVIEWER_FAMILY" && "$REVIEWER_FAMILY" == "$AUTHOR_FAMILY" ]]; then
++            verdict=CHANGES
++            reason="${reason:-the reviewer family ($REVIEWER_FAMILY) matches the author family: no same-family review}"
++          fi
++          if [[ "$verdict" == MERGE && "$deferred" == true ]]; then
++            verdict=DEFERRED
++          fi
++          case "$verdict" in
++            MERGE) conclusion=success ;;
++            CHANGES) conclusion=failure ;;
++            DEFERRED) conclusion=neutral ;;
++          esac
++          jq -n \
++            --arg model "$MODEL_LANES" \
++            --arg author_family "$AUTHOR_FAMILY" \
++            --arg head "$HEAD_SHA" \
++            --arg verdict "$verdict" \
++            '{model: $model, author_family: $author_family, head: $head, verdict: $verdict}' \
++            > ai-merge-gate.verdict.json
++          RUBRIC=merge-gate RESPONSE_FILE=ai-merge-gate.verdict.json \
++            bash .ai-workflows/.github/scripts/policy-gate/validate-verdict.sh
++          {
++            echo "verdict=$verdict"
++            echo "conclusion=$conclusion"
++            echo "reason=$reason"
++          } >> "$GITHUB_OUTPUT"
++
++      - name: Publish the AI Merge Gate verdict
++        id: publish
++        env:
++          GH_TOKEN: ${{ steps.check-token.outputs.token }}
++          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
++          CHECK_HEAD_SHA: ${{ env.HEAD_SHA }}
++          GATE_CONCLUSION: ${{ steps.verdict.outputs.conclusion }}
++          GATE_REASON: ${{ steps.verdict.outputs.reason }}
++          VERDICT_FILE: ai-merge-gate.verdict.json
++          SUMMARY_FILE: ai-merge-gate.summary.md
++          RUBRIC_LINE: A change that adds or edits a script or custom unit where a native or maintained way exists is CHANGES.
++        run: |
++          set -euo pipefail
++          if [ -z "$GH_TOKEN" ]; then
++            echo "::warning::ai-merge-gate: cannot publish the verdict check run without an App token"
++            exit 0
++          fi
++          {
++            printf '%s\n\n' "$RUBRIC_LINE"
++            printf 'model: %s\n' "$(jq -r '.model' "$VERDICT_FILE")"
++            printf 'author_family: %s\n' "$(jq -r '.author_family' "$VERDICT_FILE")"
++            printf 'head: %s\n' "$(jq -r '.head' "$VERDICT_FILE")"
++            printf 'VERDICT: %s\n' "$(jq -r '.verdict' "$VERDICT_FILE")"
++            if [ -n "$GATE_REASON" ]; then
++              printf 'reason: %s\n' "$GATE_REASON"
++            fi
++          } > "$SUMMARY_FILE"
++          bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
++            "AI Merge Gate" "$GATE_CONCLUSION" "AI Merge Gate" "$(cat "$SUMMARY_FILE")"
++
++      - name: Enforce the gate verdict
++        id: enforce
++        env:
++          GATE_VERDICT: ${{ steps.verdict.outputs.verdict }}
++          GATE_REASON: ${{ steps.verdict.outputs.reason }}
++        run: |
++          if [ "$GATE_VERDICT" = "CHANGES" ]; then
++            echo "::error::AI Merge Gate: CHANGES - ${GATE_REASON:-the verdict requires changes}."
++            exit 1
++          fi
++          echo "AI Merge Gate verdict: $GATE_VERDICT"
+diff --git a/tests/ai-merge-gate.test.js b/tests/ai-merge-gate.test.js
+index 38ab717..c11eae6 100644
+--- a/tests/ai-merge-gate.test.js
++++ b/tests/ai-merge-gate.test.js
+@@ -1,12 +1,49 @@
+ const { expect, test } = require('bun:test');
+-const { spawnSync } = require('child_process');
+-const { readFileSync } = require('fs');
++const {
++  chmodSync,
++  existsSync,
++  mkdirSync,
++  mkdtempSync,
++  readFileSync,
++  rmSync,
++  symlinkSync,
++  writeFileSync,
++} = require('fs');
+ const { join } = require('path');
++const { tmpdir } = require('os');
+ 
+ const fixture = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'ai-merge-gate.json'), 'utf8'));
+ const workflow = (name) => Bun.YAML.parse(readFileSync(join('.github', 'workflows', name), 'utf8'));
+ const frontdoor = workflow('ai-merge-gate.yml');
+ const gate = workflow('_ai-merge-gate.yml');
++const stepById = (id) => gate.jobs.gate.steps.find((step) => step.id === id);
++
++// Runs one gate-job step in a scratch workspace whose .ai-workflows scripts
++// symlink to the real ones, so the verdict step validates through
++// validate-verdict.sh exactly as it does on the runner. The caller removes dir.
++function runGateStep(stepId, env) {
++  const dir = mkdtempSync(join(tmpdir(), `merge-gate-${stepId}-`));
++  const linked = join(dir, '.ai-workflows', '.github');
++  mkdirSync(linked, { recursive: true });
++  symlinkSync(join(process.cwd(), '.github', 'scripts'), join(linked, 'scripts'));
++  const output = join(dir, 'step-output');
++  writeFileSync(output, '');
++  const result = Bun.spawnSync(['/bin/bash', '-c', stepById(stepId).run], {
++    cwd: dir,
++    env: { ...process.env, GITHUB_OUTPUT: output, ...env },
++  });
++  const outputs = Object.fromEntries(
++    readFileSync(output, 'utf8')
++      .trim()
++      .split('\n')
++      .filter(Boolean)
++      .map((line) => {
++        const eq = line.indexOf('=');
++        return [line.slice(0, eq), line.slice(eq + 1)];
++      }),
++  );
++  return { dir, result, outputs };
++}
+ 
+ test('the public workflow starts the gate for the required pull request events and passes named secrets', () => {
+   expect(frontdoor.on.pull_request.types).toEqual(fixture.pull_request_types);
+@@ -61,31 +98,211 @@ test('the leak review runs on public repos only', () => {
+   expect(gate.jobs.gate.env.REPO_PRIVATE).toBe('$' + '{{ github.event.repository.private }}');
+ });
+ 
+-test('the final check waits for every required job and only accepts draft skips', () => {
++test('the verdict check run is published with the reviewer App token', () => {
++  const mint = gate.jobs.gate.steps.find((step) => step.uses?.startsWith('actions/create-github-app-token@'));
++  expect(mint.with).toEqual({
++    'client-id': '${{ vars.GH_APP_CLAUDE_BOT_ID }}',
++    'private-key': '${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}',
++    'permission-checks': 'write',
++  });
++  expect(stepById('publish').env.GH_TOKEN).toBe('${{ steps.check-token.outputs.token }}');
++  expect(stepById('publish').env.CHECK_APP_SLUG).toBe('${{ steps.check-token.outputs.app-slug }}');
++});
++
++test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFERRED', () => {
+   const final = gate.jobs.gate;
+   expect(final.needs).toEqual(fixture.required_jobs);
+   expect(final.if).toBe('always()');
+-  expect(final.steps[0].run).toContain('copilot');
+-  const script = final.steps[1].run;
+-  expect(script).toContain('failure|cancelled)');
+-  expect(script).toContain('skipped)');
+-  expect(script).toContain('IS_DRAFT');
+-  expect(script).toContain('unexpected conclusion');
++  expect(stepById('copilot').run).toContain('copilot');
++  expect(final.env.MODEL_LANES).toBe(fixture.model_lanes);
++  const lanes = [...new Set(fixture.review_jobs.map(({ model }) => model))].join(', ');
++  expect(lanes).toBe(fixture.model_lanes);
++  expect(stepById('publish').env.RUBRIC_LINE).toBe(fixture.rubric_line);
+ 
++  const conclusions = { MERGE: 'success', CHANGES: 'failure', DEFERRED: 'neutral' };
+   for (const scenario of fixture.gate_scenarios) {
+     const [gitleaks, leak, security, semantic] = scenario.results;
+-    const result = spawnSync('/bin/bash', ['-c', script], {
+-      encoding: 'utf8',
+-      env: {
+-        IS_DRAFT: String(scenario.draft),
+-        REPO_PRIVATE: String(scenario.private ?? false),
+-        ROUTER_AVAILABLE: 'true',
+-        GITLEAKS_RESULT: gitleaks,
+-        LEAK_RESULT: leak,
+-        SECURITY_RESULT: security,
+-        SEMANTIC_RESULT: semantic,
+-      },
++    const { dir, result, outputs } = runGateStep('verdict', {
++      IS_DRAFT: String(scenario.draft),
++      REPO_PRIVATE: String(scenario.private ?? false),
++      ROUTER_AVAILABLE: 'true',
++      GITLEAKS_RESULT: gitleaks,
++      LEAK_RESULT: leak,
++      SECURITY_RESULT: security,
++      SEMANTIC_RESULT: semantic,
++      COPILOT_OUTCOME: 'success',
++      COPILOT_FAILURES: scenario.copilot_failures ?? '0',
++      AUTHOR_FAMILY: scenario.author_family ?? 'human',
++      REVIEWER_FAMILY: scenario.reviewer_family ?? 'claude',
++      MODEL_LANES: fixture.model_lanes,
++      HEAD_SHA: 'b'.repeat(40),
+     });
+-    expect(result.status, scenario.name).toBe(scenario.exit_code);
++    try {
++      expect(result.exitCode, `${scenario.name}: ${result.stderr.toString()}`).toBe(0);
++      expect(outputs.verdict, scenario.name).toBe(scenario.verdict);
++      expect(outputs.conclusion, scenario.name).toBe(conclusions[scenario.verdict]);
++      if (scenario.reason_contains) {
++        expect(outputs.reason, scenario.name).toContain(scenario.reason_contains);
++      }
++      const contract = JSON.parse(readFileSync(join(dir, 'ai-merge-gate.verdict.json'), 'utf8'));
++      expect(contract, scenario.name).toEqual({
++        model: fixture.model_lanes,
++        author_family: scenario.author_family ?? 'human',
++        head: 'b'.repeat(40),
++        verdict: scenario.verdict,
++      });
++
++      const enforce = Bun.spawnSync(['/bin/bash', '-c', stepById('enforce').run], {
++        cwd: dir,
++        env: { ...process.env, GATE_VERDICT: outputs.verdict, GATE_REASON: outputs.reason },
++      });
++      expect(enforce.exitCode, scenario.name).toBe(scenario.exit_code);
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
+   }
+ });
++
++test('the author family comes from the bot identity, the Assisted-by trailer, or human', () => {
++  const runAuthorFamily = ({ author, type, slug, message }) => {
++    const dir = mkdtempSync(join(tmpdir(), 'merge-gate-family-'));
++    try {
++      const bin = join(dir, 'bin');
++      mkdirSync(bin);
++      if (message !== undefined) {
++        const messageFile = join(dir, 'commit-message');
++        writeFileSync(messageFile, message);
++        writeFileSync(join(bin, 'gh'), '#!/bin/sh\ncat "$GH_MESSAGE_FILE"\n');
++        chmodSync(join(bin, 'gh'), 0o755);
++      }
++      // The step names the repository through the github.repository expression,
++      // which the runner resolves before bash runs; the test resolves it here.
++      const script = stepById('author-family').run.replace('${{ github.repository }}', 'owner/repo');
++      const output = join(dir, 'step-output');
++      writeFileSync(output, '');
++      const result = Bun.spawnSync(['/bin/bash', '-c', script], {
++        cwd: dir,
++        env: {
++          ...process.env,
++          GITHUB_OUTPUT: output,
++          PR_AUTHOR: author,
++          PR_AUTHOR_TYPE: type,
++          REVIEWER_SLUG: slug,
++          HEAD_SHA: 'b'.repeat(40),
++          GH_MESSAGE_FILE: message === undefined ? '' : join(dir, 'commit-message'),
++          PATH: `${bin}:${process.env.PATH}`,
++        },
++      });
++      const outputs = Object.fromEntries(
++        readFileSync(output, 'utf8')
++          .trim()
++          .split('\n')
++          .filter(Boolean)
++          .map((line) => {
++            const eq = line.indexOf('=');
++            return [line.slice(0, eq), line.slice(eq + 1)];
++          }),
++      );
++      expect(result.exitCode, result.stderr.toString()).toBe(0);
++      return outputs;
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  };
++
++  expect(
++    runAuthorFamily({ author: 'claude[bot]', type: 'Bot', slug: 'jpe-claude-bot' }),
++  ).toEqual({ author_family: 'claude', reviewer_family: 'claude' });
++
++  expect(
++    runAuthorFamily({
++      author: 'octocat',
++      type: 'User',
++      slug: 'jpe-claude-bot',
++      message: 'feat: add a helper\n\nAssisted-by: Claude Sonnet 4.5\n',
++    }).author_family,
++  ).toBe('claude');
++
++  expect(
++    runAuthorFamily({ author: 'octocat', type: 'User', message: 'feat: done by hand\n' })
++      .author_family,
++  ).toBe('human');
++
++  expect(
++    runAuthorFamily({ author: '', type: '', slug: 'mycorp-runner' }).reviewer_family,
++  ).toBe('mycorp-runner');
++});
++
++test('the published summary prepends the rubric line and carries the four contract lines', () => {
++  const capture = (reason, token = 'app-token') => {
++    const dir = mkdtempSync(join(tmpdir(), 'merge-gate-publish-'));
++    try {
++      const helperDir = join(dir, '.ai-workflows', '.github', 'scripts', 'shared');
++      mkdirSync(helperDir, { recursive: true });
++      const captured = join(dir, 'captured');
++      const summaryArg = join(dir, 'captured-summary');
++      writeFileSync(
++        join(helperDir, 'check-run.sh'),
++        [
++          '#!/bin/sh',
++          `printf '%s\\n' "$1" "$2" "$3" "$4" > '${captured}'`,
++          `printf '%s' "$5" > '${summaryArg}'`,
++          '',
++        ].join('\n'),
++      );
++      chmodSync(join(helperDir, 'check-run.sh'), 0o755);
++      writeFileSync(join(dir, 'ai-merge-gate.verdict.json'), JSON.stringify({
++        model: fixture.model_lanes,
++        author_family: 'human',
++        head: 'b'.repeat(40),
++        verdict: 'MERGE',
++      }));
++      const result = Bun.spawnSync(['/bin/bash', '-c', stepById('publish').run], {
++        cwd: dir,
++        env: {
++          ...process.env,
++          GH_TOKEN: token,
++          CHECK_APP_SLUG: 'jpe-claude-bot',
++          CHECK_HEAD_SHA: 'b'.repeat(40),
++          GATE_CONCLUSION: 'success',
++          GATE_REASON: reason,
++          VERDICT_FILE: 'ai-merge-gate.verdict.json',
++          SUMMARY_FILE: 'ai-merge-gate.summary.md',
++          RUBRIC_LINE: fixture.rubric_line,
++        },
++      });
++      const invoked = existsSync(captured) ? readFileSync(captured, 'utf8').trim().split('\n') : null;
++      const summary = existsSync(summaryArg) ? readFileSync(summaryArg, 'utf8') : null;
++      return { result, invoked, summary };
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  };
++
++  const published = capture('');
++  expect(published.result.exitCode, published.result.stderr.toString()).toBe(0);
++  expect(published.invoked).toEqual(['upsert', 'AI Merge Gate', 'success', 'AI Merge Gate']);
++  // $(cat ...) strips the trailing newline, so the API receives the summary
++  // without one.
++  expect(published.summary).toBe(
++    [
++      fixture.rubric_line,
++      '',
++      `model: ${fixture.model_lanes}`,
++      'author_family: human',
++      `head: ${'b'.repeat(40)}`,
++      'VERDICT: MERGE',
++    ].join('\n'),
++  );
++
++  const refused = capture('the reviewer family (claude) matches the author family: no same-family review');
++  expect(refused.result.exitCode).toBe(0);
++  expect(refused.summary?.trimEnd().split('\n').at(-1)).toBe(
++    'reason: the reviewer family (claude) matches the author family: no same-family review',
++  );
++
++  const untokened = capture('', '');
++  expect(untokened.result.exitCode).toBe(0);
++  expect(untokened.result.stdout.toString()).toContain('cannot publish the verdict check run');
++  expect(untokened.invoked).toBeNull();
++});
+diff --git a/tests/fixtures/ai-merge-gate.json b/tests/fixtures/ai-merge-gate.json
+index 65c8088..ccb4bf0 100644
+--- a/tests/fixtures/ai-merge-gate.json
++++ b/tests/fixtures/ai-merge-gate.json
+@@ -7,70 +7,117 @@
+   ],
+   "required_jobs": ["gitleaks", "router", "leak", "security", "semantic"],
+   "router_secrets": ["LLM_ROUTER_BASE_URL", "LLM_ROUTER_API_KEY"],
++  "rubric_line": "A change that adds or edits a script or custom unit where a native or maintained way exists is CHANGES.",
++  "model_lanes": "standard, critical",
+   "gate_scenarios": [
+     {
+       "name": "all success",
+       "draft": false,
+       "results": ["success", "success", "success", "success"],
+-      "exit_code": 0
++      "exit_code": 0,
++      "verdict": "MERGE"
+     },
+     {
+       "name": "failure",
+       "draft": false,
+       "results": ["failure", "success", "success", "success"],
+-      "exit_code": 1
++      "exit_code": 1,
++      "verdict": "CHANGES"
+     },
+     {
+       "name": "cancellation",
+       "draft": false,
+       "results": ["success", "cancelled", "success", "success"],
+-      "exit_code": 1
++      "exit_code": 1,
++      "verdict": "CHANGES"
+     },
+     {
+       "name": "draft skip",
+       "draft": true,
+       "results": ["success", "skipped", "success", "success"],
+-      "exit_code": 0
++      "exit_code": 0,
++      "verdict": "DEFERRED"
+     },
+     {
+       "name": "non-draft skip",
+       "draft": false,
+       "results": ["success", "skipped", "success", "success"],
+-      "exit_code": 1
++      "exit_code": 1,
++      "verdict": "CHANGES"
+     },
+     {
+       "name": "unknown result",
+       "draft": false,
+       "results": ["action_required", "success", "success", "success"],
+-      "exit_code": 1
++      "exit_code": 1,
++      "verdict": "CHANGES"
+     },
+     {
+       "name": "private repo leak skip",
+       "draft": false,
+       "private": true,
+       "results": ["success", "skipped", "success", "success"],
+-      "exit_code": 0
++      "exit_code": 0,
++      "verdict": "MERGE"
+     },
+     {
+       "name": "private repo leak failure",
+       "draft": false,
+       "private": true,
+       "results": ["success", "failure", "success", "success"],
+-      "exit_code": 1
++      "exit_code": 1,
++      "verdict": "CHANGES"
+     },
+     {
+       "name": "private repo security skip",
+       "draft": false,
+       "private": true,
+       "results": ["success", "success", "skipped", "success"],
+-      "exit_code": 1
++      "exit_code": 1,
++      "verdict": "CHANGES"
+     },
+     {
+       "name": "private repo gitleaks skip",
+       "draft": false,
+       "private": true,
+       "results": ["skipped", "skipped", "success", "success"],
+-      "exit_code": 1
++      "exit_code": 1,
++      "verdict": "CHANGES"
++    },
++    {
++      "name": "same-family review refused",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "author_family": "claude",
++      "reviewer_family": "claude",
++      "reason_contains": "same-family"
++    },
++    {
++      "name": "cross-family review passes",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "exit_code": 0,
++      "verdict": "MERGE",
++      "author_family": "codex",
++      "reviewer_family": "claude"
++    },
++    {
++      "name": "failed Copilot agent checks",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "copilot_failures": "2"
++    },
++    {
++      "name": "unreadable Copilot agent checks",
++      "draft": false,
++      "results": ["success", "success", "success", "success"],
++      "exit_code": 1,
++      "verdict": "CHANGES",
++      "copilot_failures": "unreadable"
+     }
+   ]
+ }
+diff --git a/tests/policy-gate-verdict.test.js b/tests/policy-gate-verdict.test.js
+index 8d81e0d..bae50e5 100644
+--- a/tests/policy-gate-verdict.test.js
++++ b/tests/policy-gate-verdict.test.js
+@@ -94,6 +94,14 @@ const makeFinding = (check, result = 'pass', overrides = {}) => ({
+   ...overrides,
+ });
+ 
++const mergeVerdict = (overrides = {}) => JSON.stringify({
++  model: 'standard, critical',
++  author_family: 'human',
++  head: headSha,
++  verdict: 'MERGE',
++  ...overrides,
++});
++
+ const POLICY = ['dry', 'native_first', 'disclosure', 'missing_test', 'token_budget'];
+ const SECURITY = ['auth', 'injection', 'permission_widening', 'unsafe_trigger', 'secret_handling'];
+ const SEMANTIC = ['claim_mismatch', 'omitted_behavior'];
+@@ -116,6 +124,32 @@ test('accepts a leak verdict with no findings, which is a clean review', () => {
+   expect(exitCodeFor('leak', JSON.stringify({ summary: 'clean', findings: [] }))).toBe(0);
+ });
+ 
++test.each(['MERGE', 'CHANGES', 'DEFERRED'])('accepts the merge-gate verdict %s', (verdict) => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ verdict }))).toBe(0);
++});
++
++test('rejects a merge-gate verdict outside the contract enum', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ verdict: 'PASS' }))).toBe(1);
++});
++
++test('rejects a merge-gate verdict whose head is not a full sha', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ head: 'b'.repeat(20) }))).toBe(1);
++});
++
++test('rejects a merge-gate verdict with an empty or multiline model', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ model: '' }))).toBe(1);
++  expect(exitCodeFor('merge-gate', mergeVerdict({ model: 'standard\ncritical' }))).toBe(1);
++});
++
++test('rejects a merge-gate verdict whose family is not a lowercase slug', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ author_family: 'Claude' }))).toBe(1);
++  expect(exitCodeFor('merge-gate', mergeVerdict({ author_family: 'claude bot' }))).toBe(1);
++});
++
++test('rejects a merge-gate verdict with keys outside the contract', () => {
++  expect(exitCodeFor('merge-gate', mergeVerdict({ reason: 'extra' }))).toBe(1);
++});
++
+ test('accepts a leak verdict with several findings in one category', () => {
+   const verdict = {
+     summary: 'two',
