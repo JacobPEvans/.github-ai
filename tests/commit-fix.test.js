@@ -31,6 +31,19 @@ function makeGithub(commit = { oid: 'newoid', url: 'https://x/commit/newoid' }) 
   return { graphql: mock(async () => ({ createCommitOnBranch: { commit } })) };
 }
 
+// The merge-queue check reads pullRequest.mergeQueueEntry before the commit
+// mutation, so the mock dispatches on the query text.
+function makeGithubWithQueue(entry, commit = { oid: 'newoid', url: 'https://x/commit/newoid' }) {
+  return {
+    graphql: mock(async (query) => {
+      if (query.includes('mergeQueueEntry')) {
+        return { repository: { pullRequest: { mergeQueueEntry: entry } } };
+      }
+      return { createCommitOnBranch: { commit } };
+    }),
+  };
+}
+
 // Run the script with cwd pointed at the temp repo, restoring cwd afterwards.
 async function runIn(dir, deps) {
   const prev = process.cwd();
@@ -166,5 +179,51 @@ describe('commit-fix', () => {
 
     expect(core.failures.length).toBe(1);
     expect(github.graphql).not.toHaveBeenCalled();
+  });
+
+  it('skips the push while the PR sits in a merge queue', async () => {
+    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n');
+    process.env.PR_NUMBER = '7';
+    const github = makeGithubWithQueue({ state: 'QUEUED' });
+
+    try {
+      await runIn(dir, { github, context, core });
+    } finally {
+      delete process.env.PR_NUMBER;
+    }
+
+    const queries = github.graphql.mock.calls.map((c) => c[0]);
+    expect(queries.some((q) => q.includes('mergeQueueEntry'))).toBe(true);
+    expect(queries.some((q) => q.includes('createCommitOnBranch'))).toBe(false);
+    expect(core.getOutput('committed')).toBe('false');
+    expect(core.notices.join('\n')).toMatch(/merge queue/);
+  });
+
+  it('pushes when the PR has no merge queue entry', async () => {
+    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n');
+    process.env.PR_NUMBER = '7';
+    const github = makeGithubWithQueue(null);
+
+    try {
+      await runIn(dir, { github, context, core });
+    } finally {
+      delete process.env.PR_NUMBER;
+    }
+
+    const queries = github.graphql.mock.calls.map((c) => c[0]);
+    expect(queries.some((q) => q.includes('mergeQueueEntry'))).toBe(true);
+    expect(queries.some((q) => q.includes('createCommitOnBranch'))).toBe(true);
+    expect(core.getOutput('committed')).toBe('true');
+  });
+
+  it('pushes without a queue check when no PR number is available', async () => {
+    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n');
+    const github = makeGithub();
+
+    await runIn(dir, { github, context, core });
+
+    const queries = github.graphql.mock.calls.map((c) => c[0]);
+    expect(queries.every((q) => q.includes('createCommitOnBranch'))).toBe(true);
+    expect(core.getOutput('committed')).toBe('true');
   });
 });
