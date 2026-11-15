@@ -550,7 +550,7 @@ function runQueueStep({ headRef, response, failures = 0, slug = 'jpe-claude-bot'
       check_runs: [{
         name: 'AI Merge Gate',
         app: { slug: slug },
-        conclusion: 'success',
+        conclusion: verdictLine === 'VERDICT: DEFERRED' ? 'neutral' : 'success',
         output: { title: 'AI Merge Gate', summary },
       }],
     }));
@@ -657,7 +657,7 @@ test('the merge_group job reads the verdict from the pull request head parsed ou
   expect(accepted.posted).toEqual(['upsert', 'AI Merge Gate', 'success', 'AI Merge Gate']);
   expect(accepted.postedSummary).toBe(`pull request #123 (head ${queuedHead}) carries VERDICT: MERGE from the reviewer App jpe-claude-bot`);
 
-  // A deferred entry passes the same way: the verdict line decides.
+  // A deferred entry passes the same way: the gate publishes it as neutral.
   const deferred = runQueueStep({ headRef: queueBranch(456), pullHead: 'd'.repeat(40), verdictLine: 'VERDICT: DEFERRED' });
   expect(deferred.result.exitCode, deferred.result.stderr.toString()).toBe(0);
   expect(deferred.ghCalls[1]).toContain(`commits/${'d'.repeat(40)}/check-runs`);
@@ -710,13 +710,13 @@ test('the merge_group job refuses an entry without an accepted verdict from the 
       },
     },
     {
-      name: 'the deferred verdict published as neutral',
+      name: 'a deferred verdict on a check run that concluded success',
       response: {
         count: 1,
         check_runs: [{
           name: 'AI Merge Gate',
           app: { slug: 'jpe-claude-bot' },
-          conclusion: 'neutral',
+          conclusion: 'success',
           output: { title: 'AI Merge Gate', summary: `model: none\nVERDICT: DEFERRED` },
         }],
       },
