@@ -1,5 +1,5 @@
 const { expect, test } = require('bun:test');
-const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('fs');
+const { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('fs');
 const { tmpdir } = require('os');
 const { join } = require('path');
 
@@ -131,4 +131,121 @@ test('the patch check rejects a tooling path in either operand of a diff header'
   ];
   for (const line of tooling) expect(matches(line), line).toBe(true);
   for (const line of ordinary) expect(matches(line), line).toBe(false);
+});
+
+// --- R08: the responder acts only on a CHANGES verdict, in the shared writer group ---
+
+const gateStep = () => workflow.jobs.respond.steps.find((step) => step.id === 'verdict');
+
+// Runs the real gate step script with a stubbed `gh` (the network call) while keeping the
+// real `jq` filter and the real shell retry/output logic. `sleep` is stubbed so the
+// fail-closed retry path is instant. Requires `jq` on PATH (as `gh` embeds it).
+const runGate = (checkRuns, { ghFails = false } = {}) => {
+  const dir = mkdtempSync(join(tmpdir(), 'verdict-gate-'));
+  try {
+    const bin = join(dir, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const payload = join(dir, 'check-runs.json');
+    writeFileSync(payload, JSON.stringify({ check_runs: checkRuns }));
+    const outputFile = join(dir, 'github-output');
+    writeFileSync(outputFile, '');
+    const gh = join(bin, 'gh');
+    writeFileSync(
+      gh,
+      [
+        '#!/usr/bin/env bash',
+        'filter=""',
+        'prev=""',
+        'for arg in "$@"; do',
+        '  if [ "$prev" = "--jq" ]; then filter="$arg"; fi',
+        '  prev="$arg"',
+        'done',
+        'if [ -n "$GH_FAIL" ]; then exit 1; fi',
+        'exec jq -r "$filter" "$PAYLOAD"',
+        '',
+      ].join('\n'),
+    );
+    chmodSync(gh, 0o755);
+    const sleep = join(bin, 'sleep');
+    writeFileSync(sleep, '#!/usr/bin/env bash\nexit 0\n');
+    chmodSync(sleep, 0o755);
+    const script = gateStep().run.replaceAll('${{ github.repository }}', 'owner/repo');
+    const result = Bun.spawnSync(['bash', '-e', '-o', 'pipefail', '-c', script], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        HEAD_SHA: '0123456789abcdef0123456789abcdef01234567',
+        GITHUB_OUTPUT: outputFile,
+        PAYLOAD: payload,
+        GH_FAIL: ghFails ? '1' : '',
+      },
+    });
+    const output = readFileSync(outputFile, 'utf8');
+    const changes = (output.match(/^changes=(.*)$/m) || [])[1];
+    return { exitCode: result.exitCode, changes };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+test('the responder shares the pr-writer concurrency group and never cancels in progress', () => {
+  expect(workflow.concurrency.group).toBe(
+    'pr-writer-${{ github.repository }}-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}',
+  );
+  expect(workflow.concurrency['cancel-in-progress']).toBe(false);
+});
+
+test('the verdict gate reads the AI Merge Gate check-run on the head before any checkout or agent work', () => {
+  const respond = workflow.jobs.respond;
+  const gate = respond.steps.findIndex((step) => step.id === 'verdict');
+  const resolve = respond.steps.findIndex((step) => step.id === 'pr');
+  expect(gate).toBeGreaterThanOrEqual(0);
+  // Only the dispatch-only head resolution (which supplies the head SHA) may precede it.
+  expect(gate).toBe(resolve + 1);
+  expect(gate).toBeLessThan(stepIndex(respond, 'Checkout PR head'));
+  expect(gate).toBeLessThan(stepIndex(respond, 'Run AI agent'));
+  const step = respond.steps[gate];
+  expect(step.env.HEAD_SHA).toBe('${{ github.event.pull_request.head.sha || steps.pr.outputs.sha }}');
+  expect(step.run).toContain('/check-runs');
+  expect(step.run).toContain('AI Merge Gate');
+  expect(step.run).toContain('VERDICT: CHANGES');
+  expect(step.run).toContain('changes=');
+});
+
+test('the agent, its handoff, and publish act only on a CHANGES verdict', () => {
+  const respond = workflow.jobs.respond;
+  expect(respond.outputs.changes).toBe('${{ steps.verdict.outputs.changes }}');
+  for (const name of ['Run AI agent', 'Collect agent patch', 'Upload responder handoff']) {
+    const step = respond.steps.find((s) => s.name === name);
+    expect(step.if, name).toBe("steps.verdict.outputs.changes == 'true'");
+  }
+  expect(workflow.jobs.publish.if).toContain("needs.respond.outputs.changes == 'true'");
+  expect(workflow.jobs.publish.if).toContain('!inputs.dry_run');
+});
+
+test('the fork and loop guards on the agent job are preserved', () => {
+  const cond = workflow.jobs.respond.if;
+  expect(cond).toContain("needs.check-daily-limit.outputs.should_run == 'true'");
+  expect(cond).toContain('github.event.pull_request.head.repo.full_name == github.repository');
+  expect(cond).toContain("github.event.sender.login != 'jacobpevans-claude[bot]'");
+  expect(cond).toContain("github.event.sender.login != 'claude[bot]'");
+  expect(cond).toContain("github.event.sender.login != 'github-actions[bot]'");
+});
+
+test('the verdict gate sets changes=true only for a CHANGES summary on the AI Merge Gate check-run', () => {
+  const checkRun = (name, summary) => ({ name, output: { summary } });
+  expect(runGate([checkRun('AI Merge Gate', 'VERDICT: CHANGES')]).changes).toBe('true');
+  expect(runGate([checkRun('AI Merge Gate', 'Review done.\nVERDICT: CHANGES\nSee threads.')]).changes).toBe('true');
+  expect(runGate([checkRun('AI Merge Gate', 'VERDICT: MERGE')]).changes).toBe('false');
+  expect(runGate([checkRun('AI Merge Gate', 'VERDICT: DEFERRED')]).changes).toBe('false');
+  expect(runGate([checkRun('AI Merge Gate', null)]).changes).toBe('false');
+  expect(runGate([checkRun('some other check', 'VERDICT: CHANGES')]).changes).toBe('false');
+  expect(runGate([]).changes).toBe('false');
+});
+
+test('the verdict gate fails closed when the check-runs API is unreadable', () => {
+  const result = runGate([], { ghFails: true });
+  expect(result.exitCode).toBe(0);
+  expect(result.changes).toBe('false');
 });

@@ -86,7 +86,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: pr-review-responder-${{ github.repository }}-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  group: pr-writer-${{ github.repository }}-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
   cancel-in-progress: false  # Never cancel — queue instead to avoid wasting AI tokens
 
 jobs:
@@ -146,6 +146,7 @@ jobs:
       head_sha: ${{ github.event.pull_request.head.sha || steps.pr.outputs.sha }}
       head_ref: ${{ github.event.pull_request.head.ref || steps.pr.outputs.ref }}
       gateway_class: ${{ steps.agent.outputs.gateway_class }}
+      changes: ${{ steps.verdict.outputs.changes }}
     steps:
       # workflow_dispatch has no PR event context — resolve the head SHA (a hex OID,
       # no injection surface) from the trusted integer pr_number input. Review-event
@@ -160,6 +161,35 @@ jobs:
           echo "number=$INPUT_PR" >> "$GITHUB_OUTPUT"
           gh pr view "$INPUT_PR" --repo "$GITHUB_REPOSITORY" --json headRefOid,headRefName \
             --jq '"sha=\(.headRefOid)\nref=\(.headRefName)"' >> "$GITHUB_OUTPUT"
+
+      # Act only on a CHANGES verdict: read the latest "AI Merge Gate" check run on
+      # the head and set changes=true only when its summary holds "VERDICT: CHANGES".
+      # No check run, another verdict or an unreadable API: the responder does not act.
+      # The job asks for no checks scope, because a caller that does not grant it
+      # would fail at startup; a public repository's check runs are readable
+      # without it.
+      - name: Require a CHANGES verdict
+        id: verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || steps.pr.outputs.sha }}
+        run: |
+          CHANGES=unreadable
+          for i in 1 2 3; do
+            CHANGES=$(gh api -X GET "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs" \
+              -f check_name="AI Merge Gate" -f filter=latest \
+              --jq '[.check_runs[] | select(.name == "AI Merge Gate") | .output.summary // "" | contains("VERDICT: CHANGES")] | any') && break
+            CHANGES=unreadable
+            sleep $((i * 5))
+          done
+          if [ "$CHANGES" = "unreadable" ]; then
+            echo "::warning::could not read the AI Merge Gate check run on $HEAD_SHA; the responder does not act"
+          fi
+          if [ "$CHANGES" = "true" ]; then
+            echo "changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changes=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Checkout PR head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -225,6 +255,7 @@ jobs:
       # no App key or App id: the publish and gateway-report jobs mint the App token.
       - name: Run AI agent
         id: agent
+        if: steps.verdict.outputs.changes == 'true'
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
           agent: ${{ inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude' }}
@@ -243,12 +274,14 @@ jobs:
           allowed_bots: "gemini-code-assist,copilot-pull-request-reviewer,github-actions"
 
       - name: Collect agent patch
+        if: steps.verdict.outputs.changes == 'true'
         run: |
           git add -N -A
           git reset -q -- .ai-workflows .review-threads.json .review-actions.json
           git diff --binary HEAD > agent.patch
 
       - name: Upload responder handoff
+        if: steps.verdict.outputs.changes == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: review-responder-${{ github.run_id }}
@@ -262,7 +295,7 @@ jobs:
   publish:
     name: Publish review response
     needs: respond
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && needs.respond.outputs.changes == 'true' }}
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
