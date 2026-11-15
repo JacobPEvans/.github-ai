@@ -20,6 +20,17 @@
 # in the merge-gate mode of .github/scripts/policy-gate/validate-verdict.sh,
 # with the model-to-family map in model-families.json next to it.
 #
+# Lane rule: before merge, _lane.yml classifies the pull request. In the
+# standard and hot tiers the tiny and land-first lanes skip the model
+# reviews and publish DEFERRED, and the bot lane never reviews and stays
+# DEFERRED; the legacy tier, an empty lane, and the normal and guarded
+# lanes keep today's full reviews. The secret scan runs in every lane.
+# A closed event acts only when the pull request merged with the label
+# checks:deferred: that post-merge run ignores the lane, runs every
+# review, and publishes the real verdict on the pull request head for
+# the auto-revert workflow. The summary also prints lane: <lane or none>
+# after the head: line.
+#
 # A merge_group run carries no reviews of its own: one mechanical job reads
 # the queue entry's pull request head and reports the required check name on
 # the queue commit, passing only when the reviewer App's verdict check run
@@ -65,6 +76,9 @@ on:
       GITLEAKS_LICENSE_KEY:
         description: Org gitleaks-action license key; the scan fails closed without it.
         required: false
+      GH_APP_PRIVATE_KEY:
+        description: lets the lane classifier grant the fast lanes; without it reviews run before merge
+        required: false
 
 concurrency:
   group: ai-merge-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
@@ -76,9 +90,19 @@ permissions:
   pull-requests: write
 
 jobs:
+  lane:
+    name: Lane classifier
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    uses: JacobPEvans/.github/.github/workflows/_lane.yml@topic/merge-flow-r2 # shortcut: follows the topic branch until _lane.yml is released under v1, then pin v1
+    permissions:
+      contents: read
+      pull-requests: read
+    secrets:
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
   gitleaks:
     name: Gitleaks secret scan
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')))
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
@@ -100,7 +124,7 @@ jobs:
 
   router:
     name: Review router availability
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')))
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 2
     permissions: {}
@@ -122,8 +146,8 @@ jobs:
   # Public repos only. The gitleaks job still scans every repo for secrets.
   leak:
     name: Leak review
-    needs: router
-    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true' && !github.event.repository.private
+    needs: [router, lane]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) && !github.event.repository.private }}
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -143,8 +167,8 @@ jobs:
 
   security:
     name: Security review
-    needs: router
-    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true'
+    needs: [router, lane]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) }}
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -162,8 +186,8 @@ jobs:
 
   semantic:
     name: Semantic review
-    needs: router
-    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true'
+    needs: [router, lane]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) }}
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -182,8 +206,8 @@ jobs:
   # Advisory: posts its comment and check, never fails, and the final check does not wait for it.
   code:
     name: Code review
-    needs: router
-    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true'
+    needs: [router, lane]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred'))) && needs.router.outputs.available == 'true' && ((github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')) || (needs.lane.outputs.tier != 'standard' && needs.lane.outputs.tier != 'hot') || (needs.lane.outputs.lane != 'tiny' && needs.lane.outputs.lane != 'land-first' && needs.lane.outputs.lane != 'bot')) }}
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -201,8 +225,8 @@ jobs:
 
   gate:
     name: AI Merge Gate
-    if: always() && github.event_name == 'pull_request'
-    needs: [gitleaks, router, leak, security, semantic]
+    if: always() && github.event_name == 'pull_request' && (github.event.action != 'closed' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')))
+    needs: [gitleaks, router, leak, security, semantic, lane]
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
@@ -212,6 +236,9 @@ jobs:
       IS_DRAFT: ${{ github.event.pull_request.draft }}
       REPO_PRIVATE: ${{ github.event.repository.private }}
       ROUTER_AVAILABLE: ${{ needs.router.outputs.available }}
+      LANE: ${{ needs.lane.outputs.lane }}
+      TIER: ${{ needs.lane.outputs.tier }}
+      POST_MERGE: ${{ github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred') && 'true' || 'false' }}
       GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
       LEAK_RESULT: ${{ needs.leak.result }}
       SECURITY_RESULT: ${{ needs.security.result }}
@@ -328,7 +355,11 @@ jobs:
           # failed or was unreadable, or when the reviewer family is unknown
           # or shared with the author family. DEFERRED when the gate otherwise
           # passed with reviews skipped on a draft pull request or without a
-          # router. MERGE only when every review ran and passed.
+          # router, or with reviews skipped before merge in the tiny,
+          # land-first or bot lane of a standard/hot-tier repository (the
+          # secret scan is never excused by the lane). MERGE only when every
+          # review ran and passed. A post-merge run ignores the lane and the
+          # draft flag: a merged pull request is never a draft.
           leak_result="$LEAK_RESULT"
           if [[ "$REPO_PRIVATE" == "true" && "$leak_result" == "skipped" ]]; then
             leak_result=success
@@ -343,12 +374,26 @@ jobs:
             verdict=CHANGES
             reason="$COPILOT_FAILURES Copilot agent check(s) failed"
           fi
-          for result in "$GITLEAKS_RESULT" "$leak_result" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
+          # The lane only excuses a skipped review before merge, and only in
+          # the standard and hot tiers; legacy and an unclassified pull
+          # request keep the full rule. After merge the reviews always run.
+          is_draft="$IS_DRAFT"
+          lane_deferred=false
+          if [[ "$POST_MERGE" == "true" ]]; then
+            is_draft=false
+          elif [[ ( "$TIER" == "standard" || "$TIER" == "hot" ) && ( "$LANE" == "tiny" || "$LANE" == "land-first" || "$LANE" == "bot" ) ]]; then
+            lane_deferred=true
+          fi
+          for entry in "gitleaks|$GITLEAKS_RESULT" "review|$leak_result" "review|$SECURITY_RESULT" "review|$SEMANTIC_RESULT"; do
+            kind="${entry%%|*}"
+            result="${entry#*|}"
             case "$result" in
               success)
                 ;;
               skipped)
-                if [[ "$IS_DRAFT" != "true" && "$ROUTER_AVAILABLE" == "true" ]]; then
+                if [[ "$kind" == "review" && "$lane_deferred" == true ]]; then
+                  deferred=true
+                elif [[ "$is_draft" != "true" && "$ROUTER_AVAILABLE" == "true" ]]; then
                   verdict=CHANGES
                   reason="${reason:-a required scan or review was skipped for a non-draft pull request}"
                 else
@@ -444,6 +489,7 @@ jobs:
             printf 'model: %s\n' "$(jq -r '.model' "$VERDICT_FILE")"
             printf 'author_family: %s\n' "$(jq -r '.author_family' "$VERDICT_FILE")"
             printf 'head: %s\n' "$(jq -r '.head' "$VERDICT_FILE")"
+            printf 'lane: %s\n' "${LANE:-none}"
             # On a refusal the reason is the last summary line before VERDICT.
             if [ -n "$GATE_REASON" ]; then
               printf 'reason: %s\n' "$GATE_REASON"

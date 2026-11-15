@@ -21,6 +21,13 @@ const policy = workflow('policy-gate.yml');
 const stepById = (id) => gate.jobs.gate.steps.find((step) => step.id === id);
 const stepByName = (name) => gate.jobs.gate.steps.find((step) => step.name === name);
 
+// The post-merge run is a closed pull_request event that merged with the
+// checks:deferred label. GitHub Actions has no shared expression variables,
+// so the workflow repeats this clause in every pull_request job; the tests
+// pin the same text here.
+const POST_MERGE_CLAUSE = "github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'checks:deferred')";
+const PR_ACT_CLAUSE = `github.event_name == 'pull_request' && (github.event.action != 'closed' || (${POST_MERGE_CLAUSE}))`;
+
 const readOutputs = (file) =>
   Object.fromEntries(
     readFileSync(file, 'utf8')
@@ -54,7 +61,10 @@ function runGateStep(stepId, dir, env) {
   writeFileSync(output, '');
   const result = Bun.spawnSync(['/bin/bash', '-c', stepById(stepId).run], {
     cwd: dir,
-    env: { ...process.env, GITHUB_OUTPUT: output, ...env },
+    // The lane classifier is skipped on the post-merge run, so its outputs
+    // are empty there; default the lane env to the unclassified, pre-merge
+    // case and let each scenario override it.
+    env: { ...process.env, GITHUB_OUTPUT: output, LANE: '', TIER: '', POST_MERGE: 'false', ...env },
   });
   return { result, outputs: readOutputs(output) };
 }
@@ -96,6 +106,58 @@ test('the reusable workflow exposes router and check credentials to its caller',
   expect(fixture.router_secrets.every((name) => call.secrets[name].required === false)).toBe(true);
   expect(call.secrets.NTFY_BASE_URL.required).toBe(false);
   expect(call.secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY.required).toBe(false);
+});
+
+test('the lane job classifies non-closed pull requests with read permissions and the optional App key', () => {
+  const lane = gate.jobs.lane;
+  expect(lane.uses).toBe('JacobPEvans/.github/.github/workflows/_lane.yml@topic/merge-flow-r2');
+  expect(lane.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' });
+  expect(lane.secrets).toEqual({ GH_APP_PRIVATE_KEY: '${{ secrets.GH_APP_PRIVATE_KEY }}' });
+  expect(lane.if).toBe("github.event_name == 'pull_request' && github.event.action != 'closed'");
+  // The classifier never runs on the post-merge (closed) event.
+  expect(lane.if).not.toContain(POST_MERGE_CLAUSE);
+  const secret = gate.on.workflow_call.secrets.GH_APP_PRIVATE_KEY;
+  expect(secret.required).toBe(false);
+  expect(secret.description).toContain('fast lanes');
+  const text = readFileSync(join('.github', 'workflows', '_ai-merge-gate.yml'), 'utf8');
+  expect(text).toContain('@topic/merge-flow-r2 # shortcut: follows the topic branch until _lane.yml is released under v1, then pin v1');
+});
+
+test('every pull_request job acts only on non-closed events or the post-merge run', () => {
+  for (const job of ['gitleaks', 'router', 'leak', 'security', 'semantic', 'code', 'gate']) {
+    expect(gate.jobs[job].if, job).toContain(PR_ACT_CLAUSE);
+    expect(gate.jobs[job].if, job).toContain(POST_MERGE_CLAUSE);
+  }
+  expect(gate.jobs.gitleaks.if).toBe(PR_ACT_CLAUSE);
+  expect(gate.jobs.router.if).toBe(PR_ACT_CLAUSE);
+  expect(gate.jobs.gate.if).toBe(`always() && ${PR_ACT_CLAUSE}`);
+});
+
+test('the review jobs need the router and lane and skip only modern-tier fast lanes before merge', () => {
+  for (const job of ['leak', 'security', 'semantic', 'code']) {
+    const review = gate.jobs[job];
+    expect(review.needs, job).toEqual(['router', 'lane']);
+    // A skipped or failed needed job skips the review unless the condition
+    // starts with a status function.
+    expect(review.if.startsWith('${{ !cancelled() && '), job).toBe(true);
+    expect(review.if, job).toContain("needs.router.outputs.available == 'true'");
+    expect(review.if, job).toContain(`(${POST_MERGE_CLAUSE}) ||`);
+    expect(review.if, job).toContain("needs.lane.outputs.tier != 'standard'");
+    expect(review.if, job).toContain("needs.lane.outputs.tier != 'hot'");
+    expect(review.if, job).toContain("needs.lane.outputs.lane != 'tiny'");
+    expect(review.if, job).toContain("needs.lane.outputs.lane != 'land-first'");
+    expect(review.if, job).toContain("needs.lane.outputs.lane != 'bot'");
+  }
+  expect(gate.jobs.code.if).toBe(gate.jobs.semantic.if);
+  expect(gate.jobs.leak.if).toContain('!github.event.repository.private');
+});
+
+test('the gate needs the lane and passes LANE, TIER and POST_MERGE to the verdict step', () => {
+  const final = gate.jobs.gate;
+  expect(final.needs).toContain('lane');
+  expect(final.env.LANE).toBe('${{ needs.lane.outputs.lane }}');
+  expect(final.env.TIER).toBe('${{ needs.lane.outputs.tier }}');
+  expect(final.env.POST_MERGE).toBe('${{ ' + POST_MERGE_CLAUSE + " && 'true' || 'false' }}");
 });
 
 test('the three policy reviews use dogfood rubrics, models, and blocking mode', () => {
@@ -218,10 +280,10 @@ test('the verdict check run is published with the reviewer App token', () => {
 
 test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFERRED', () => {
   const final = gate.jobs.gate;
-  expect(final.needs).toEqual(fixture.required_jobs);
+  expect(final.needs).toEqual([...fixture.required_jobs, 'lane']);
   // always() keeps the aggregation past failed needs; the pull_request guard
   // keeps the aggregation off merge_group runs, which the merge-group job owns.
-  expect(final.if).toBe("always() && github.event_name == 'pull_request'");
+  expect(final.if).toBe(`always() && ${PR_ACT_CLAUSE}`);
   expect(stepById('copilot').run).toContain('copilot');
 
   const conclusions = { MERGE: 'success', CHANGES: 'failure', DEFERRED: 'neutral' };
@@ -269,6 +331,78 @@ test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFER
       });
       expect(enforce.exitCode, scenario.name).toBe(scenario.exit_code);
     });
+  }
+});
+
+// The lane-aware verdict: a skipped review is excused (DEFERRED) only before
+// merge, only in the standard/hot tiers, and only for the tiny, land-first
+// and bot lanes. The secret scan is never excused, and the post-merge run
+// ignores both the lane and the draft flag.
+const verdictBaseEnv = {
+  IS_DRAFT: 'false',
+  REPO_PRIVATE: 'false',
+  ROUTER_AVAILABLE: 'true',
+  GITLEAKS_RESULT: 'success',
+  LEAK_RESULT: 'skipped',
+  SECURITY_RESULT: 'skipped',
+  SEMANTIC_RESULT: 'skipped',
+  LEAK_MODEL: '',
+  SECURITY_MODEL: '',
+  SEMANTIC_MODEL: '',
+  LEAK_STATUS: '',
+  SECURITY_STATUS: '',
+  SEMANTIC_STATUS: '',
+  COPILOT_OUTCOME: 'success',
+  COPILOT_FAILURES: '0',
+  AUTHOR_FAMILY: 'human',
+  HEAD_SHA: 'b'.repeat(40),
+};
+const conclusionFor = { MERGE: 'success', CHANGES: 'failure', DEFERRED: 'neutral' };
+function runVerdict(overrides) {
+  return withGateWorkspace((dir) => {
+    const { result, outputs } = runGateStep('verdict', dir, { ...verdictBaseEnv, ...overrides });
+    const contract = JSON.parse(readFileSync(join(dir, 'ai-merge-gate.verdict.json'), 'utf8'));
+    return { result, outputs, contract };
+  });
+}
+
+test('the verdict defers skipped reviews only for modern-tier fast lanes before merge', () => {
+  const cases = [
+    { name: 'tiny lane defers skipped reviews', env: { LANE: 'tiny', TIER: 'standard' }, verdict: 'DEFERRED' },
+    { name: 'land-first lane defers skipped reviews', env: { LANE: 'land-first', TIER: 'standard' }, verdict: 'DEFERRED' },
+    { name: 'bot lane defers skipped reviews', env: { LANE: 'bot', TIER: 'standard' }, verdict: 'DEFERRED' },
+    { name: 'hot tier also grants the fast lane', env: { LANE: 'tiny', TIER: 'hot' }, verdict: 'DEFERRED' },
+    { name: 'normal lane keeps the full rule', env: { LANE: 'normal', TIER: 'standard' }, verdict: 'CHANGES' },
+    { name: 'guarded lane keeps the full rule', env: { LANE: 'guarded', TIER: 'standard' }, verdict: 'CHANGES' },
+    { name: 'empty lane behaves as normal', env: { LANE: '', TIER: '' }, verdict: 'CHANGES' },
+    { name: 'legacy tier ignores the bot lane', env: { LANE: 'bot', TIER: 'legacy' }, verdict: 'CHANGES' },
+    {
+      name: 'post-merge run ignores the lane and the draft flag',
+      env: { LANE: 'tiny', TIER: 'standard', POST_MERGE: 'true', IS_DRAFT: 'true' },
+      verdict: 'CHANGES',
+    },
+    {
+      name: 'post-merge run with every review passed merges',
+      env: {
+        LANE: 'tiny', TIER: 'standard', POST_MERGE: 'true', IS_DRAFT: 'true',
+        LEAK_RESULT: 'success', SECURITY_RESULT: 'success', SEMANTIC_RESULT: 'success',
+        LEAK_MODEL: 'glm-4.7', SECURITY_MODEL: 'glm-4.7', SEMANTIC_MODEL: 'glm-4.7',
+        LEAK_STATUS: 'ok', SECURITY_STATUS: 'ok', SEMANTIC_STATUS: 'ok',
+      },
+      verdict: 'MERGE',
+    },
+    {
+      name: 'a skipped secret scan is never excused by the lane',
+      env: { LANE: 'tiny', TIER: 'standard', GITLEAKS_RESULT: 'skipped' },
+      verdict: 'CHANGES',
+    },
+  ];
+  for (const { name, env, verdict } of cases) {
+    const { result, outputs, contract } = runVerdict(env);
+    expect(result.exitCode, `${name}: ${result.stderr.toString()}`).toBe(0);
+    expect(outputs.verdict, name).toBe(verdict);
+    expect(outputs.conclusion, name).toBe(conclusionFor[verdict]);
+    expect(contract.verdict, name).toBe(verdict);
   }
 });
 
@@ -501,7 +635,8 @@ test('the published summary prepends the rubric line and carries the four contra
   expect(published.result.exitCode, published.result.stderr.toString()).toBe(0);
   expect(published.invoked).toEqual(['upsert', 'AI Merge Gate', 'success', 'AI Merge Gate']);
   // $(cat ...) strips the trailing newline, so the API receives the summary
-  // without one. Exactly four contract lines, in order, nothing between them.
+  // without one. The four contract lines keep their order; the lane line
+  // follows head and reads "none" when the classifier did not run.
   expect(published.summary).toBe(
     [
       fixture.rubric_line,
@@ -509,6 +644,7 @@ test('the published summary prepends the rubric line and carries the four contra
       'model: claude-opus-5-5',
       'author_family: human',
       `head: ${'b'.repeat(40)}`,
+      'lane: none',
       'VERDICT: MERGE',
     ].join('\n'),
   );
@@ -537,6 +673,50 @@ test('the published summary prepends the rubric line and carries the four contra
   expect(untokened.result.exitCode).toBe(0);
   expect(untokened.result.stdout.toString()).toContain('cannot publish the verdict check run');
   expect(untokened.invoked).toBeNull();
+});
+
+test('the published summary prints the classifier lane after the head line', () => {
+  const capture = (lane) =>
+    withGateWorkspace((dir) => {
+      const helperDir = join(dir, '.ai-workflows', '.github', 'scripts', 'shared');
+      mkdirSync(helperDir, { recursive: true });
+      const summaryArg = join(dir, 'captured-summary');
+      writeFileSync(join(helperDir, 'check-run.sh'), [
+        '#!/bin/sh',
+        `printf '%s' "$5" > '${summaryArg}'`,
+        '',
+      ].join('\n'));
+      chmodSync(join(helperDir, 'check-run.sh'), 0o755);
+      writeFileSync(join(dir, 'ai-merge-gate.verdict.json'), JSON.stringify({
+        model: 'none', author_family: 'human', head: 'b'.repeat(40), verdict: 'DEFERRED',
+      }));
+      const result = Bun.spawnSync(['/bin/bash', '-c', stepById('publish').run], {
+        cwd: dir,
+        env: {
+          ...process.env,
+          GH_TOKEN: 'app-token',
+          CHECK_APP_SLUG: 'jpe-claude-bot',
+          CHECK_HEAD_SHA: 'b'.repeat(40),
+          GATE_CONCLUSION: 'neutral',
+          GATE_REASON: '',
+          VERDICT_FILE: 'ai-merge-gate.verdict.json',
+          SUMMARY_FILE: 'ai-merge-gate.summary.md',
+          RUBRIC_LINE: fixture.rubric_line,
+          LANE: lane,
+        },
+      });
+      return { result, summary: existsSync(summaryArg) ? readFileSync(summaryArg, 'utf8') : null };
+    });
+
+  const tiny = capture('tiny');
+  expect(tiny.result.exitCode, tiny.result.stderr.toString()).toBe(0);
+  const lines = tiny.summary.split('\n');
+  expect(lines[lines.indexOf(`head: ${'b'.repeat(40)}`) + 1]).toBe('lane: tiny');
+  expect(tiny.summary).toContain('VERDICT: DEFERRED');
+
+  const none = capture('');
+  expect(none.result.exitCode, none.result.stderr.toString()).toBe(0);
+  expect(none.summary.split('\n')).toContain('lane: none');
 });
 
 test('the contract shape fails when a summary line is missing', () => {
