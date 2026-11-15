@@ -33,6 +33,14 @@ on:
         type: string
         required: false
         default: ""
+      agent:
+        description: >-
+          Agent that makes the fix. Empty keeps the configured default. Set
+          openhands to run the OpenHands agent on the role named by local_model.
+          Only claude can be combined with local_only.
+        type: string
+        required: false
+        default: ""
       dry_run:
         description: Generate an artifact without publishing a patch or failure reply.
         type: boolean
@@ -80,6 +88,9 @@ on:
         required: false
       OPENBAO_ADDR:
         description: OpenBao service URL used by the local-only OIDC identity.
+        required: false
+      GH_APP_CLAUDE_BOT_ID:
+        description: App identifier, read when the organization variable of the same name is empty.
         required: false
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         required: false
@@ -257,6 +268,13 @@ jobs:
       pull-requests: read
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     steps:
+      # The local-only key flow is Claude-specific.
+      - name: Reject another agent with the local-only key flow
+        if: inputs.agent != '' && inputs.agent != 'claude' && inputs.local_only
+        run: |
+          echo "::error::local_only runs Claude only; leave agent empty or set it to claude"
+          exit 1
+
       - name: Checkout PR branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -308,7 +326,8 @@ jobs:
       - name: Run AI agent
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
-          agent: ${{ inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude' }}
+          agent: ${{ inputs.agent || (inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude') }}
+          openhands_model: ${{ inputs.local_model }}
           prompt: ${{ steps.prompt.outputs.content }}
           claude_model: ${{ inputs.local_only && inputs.local_model || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL }}
           codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}
@@ -381,7 +400,7 @@ jobs:
         id: commit-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
-          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}
           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
           permission-contents: write
 
