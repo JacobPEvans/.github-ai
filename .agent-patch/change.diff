@@ -1,0 +1,489 @@
+diff --git a/.github/workflows/_ai-merge-gate.yml b/.github/workflows/_ai-merge-gate.yml
+index ee99d04..cab5a4a 100644
+--- a/.github/workflows/_ai-merge-gate.yml
++++ b/.github/workflows/_ai-merge-gate.yml
+@@ -19,6 +19,11 @@
+ # in the merge-gate mode of .github/scripts/policy-gate/validate-verdict.sh,
+ # with the model-to-family map in model-families.json next to it.
+ #
++# A merge_group run carries no reviews of its own: one mechanical job reads
++# the queue entry's pull request head and reports the required check name on
++# the queue commit, passing only when the reviewer App's verdict check run
++# is already successful there with VERDICT: MERGE or VERDICT: DEFERRED.
++#
+ # Usage:
+ #   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate.yml@v1
+ name: _ai-merge-gate
+@@ -34,6 +39,14 @@ on:
+         type: string
+         required: false
+         default: ubuntu-24.04
++      reviewer_app_slug:
++        description: >-
++          Slug of the GitHub App whose "AI Merge Gate" verdict check run the
++          merge_group job accepts. Defaults to the reviewer App that
++          publishes the check run.
++        type: string
++        required: false
++        default: jpe-claude-bot
+     secrets:
+       LLM_ROUTER_BASE_URL:
+         description: OpenAI-compatible base URL for the review router.
+@@ -63,6 +76,7 @@ permissions:
+ jobs:
+   gitleaks:
+     name: Gitleaks secret scan
++    if: github.event_name == 'pull_request'
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+     timeout-minutes: 5
+     permissions:
+@@ -84,6 +98,7 @@ jobs:
+ 
+   router:
+     name: Review router availability
++    if: github.event_name == 'pull_request'
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+     timeout-minutes: 2
+     permissions: {}
+@@ -106,7 +121,7 @@ jobs:
+   leak:
+     name: Leak review
+     needs: router
+-    if: needs.router.outputs.available == 'true' && !github.event.repository.private
++    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true' && !github.event.repository.private
+     uses: ./.github/workflows/policy-gate.yml
+     permissions:
+       contents: read
+@@ -127,7 +142,7 @@ jobs:
+   security:
+     name: Security review
+     needs: router
+-    if: needs.router.outputs.available == 'true'
++    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true'
+     uses: ./.github/workflows/policy-gate.yml
+     permissions:
+       contents: read
+@@ -146,7 +161,7 @@ jobs:
+   semantic:
+     name: Semantic review
+     needs: router
+-    if: needs.router.outputs.available == 'true'
++    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true'
+     uses: ./.github/workflows/policy-gate.yml
+     permissions:
+       contents: read
+@@ -164,7 +179,7 @@ jobs:
+ 
+   gate:
+     name: AI Merge Gate
+-    if: always()
++    if: always() && github.event_name == 'pull_request'
+     needs: [gitleaks, router, leak, security, semantic]
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+     timeout-minutes: 5
+@@ -416,3 +431,109 @@ jobs:
+             exit 1
+           fi
+           echo "AI Merge Gate verdict: $GATE_VERDICT"
++
++  # The merge queue's mechanical check: an entry is queued only after its
++  # required checks passed, so the verdict check run already exists on the
++  # pull request head. This job re-reads it and reports the same check name
++  # the ruleset requires on the queue commit, once - no model call.
++  merge-group:
++    name: AI Merge Gate
++    if: github.event_name == 'merge_group'
++    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
++    timeout-minutes: 2
++    permissions:
++      checks: read
++      contents: read
++    steps:
++      - name: Mint the check-run token
++        id: check-token
++        continue-on-error: true
++        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
++        with:
++          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
++          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
++          permission-checks: write
++
++      - name: Checkout ai-workflows scripts
++        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++        with:
++          repository: JacobPEvans/.github-ai
++          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
++          sparse-checkout: .github/scripts
++          path: .ai-workflows
++          persist-credentials: false
++
++      - name: Verify the queued entry already carries its verdict
++        id: queue-verdict
++        timeout-minutes: 1
++        env:
++          GH_TOKEN: ${{ steps.check-token.outputs.token }}
++          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
++          CHECK_HEAD_SHA: ${{ github.event.merge_group.head_sha || github.sha }}
++          HEAD_REF: ${{ github.event.merge_group.head_ref }}
++          REVIEWER_APP_SLUG: ${{ inputs.reviewer_app_slug }}
++        run: |
++          set -euo pipefail
++          # The queue branch is gh-readonly-queue/<base>/pr-<number>-<head
++          # sha>, and the tail sha is the pull request head the verdict was
++          # posted on.
++          if [[ "$HEAD_REF" =~ ^gh-readonly-queue/[^/]+/pr-([0-9]+)-([0-9a-f]{40})$ ]]; then
++            PR_NUMBER=${BASH_REMATCH[1]}
++            HEAD_SHA=${BASH_REMATCH[2]}
++          else
++            echo "::error::AI Merge Gate: unexpected queue branch '$HEAD_REF'; expected gh-readonly-queue/<base>/pr-<number>-<sha>"
++            bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
++              "AI Merge Gate" failure "AI Merge Gate" \
++              "unexpected queue branch '$HEAD_REF'; expected gh-readonly-queue/<base>/pr-<number>-<sha>"
++            exit 1
++          fi
++          # The gate reports the ruleset's required check from the reviewer
++          # App; without a minted token this job cannot report it at all.
++          if [ -z "$GH_TOKEN" ]; then
++            echo "::error::AI Merge Gate: pull request #$PR_NUMBER (head $HEAD_SHA): cannot report the verdict without an App token"
++            exit 1
++          fi
++          # A refusal reports failure under the same check name and fails the
++          # job, so the queue entry never waits on a verdict that will never
++          # arrive.
++          refuse() {
++            echo "::error::AI Merge Gate: pull request #$PR_NUMBER (head $HEAD_SHA): $1"
++            bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
++              "AI Merge Gate" failure "AI Merge Gate" "pull request #$PR_NUMBER (head $HEAD_SHA): $1"
++            exit 1
++          }
++          # The API occasionally returns a transient HTML error page; retry
++          # with backoff and judge only a readable response, as the gate does.
++          RUNS=""
++          for i in 1 2 3; do
++            RUNS=$(gh api -X GET \
++              "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs" \
++              -f check_name="AI Merge Gate" \
++              -f filter=latest \
++              -f per_page=100) && break
++            sleep $((i * 5))
++          done
++          if [ -z "$RUNS" ]; then
++            refuse "could not read its check runs"
++          fi
++          if ! RUN="$(jq -r --arg name "AI Merge Gate" --arg slug "$REVIEWER_APP_SLUG" \
++            '(if type == "array" then . else (.check_runs // []) end)
++             | map(select(.name == $name and .app.slug == $slug))
++             | first // empty' <<< "$RUNS" 2>/dev/null)"; then
++            refuse "the check-run lookup returned an unreadable response"
++          fi
++          if [ -z "$RUN" ]; then
++            refuse "carries no 'AI Merge Gate' check run from the reviewer App $REVIEWER_APP_SLUG"
++          fi
++          CONCLUSION="$(jq -r '.conclusion // ""' <<< "$RUN")"
++          SUMMARY="$(jq -r '.output.summary // ""' <<< "$RUN")"
++          if [ "$CONCLUSION" != "success" ]; then
++            refuse "verdict check run concluded '${CONCLUSION:-none}', not success"
++          fi
++          if ! VERDICT_LINE="$(grep -xE 'VERDICT: (MERGE|DEFERRED)' <<< "$SUMMARY" | tail -n 1)"; then
++            refuse "verdict summary carries no 'VERDICT: MERGE' or 'VERDICT: DEFERRED' line"
++          fi
++          echo "AI Merge Gate: pull request #$PR_NUMBER (head $HEAD_SHA) carries an accepted verdict: $VERDICT_LINE"
++          bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
++            "AI Merge Gate" success "AI Merge Gate" \
++            "pull request #$PR_NUMBER (head $HEAD_SHA) carries $VERDICT_LINE from the reviewer App $REVIEWER_APP_SLUG"
+diff --git a/.github/workflows/ai-merge-gate.yml b/.github/workflows/ai-merge-gate.yml
+index f61249c..3d655a6 100644
+--- a/.github/workflows/ai-merge-gate.yml
++++ b/.github/workflows/ai-merge-gate.yml
+@@ -2,6 +2,7 @@ name: AI Merge Gate
+ on:
+   pull_request:
+     types: [opened, ready_for_review, synchronize, reopened]
++  merge_group:
+ permissions:
+   checks: read
+   contents: read
+diff --git a/tests/ai-merge-gate.test.js b/tests/ai-merge-gate.test.js
+index c026a7e..08b02df 100644
+--- a/tests/ai-merge-gate.test.js
++++ b/tests/ai-merge-gate.test.js
+@@ -188,7 +188,9 @@ test('the verdict check run is published with the reviewer App token', () => {
+ test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFERRED', () => {
+   const final = gate.jobs.gate;
+   expect(final.needs).toEqual(fixture.required_jobs);
+-  expect(final.if).toBe('always()');
++  // always() keeps the aggregation past failed needs; the pull_request guard
++  // keeps the aggregation off merge_group runs, which the merge-group job owns.
++  expect(final.if).toBe("always() && github.event_name == 'pull_request'");
+   expect(stepById('copilot').run).toContain('copilot');
+ 
+   const conclusions = { MERGE: 'success', CHANGES: 'failure', DEFERRED: 'neutral' };
+@@ -409,3 +411,268 @@ test('the contract shape fails when a summary line is missing', () => {
+   expect(contractLines(valid.filter((line) => !line.startsWith('head:')).join('\n'))).toHaveLength(3);
+   expect(contractLines(valid.concat(['model: a']).join('\n'))).toHaveLength(5);
+ });
++
++const queueJob = gate.jobs['merge-group'];
++const queueStep = queueJob.steps.find((step) => step.name === 'Verify the queued entry already carries its verdict');
++
++// Runs the merge-group verification step against a stub gh CLI, a stub
++// sleep, and a stub check-run.sh: gh replays the canned check-runs body
++// after `failures` failing calls, sleep only records its argument, and
++// check-run.sh records the upsert name, conclusion, title, and summary.
++// The stubs live in the workspace or on PATH ahead of the real ones, so
++// the step never waits, posts, or touches the network.
++function runQueueStep({ headRef, response, failures = 0, slug = 'jpe-claude-bot', verdictLine, token = 'app-token' }) {
++  const dir = mkdtempSync(join(tmpdir(), 'merge-group-'));
++  try {
++    const bin = join(dir, 'bin');
++    mkdirSync(bin, { recursive: true });
++    const helperDir = join(dir, '.ai-workflows', '.github', 'scripts', 'shared');
++    mkdirSync(helperDir, { recursive: true });
++    const calls = join(dir, 'gh-calls');
++    const sleeps = join(dir, 'sleep-calls');
++    const posted = join(dir, 'posted');
++    const postedSummary = join(dir, 'posted-summary');
++    const body = join(dir, 'gh-response.json');
++    const countdown = join(dir, 'gh-failures');
++    const summary = `rubric line\n\nmodel: glm-4.7\nauthor_family: human\nhead: ${'b'.repeat(40)}\n${verdictLine ?? 'VERDICT: MERGE'}`;
++    writeFileSync(body, JSON.stringify(response ?? {
++      count: 1,
++      check_runs: [{
++        name: 'AI Merge Gate',
++        app: { slug: slug },
++        conclusion: 'success',
++        output: { title: 'AI Merge Gate', summary },
++      }],
++    }));
++    writeFileSync(countdown, String(failures));
++    writeFileSync(join(bin, 'gh'), [
++      '#!/bin/bash',
++      `printf '%s\\n' "$*" >> '${calls}'`,
++      `if [ "$(cat '${countdown}')" -gt 0 ]; then`,
++      `  echo $(( $(cat '${countdown}') - 1 )) > '${countdown}'`,
++      '  exit 1',
++      'fi',
++      `cat '${body}'`,
++      '',
++    ].join('\n'));
++    writeFileSync(join(bin, 'sleep'), `#!/bin/bash\nprintf '%s\\n' "$*" >> '${sleeps}'\n`);
++    writeFileSync(join(helperDir, 'check-run.sh'), [
++      '#!/bin/bash',
++      `printf '%s\\n' "$1" "$2" "$3" "$4" > '${posted}'`,
++      `printf '%s' "$5" > '${postedSummary}'`,
++      '',
++    ].join('\n'));
++    chmodSync(join(bin, 'gh'), 0o755);
++    chmodSync(join(bin, 'sleep'), 0o755);
++    chmodSync(join(helperDir, 'check-run.sh'), 0o755);
++    const result = Bun.spawnSync(['/bin/bash', '-c', queueStep.run], {
++      cwd: dir,
++      env: {
++        ...process.env,
++        PATH: `${bin}:${process.env.PATH}`,
++        GH_TOKEN: token,
++        CHECK_APP_SLUG: slug,
++        CHECK_HEAD_SHA: 'e'.repeat(40),
++        GITHUB_REPOSITORY: 'JacobPEvans/.github-ai',
++        HEAD_REF: headRef,
++        REVIEWER_APP_SLUG: slug,
++      },
++    });
++    return {
++      result,
++      ghCalls: existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n') : [],
++      sleeps: existsSync(sleeps) ? readFileSync(sleeps, 'utf8').trim().split('\n') : [],
++      posted: existsSync(posted) ? readFileSync(posted, 'utf8').trim().split('\n') : null,
++      postedSummary: existsSync(postedSummary) ? readFileSync(postedSummary, 'utf8') : null,
++    };
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++}
++
++const queuedHead = 'c'.repeat(40);
++const queueBranch = (number, sha = queuedHead) => `gh-readonly-queue/main/pr-${number}-${sha}`;
++
++test('the merge_group trigger starts only the mechanical job, under the required check name', () => {
++  expect(frontdoor.on.merge_group).toBeNull();
++  expect(frontdoor.on.pull_request.types).toEqual(fixture.pull_request_types);
++  expect(queueJob.name).toBe('AI Merge Gate');
++  expect(queueJob.if).toBe("github.event_name == 'merge_group'");
++  // The same runner setting as the light jobs; no runner group is selected.
++  expect(queueJob['runs-on']).toBe(gate.jobs.router['runs-on']);
++  expect(queueJob['timeout-minutes']).toBe(2);
++  expect(queueJob.permissions).toEqual({ checks: 'read', contents: 'read' });
++  expect(queueJob.secrets).toBeUndefined();
++  // Mechanical: no review, so no policy-gate call and no router secret.
++  expect(queueStep.run).not.toContain('LLM_ROUTER');
++  expect(queueStep.run).not.toContain('policy-gate');
++  // The check is reported the same way the gate reports it: minted reviewer
++  // App token, the shared check-run helper, on the queue commit.
++  const mint = queueJob.steps.find((step) => step.id === 'check-token');
++  const gateMint = stepById('check-token');
++  expect(mint.uses).toBe(gateMint.uses);
++  expect(mint.with).toEqual(gateMint.with);
++  const checkout = queueJob.steps.find((step) => step.uses?.startsWith('actions/checkout@'));
++  const gateCheckout = stepByName('Checkout ai-workflows scripts');
++  expect(checkout.uses).toBe(gateCheckout.uses);
++  expect(checkout.with).toEqual(gateCheckout.with);
++  expect(queueStep['timeout-minutes']).toBe(1);
++  expect(queueStep.env.GH_TOKEN).toBe('${{ steps.check-token.outputs.token }}');
++  expect(queueStep.env.CHECK_APP_SLUG).toBe('${{ steps.check-token.outputs.app-slug }}');
++  expect(queueStep.env.CHECK_HEAD_SHA).toBe('${{ github.event.merge_group.head_sha || github.sha }}');
++  // Only the reviewer App's check run counts, by slug input with a default.
++  expect(gate.on.workflow_call.inputs.reviewer_app_slug).toMatchObject({
++    type: 'string', required: false, default: 'jpe-claude-bot',
++  });
++  expect(queueStep.env.REVIEWER_APP_SLUG).toBe('${{ inputs.reviewer_app_slug }}');
++  expect(queueStep.env.HEAD_REF).toBe('${{ github.event.merge_group.head_ref }}');
++  // The reviews and the aggregation stay on the pull request path only.
++  for (const job of ['gitleaks', 'router', 'leak', 'security', 'semantic', 'gate']) {
++    expect(gate.jobs[job].if).toContain("github.event_name == 'pull_request'");
++  }
++});
++
++test('the merge_group job reads the verdict from the pull request head parsed out of the queue branch', () => {
++  const accepted = runQueueStep({ headRef: queueBranch(123), verdictLine: 'VERDICT: MERGE' });
++  expect(accepted.result.exitCode, accepted.result.stderr.toString()).toBe(0);
++  expect(accepted.ghCalls).toEqual([
++    `api -X GET repos/JacobPEvans/.github-ai/commits/${queuedHead}/check-runs -f check_name=AI Merge Gate -f filter=latest -f per_page=100`,
++  ]);
++  expect(accepted.sleeps).toEqual([]);
++  expect(accepted.posted).toEqual(['upsert', 'AI Merge Gate', 'success', 'AI Merge Gate']);
++  expect(accepted.postedSummary).toBe(`pull request #123 (head ${queuedHead}) carries VERDICT: MERGE from the reviewer App jpe-claude-bot`);
++
++  // A deferred entry passes the same way: the verdict line decides.
++  const deferred = runQueueStep({ headRef: queueBranch(456, 'd'.repeat(40)), verdictLine: 'VERDICT: DEFERRED' });
++  expect(deferred.result.exitCode, deferred.result.stderr.toString()).toBe(0);
++  expect(deferred.ghCalls[0]).toContain(`commits/${'d'.repeat(40)}/check-runs`);
++  expect(deferred.postedSummary).toContain('VERDICT: DEFERRED');
++});
++
++test('the merge_group job refuses a queue branch that does not name a pull request head', () => {
++  for (const headRef of [
++    'feature/branch',
++    'gh-readonly-queue/main/pr-abc-def4',
++    `gh-readonly-queue/main/pr-123-${'c'.repeat(39)}`,
++    `gh-readonly-queue/main/pr-123-${'c'.repeat(40)}-extra`,
++    'gh-readonly-queue/main/pr-123-',
++  ]) {
++    const refused = runQueueStep({ headRef });
++    expect(refused.result.exitCode, headRef).not.toBe(0);
++    expect(refused.result.stdout.toString(), headRef).toContain('::error::');
++    expect(refused.result.stdout.toString(), headRef).toContain(headRef);
++    expect(refused.ghCalls, headRef).toEqual([]);
++  }
++});
++
++test('the merge_group job refuses an entry without an accepted verdict from the reviewer App', () => {
++  const cases = [
++    {
++      name: 'no check run at all',
++      response: { count: 0, check_runs: [] },
++    },
++    {
++      name: 'a check run from another App',
++      response: {
++        count: 1,
++        check_runs: [{
++          name: 'AI Merge Gate',
++          app: { slug: 'github-actions[bot]' },
++          conclusion: 'success',
++          output: { title: 'AI Merge Gate', summary: 'VERDICT: MERGE' },
++        }],
++      },
++    },
++    {
++      name: 'a failed verdict check run',
++      response: {
++        count: 1,
++        check_runs: [{
++          name: 'AI Merge Gate',
++          app: { slug: 'jpe-claude-bot' },
++          conclusion: 'failure',
++          output: { title: 'AI Merge Gate', summary: `reason: two Copilot agent check(s) failed\nVERDICT: CHANGES` },
++        }],
++      },
++    },
++    {
++      name: 'the deferred verdict published as neutral',
++      response: {
++        count: 1,
++        check_runs: [{
++          name: 'AI Merge Gate',
++          app: { slug: 'jpe-claude-bot' },
++          conclusion: 'neutral',
++          output: { title: 'AI Merge Gate', summary: `model: none\nVERDICT: DEFERRED` },
++        }],
++      },
++    },
++    {
++      name: 'a successful run whose summary carries no verdict line',
++      response: {
++        count: 1,
++        check_runs: [{
++          name: 'AI Merge Gate',
++          app: { slug: 'jpe-claude-bot' },
++          conclusion: 'success',
++          output: { title: 'AI Merge Gate', summary: 'model: glm-4.7\nauthor_family: human' },
++        }],
++      },
++    },
++    {
++      name: 'a verdict the contract does not accept',
++      response: {
++        count: 1,
++        check_runs: [{
++          name: 'AI Merge Gate',
++          app: { slug: 'jpe-claude-bot' },
++          conclusion: 'success',
++          output: { title: 'AI Merge Gate', summary: 'reason: a review was refused\nVERDICT: CHANGES' },
++        }],
++      },
++    },
++  ];
++  for (const { name, response, slug } of cases) {
++    const refused = runQueueStep({ headRef: queueBranch(789), response, slug });
++    expect(refused.result.exitCode, `${name}: ${refused.result.stderr.toString()}`).toBe(1);
++    const message = refused.result.stdout.toString();
++    expect(message, name).toContain('::error::');
++    // Every refusal names the pull request and the head commit.
++    expect(message, name).toContain('#789');
++    expect(message, name).toContain(queuedHead);
++    // ... and reports the failure under the required check name, so the
++    // queue entry is never left waiting for a check that never arrives.
++    expect(refused.posted, name).toEqual(['upsert', 'AI Merge Gate', 'failure', 'AI Merge Gate']);
++    expect(refused.postedSummary, name).toContain('#789');
++    expect(refused.postedSummary, name).toContain(queuedHead);
++  }
++});
++
++test('the merge_group job fails closed when it cannot report at all', () => {
++  const untokened = runQueueStep({ headRef: queueBranch(789), token: '' });
++  expect(untokened.result.exitCode).toBe(1);
++  expect(untokened.result.stdout.toString()).toContain('cannot report the verdict');
++  expect(untokened.posted).toBeNull();
++  // The queue branch must still be legible before anything else runs.
++  const unparseable = runQueueStep({ headRef: 'feature/branch', token: '' });
++  expect(unparseable.result.exitCode).toBe(1);
++  expect(unparseable.result.stdout.toString()).toContain("unexpected queue branch 'feature/branch'");
++});
++
++test('the merge_group job retries a transient lookup failure with backoff and fails closed after three', () => {
++  const recovered = runQueueStep({ headRef: queueBranch(123), failures: 2 });
++  expect(recovered.result.exitCode, recovered.result.stderr.toString()).toBe(0);
++  expect(recovered.ghCalls).toHaveLength(3);
++  expect(recovered.sleeps).toEqual(['5', '10']);
++  expect(recovered.posted).toEqual(['upsert', 'AI Merge Gate', 'success', 'AI Merge Gate']);
++
++  const unreadable = runQueueStep({ headRef: queueBranch(123), failures: 3 });
++  expect(unreadable.result.exitCode).toBe(1);
++  expect(unreadable.result.stdout.toString()).toContain('::error::');
++  expect(unreadable.result.stdout.toString()).toContain('#123');
++  expect(unreadable.result.stdout.toString()).toContain(queuedHead);
++  expect(unreadable.ghCalls).toHaveLength(3);
++  expect(unreadable.sleeps).toEqual(['5', '10', '15']);
++  expect(unreadable.posted).toEqual(['upsert', 'AI Merge Gate', 'failure', 'AI Merge Gate']);
++  expect(unreadable.postedSummary).toContain('#123');
++});
