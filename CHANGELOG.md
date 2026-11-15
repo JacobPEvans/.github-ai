@@ -5,14 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [2.9.0](https://github.com/JacobPEvans/.github-ai/compare/v2.8.0...v2.9.0) (2026-11-15)
-
-
-### Features
-
-* **agent:** zcode run j-303b7fa0d4310129 ([fe99184](https://github.com/JacobPEvans/.github-ai/commit/fe9918419ee396ef4dfdef63b7390c57c488bdc1))
-* **policy-gate:** accept the code rubric in the gate scripts ([#133](https://github.com/JacobPEvans/.github-ai/issues/133)) ([fe99184](https://github.com/JacobPEvans/.github-ai/commit/fe9918419ee396ef4dfdef63b7390c57c488bdc1))
-
 ## [2.8.0](https://github.com/JacobPEvans/.github-ai/compare/v2.7.0...v2.8.0) (2026-11-15)
 
 

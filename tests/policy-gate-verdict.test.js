@@ -97,7 +97,6 @@ const makeFinding = (check, result = 'pass', overrides = {}) => ({
 const POLICY = ['dry', 'native_first', 'disclosure', 'missing_test', 'token_budget'];
 const SECURITY = ['auth', 'injection', 'permission_widening', 'unsafe_trigger', 'secret_handling'];
 const SEMANTIC = ['claim_mismatch', 'omitted_behavior'];
-const CODE = ['correctness', 'regression', 'missing_test', 'native_first'];
 const verdictWith = (checks) => JSON.stringify({ summary: 'ok', findings: checks.map((c) => makeFinding(c)) });
 
 // A rejected verdict exits 1 (jq -e on false). Exit 127 would mean the script never ran.
@@ -111,10 +110,6 @@ test('accepts a security verdict with exactly one finding per security check', (
 
 test('accepts a semantic verdict with exactly one finding per semantic check', () => {
   expect(exitCodeFor('semantic', verdictWith(SEMANTIC))).toBe(0);
-});
-
-test('accepts a code verdict with exactly one finding per code check', () => {
-  expect(exitCodeFor('code', verdictWith(CODE))).toBe(0);
 });
 
 test('accepts a leak verdict with no findings, which is a clean review', () => {
@@ -250,14 +245,6 @@ test('rejects a security verdict with fewer than five findings', () => {
 
 test('rejects a semantic verdict with one finding', () => {
   expect(exitCodeFor('semantic', verdictWith(['claim_mismatch']))).toBe(1);
-});
-
-test('rejects a code verdict that omits a check', () => {
-  expect(exitCodeFor('code', verdictWith(CODE.slice(0, 3)))).toBe(1);
-});
-
-test('rejects a code verdict with a check the code rubric does not define', () => {
-  expect(exitCodeFor('code', verdictWith(['correctness', 'regression', 'missing_test', 'style_nit']))).toBe(1);
 });
 
 test('rejects a check that the rubric does not define', () => {

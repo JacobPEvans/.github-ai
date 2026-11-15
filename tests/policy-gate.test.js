@@ -121,37 +121,6 @@ test('render.sh marks exit 1 when any check fails, and still renders the table',
   });
 });
 
-test('render.sh renders a failed code verdict like a failed security verdict', () => {
-  withTempDir((dir) => {
-    writeFileSync(
-      join(dir, 'response.json'),
-      JSON.stringify({
-        summary: 'One violation.',
-        findings: [
-          {
-            check: 'regression',
-            result: 'fail',
-            file: 'roles/foo/tasks/main.yml',
-            line: 4,
-            detail: 'drops the retry the old task had',
-          },
-          { check: 'correctness', result: 'pass', file: '', line: 0, detail: '' },
-          { check: 'missing_test', result: 'pass', file: '', line: 0, detail: '' },
-          { check: 'native_first', result: 'pass', file: '', line: 0, detail: '' },
-        ],
-      }),
-    );
-
-    const result = run(dir, 'render.sh', { MODEL: 'small', RESPONSE_FILE: join(dir, 'response.json') });
-
-    expect(result.exitCode).toBe(0); // rendering itself never fails the job
-    const body = readFileSync(join(dir, 'policy-gate.md'), 'utf8');
-    expect(body).toContain('| regression | fail | roles/foo/tasks/main.yml | 4 |');
-    expect(body).toContain('_Router role `small`._'); // the non-leak footer, as for security
-    expect(readFileSync(join(dir, 'policy-gate.exit'), 'utf8').trim()).toBe('1');
-  });
-});
-
 test('render.sh takes the title and override label from the rubric', () => {
   withTempDir((dir) => {
     writeFileSync(join(dir, 'override.flag'), '');
@@ -228,7 +197,7 @@ test('collect.sh replaces reference-only additions for leak without changing lin
   }, { RUBRIC: 'leak' });
 });
 
-test.each(['security', 'semantic', 'policy', 'code'])('collect.sh preserves reference-only lines for %s', (rubric) => {
+test.each(['security', 'semantic', 'policy'])('collect.sh preserves reference-only lines for %s', (rubric) => {
   withCollectedDiff('  API_KEY: ${{ secrets.API_KEY }}\n', (diff, raw) => {
     expect(diff.toString()).toBe(raw.toString().replace('${{ secrets.API_KEY }}', '<secret-reference:API_KEY>'));
   }, { RUBRIC: rubric });
@@ -246,7 +215,7 @@ test('collect.sh omits reference-only context and preserves removals for leak', 
   }, { RUBRIC: 'leak' }, context + 'REMOVED: ${{ secrets.TOKEN }}\n');
 });
 
-test.each(['leak', 'security', 'semantic', 'policy', 'code', undefined])('collect.sh selects context for %s and preserves added lines and hunk coordinates', (rubric) => {
+test.each(['leak', 'security', 'semantic', 'policy', undefined])('collect.sh selects context for %s and preserves added lines and hunk coordinates', (rubric) => {
   const before = 'permissions:\n  pull-requests: write\n  uses: example/action@v1\n  env:\n    API_KEY: ${{ secrets.API_KEY }}\n';
   const after = before.replace('@v1', '@v2');
   withCollectedDiff(after, (diff, raw) => {

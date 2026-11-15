@@ -1,0 +1,563 @@
+diff --git a/.github/scripts/ci-fix/commit-fix.js b/.github/scripts/ci-fix/commit-fix.js
+index 437de68..eaa1b60 100644
+--- a/.github/scripts/ci-fix/commit-fix.js
++++ b/.github/scripts/ci-fix/commit-fix.js
+@@ -4,7 +4,35 @@
+ // shared/verified-commit.js and docs/PATTERNS.md "Verified Commit & PR Pattern".
+ const { commitToBranch } = require('../shared/verified-commit.js');
+ 
++// A PR sitting in a merge queue must not receive pushes: the commit would
++// invalidate (or dequeue) the queued entry the gate is evaluating. Read the
++// entry through GraphQL immediately before the commit so the check races the
++// push as little as possible.
++const MERGE_QUEUE_QUERY = `
++  query ($owner: String!, $name: String!, $number: Int!) {
++    repository(owner: $owner, name: $name) {
++      pullRequest(number: $number) {
++        mergeQueueEntry { state }
++      }
++    }
++  }
++`;
++
+ module.exports = async ({ github, context, core }) => {
++  const prNumber = parseInt(process.env.PR_NUMBER, 10);
++  if (Number.isSafeInteger(prNumber) && prNumber > 0) {
++    const res = await github.graphql(MERGE_QUEUE_QUERY, {
++      owner: context.repo.owner,
++      name: context.repo.repo,
++      number: prNumber,
++    });
++    const entry = res.repository?.pullRequest?.mergeQueueEntry;
++    if (entry) {
++      core.notice(`PR #${prNumber} is in the merge queue (${entry.state}) — skipping the push.`);
++      core.setOutput('committed', 'false');
++      return { committed: false };
++    }
++  }
+   await commitToBranch({
+     github,
+     context,
+diff --git a/.github/scripts/ci-fix/get-failure-logs.js b/.github/scripts/ci-fix/get-failure-logs.js
+index 340fdba..1c94005 100644
+--- a/.github/scripts/ci-fix/get-failure-logs.js
++++ b/.github/scripts/ci-fix/get-failure-logs.js
+@@ -1,8 +1,27 @@
+ module.exports = async ({ github, context, core }) => {
+-  const runId = process.env.FAILURE_RUN_ID || context.payload.workflow_run?.id;
++  let runId = process.env.FAILURE_RUN_ID || context.payload.workflow_run?.id;
+   if (!runId) {
+-    core.setFailed('FAILURE_RUN_ID is required');
+-    return;
++    // Label-triggered runs carry no failed run: use the newest failed run on
++    // the PR head branch instead.
++    const branch = process.env.FAILURE_HEAD_BRANCH;
++    if (!branch) {
++      core.setFailed('FAILURE_RUN_ID is required');
++      return;
++    }
++    const { data } = await github.rest.actions.listWorkflowRunsForRepo({
++      owner: context.repo.owner,
++      repo: context.repo.repo,
++      branch,
++      status: 'failure',
++      per_page: 1,
++    });
++    const latest = data.workflow_runs[0];
++    if (!latest) {
++      core.setFailed(`No failed CI run found for branch ${branch}`);
++      return;
++    }
++    runId = latest.id;
++    core.info(`Using the most recent failed run ${latest.id} (${latest.name}) on branch ${branch}`);
+   }
+   const allJobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+     owner: context.repo.owner,
+diff --git a/.github/workflows/cc-ci-fix.yml b/.github/workflows/cc-ci-fix.yml
+index 3fd1d1b..4f565f4 100644
+--- a/.github/workflows/cc-ci-fix.yml
++++ b/.github/workflows/cc-ci-fix.yml
+@@ -3,6 +3,13 @@
+ # Reusable workflow: called by consumer repos when CI fails on a PR branch.
+ # Analyzes failure logs and pushes fixes (max 2 attempts per PR).
+ #
++# Direct triggers: a failed "AI Merge Gate" run, or the "ci-fix" label on a
++# pull request. Repositories tagged with the merge_tier=hot custom property
++# act only on failed merge_group gate runs or the label; any other tier (the
++# empty custom property reads as legacy) keeps fixing pull-request failures
++# exactly as before. Before pushing, the publisher skips PRs that sit in a
++# merge queue (pullRequest.mergeQueueEntry).
++#
+ # Security: The fix job includes a fork guard before checking out the failed
+ # branch, regardless of whether the caller uses workflow_run or workflow_call.
+ 
+@@ -95,6 +102,11 @@ on:
+       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
+         required: false
+   workflow_dispatch:
++  workflow_run:
++    workflows: ["AI Merge Gate"]
++    types: [completed]
++  pull_request:
++    types: [labeled]
+ 
+ # Workflow-level permissions set the maximum for all jobs.
+ # permissions: {} silently skips all jobs in cross-repo calls.
+@@ -104,22 +116,28 @@ permissions:
+   issues: write
+   pull-requests: write
+ 
+-concurrency:
+-  group: ci-fix-${{ github.repository }}-${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.ref }}
+-  cancel-in-progress: false  # Never cancel — queue instead to avoid wasting AI tokens
+-
++# Per-PR write serialization lives on the writing jobs (post-attempt-comment,
++# publish, notify-failure) so a queued pull request never receives writes from
++# two runs at once. Agent and read jobs stay parallel.
+ jobs:
+   should-fix:
+     name: Check if fix needed
+     # Gate on CI failure so direct importers no-op on green builds. suite-ci
+-    # applies the same conclusion gate one level up.
++    # applies the same conclusion gate one level up. The ci-fix label is an
++    # explicit fix request, so it bypasses the conclusion gate. Hot-tier
++    # repositories (custom property merge_tier=hot) only act on merge_group
++    # gate failures or the label; any other tier keeps today's behavior.
+     if: >-
+-      (inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure' &&
++      ((inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure' ||
++      (github.event_name == 'pull_request' && github.event.label.name == 'ci-fix')) &&
+       (inputs.failure_actor || github.actor) != 'renovate[bot]' &&
+       (inputs.failure_actor || github.actor) != 'dependabot[bot]' &&
+-      (inputs.failure_actor || github.actor) != 'copilot[bot]'
++      (inputs.failure_actor || github.actor) != 'copilot[bot]' &&
++      ((github.event.repository.custom_properties.merge_tier || 'legacy') != 'hot' ||
++      github.event.workflow_run.event == 'merge_group' ||
++      github.event_name == 'pull_request')
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
++    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
+     permissions:
+       pull-requests: read
+       issues: read
+@@ -140,7 +158,7 @@ jobs:
+         id: find-pr
+         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+         env:
+-          FAILURE_HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
++          FAILURE_HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
+         with:
+           script: |
+             const run = require('./.ai-workflows/.github/scripts/ci-fix/find-pr.js');
+@@ -159,8 +177,19 @@ jobs:
+ 
+   check-daily-limit:
+     name: Check daily run limit
++    # Same gate as should-fix: runs that cannot act (green gate runs, other
++    # labels) must not consume the daily budget.
++    if: >-
++      ((inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure' ||
++      (github.event_name == 'pull_request' && github.event.label.name == 'ci-fix')) &&
++      (inputs.failure_actor || github.actor) != 'renovate[bot]' &&
++      (inputs.failure_actor || github.actor) != 'dependabot[bot]' &&
++      (inputs.failure_actor || github.actor) != 'copilot[bot]' &&
++      ((github.event.repository.custom_properties.merge_tier || 'legacy') != 'hot' ||
++      github.event.workflow_run.event == 'merge_group' ||
++      github.event_name == 'pull_request')
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
++    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
+     permissions:
+       actions: read
+     outputs:
+@@ -189,14 +218,18 @@ jobs:
+     name: Post attempt marker
+     needs: [should-fix, check-daily-limit]
+     if: >-
+-      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
++      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository ||
++      github.event.pull_request.head.repo.full_name) == github.repository &&
+       needs.should-fix.outputs.should_run == 'true' &&
+       needs.check-daily-limit.outputs.should_run == 'true'
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
++    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
+     permissions:
+       pull-requests: write
+       issues: write
++    concurrency:
++      group: pr-writer-${{ github.repository }}-${{ needs.should-fix.outputs.pr_number }}
++      cancel-in-progress: false
+     steps:
+       - name: Checkout ai-workflows scripts
+         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+@@ -221,11 +254,12 @@ jobs:
+     name: Get failure logs
+     needs: [should-fix, check-daily-limit]
+     if: >-
+-      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
++      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository ||
++      github.event.pull_request.head.repo.full_name) == github.repository &&
+       needs.should-fix.outputs.should_run == 'true' &&
+       needs.check-daily-limit.outputs.should_run == 'true'
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
++    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
+     permissions:
+       actions: read
+     outputs:
+@@ -244,6 +278,7 @@ jobs:
+         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+         env:
+           FAILURE_RUN_ID: ${{ inputs.failure_run_id || github.event.workflow_run.id }}
++          FAILURE_HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
+         with:
+           script: |
+             const run = require('./.ai-workflows/.github/scripts/ci-fix/get-failure-logs.js');
+@@ -256,7 +291,8 @@ jobs:
+     # Also require upstream gate jobs to have passed (explicit `if` replaces the default
+     # dependency-success check, so all conditions must be listed here).
+     if: >-
+-      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
++      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository ||
++      github.event.pull_request.head.repo.full_name) == github.repository &&
+       needs.should-fix.outputs.should_run == 'true' &&
+       needs.check-daily-limit.outputs.should_run == 'true'
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+@@ -266,7 +302,7 @@ jobs:
+     permissions:
+       contents: read
+       pull-requests: read
+-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
++    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
+     steps:
+       # The local-only key flow is Claude-specific.
+       - name: Reject another agent with the local-only key flow
+@@ -278,7 +314,7 @@ jobs:
+       - name: Checkout PR branch
+         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+         with:
+-          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
++          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
+           fetch-depth: 0
+           persist-credentials: false
+ 
+@@ -363,14 +399,17 @@ jobs:
+     needs: [should-fix, fix]
+     if: ${{ !inputs.dry_run }}
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
++    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
+     permissions:
+       contents: write
++    concurrency:
++      group: pr-writer-${{ github.repository }}-${{ needs.should-fix.outputs.pr_number }}
++      cancel-in-progress: false
+     steps:
+       - name: Checkout PR branch
+         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+         with:
+-          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
++          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
+           fetch-depth: 0
+           persist-credentials: false
+ 
+@@ -395,7 +434,8 @@ jobs:
+           fi
+           rm agent.patch
+ 
+-      # The fresh publisher alone receives the App token.
++      # The fresh publisher alone receives the App token. The queue skip below
++      # reads the PR through GraphQL, so the token also needs pull-requests read.
+       - name: Mint commit token
+         id: commit-token
+         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+@@ -403,12 +443,14 @@ jobs:
+           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}
+           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+           permission-contents: write
++          permission-pull-requests: read
+ 
+       - name: Commit fix to PR branch
+         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+         env:
+-          HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
++          HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
+           COMMIT_MESSAGE: "fix: resolve CI failure (auto-fix attempt ${{ needs.should-fix.outputs.attempt }})"
++          PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+         with:
+           github-token: ${{ steps.commit-token.outputs.token }}
+           script: |
+@@ -420,9 +462,12 @@ jobs:
+     needs: [should-fix, fix, publish]
+     if: failure() && !inputs.dry_run
+     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
++    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}
+     permissions:
+       pull-requests: write
++    concurrency:
++      group: pr-writer-${{ github.repository }}-${{ needs.should-fix.outputs.pr_number }}
++      cancel-in-progress: false
+     steps:
+       - name: Comment on failure
+         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+diff --git a/tests/ci-fix-triggers.test.js b/tests/ci-fix-triggers.test.js
+new file mode 100644
+index 0000000..39be160
+--- /dev/null
++++ b/tests/ci-fix-triggers.test.js
+@@ -0,0 +1,94 @@
++const { expect, test } = require('bun:test');
++const { readFileSync } = require('fs');
++
++// cc-ci-fix gained direct triggers (failed AI Merge Gate runs, the ci-fix
++// label) beside the workflow_call entry. The gates here keep legacy callers
++// intact, restrict hot-tier repositories to merge-group failures + the label,
++// serialize PR writers, and skip queued PRs before any push.
++const ciFix = Bun.YAML.parse(readFileSync('.github/workflows/cc-ci-fix.yml', 'utf8'));
++const events = ciFix.on ?? ciFix[true];
++const jobs = ciFix.jobs;
++const CONCLUSION_GATE = "(inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure'";
++const LABEL_GATE = "github.event_name == 'pull_request' && github.event.label.name == 'ci-fix'";
++const TIER_GATE = "(github.event.repository.custom_properties.merge_tier || 'legacy') != 'hot'";
++const MERGE_GROUP_GATE = "github.event.workflow_run.event == 'merge_group'";
++const WRITER_GROUP = 'pr-writer-${{ github.repository }}-${{ needs.should-fix.outputs.pr_number }}';
++const PR_HEAD_REF = '${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}';
++const stepByName = (job, name) => jobs[job].steps.find((step) => step.name === name);
++
++test('direct triggers sit beside the workflow_call entry', () => {
++  expect(events.workflow_call.secrets.LLM_ROUTER_BASE_URL).toBeDefined();
++  expect(events.workflow_dispatch).toBeDefined();
++  expect(events.workflow_run.workflows).toEqual(['AI Merge Gate']);
++  expect(events.workflow_run.types).toEqual(['completed']);
++  expect(events.pull_request.types).toEqual(['labeled']);
++});
++
++test('the workflow-level concurrency group is gone', () => {
++  expect(ciFix.concurrency).toBeUndefined();
++});
++
++test('the writing jobs share the per-PR writer group', () => {
++  for (const name of ['post-attempt-comment', 'publish', 'notify-failure']) {
++    expect(jobs[name].concurrency.group, name).toBe(WRITER_GROUP);
++    expect(jobs[name].concurrency['cancel-in-progress'], name).toBe(false);
++  }
++  for (const name of ['should-fix', 'check-daily-limit', 'get-failure-details', 'fix']) {
++    expect(jobs[name].concurrency, name).toBeUndefined();
++  }
++});
++
++test('legacy and standard repositories keep the conclusion gate', () => {
++  expect(jobs['should-fix'].if).toContain(CONCLUSION_GATE);
++  expect(jobs['check-daily-limit'].if).toContain(CONCLUSION_GATE);
++});
++
++test('the ci-fix label bypasses the conclusion gate', () => {
++  expect(jobs['should-fix'].if).toContain(LABEL_GATE);
++  expect(jobs['check-daily-limit'].if).toContain(LABEL_GATE);
++});
++
++test('hot repositories only act on merge_group failures or the label', () => {
++  for (const name of ['should-fix', 'check-daily-limit']) {
++    expect(jobs[name].if, name).toContain(TIER_GATE);
++    expect(jobs[name].if, name).toContain(MERGE_GROUP_GATE);
++    expect(jobs[name].if, name).toContain(LABEL_GATE);
++  }
++});
++
++test('fork guards accept same-repository pull requests and keep refusing forks', () => {
++  const guard =
++    '(github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository || ' +
++    'github.event.pull_request.head.repo.full_name) == github.repository';
++  for (const name of ['post-attempt-comment', 'get-failure-details', 'fix']) {
++    expect(jobs[name].if, name).toContain(guard);
++  }
++});
++
++test('the 2-attempt bound stays wired into should-fix', () => {
++  expect(jobs['should-fix'].steps.some((step) => step.id === 'check-attempts')).toBe(true);
++  expect(jobs['should-fix'].outputs.pr_number).toBe('${{ steps.find-pr.outputs.pr_number }}');
++});
++
++test('the label path resolves the PR, the branch, and the failure run', () => {
++  expect(stepByName('should-fix', 'Find associated PR').env.FAILURE_HEAD_BRANCH).toBe(PR_HEAD_REF);
++  expect(stepByName('get-failure-details', 'Download failure logs').env.FAILURE_HEAD_BRANCH).toBe(PR_HEAD_REF);
++  expect(stepByName('fix', 'Checkout PR branch').with.ref).toBe(PR_HEAD_REF);
++  expect(stepByName('publish', 'Checkout PR branch').with.ref).toBe(PR_HEAD_REF);
++});
++
++test('the publisher skips queued PRs before any push', () => {
++  const commit = stepByName('publish', 'Commit fix to PR branch');
++  expect(commit.env.HEAD_BRANCH).toBe(PR_HEAD_REF);
++  expect(commit.env.PR_NUMBER).toBe('${{ needs.should-fix.outputs.pr_number }}');
++  const mint = stepByName('publish', 'Mint commit token');
++  expect(mint.with['permission-pull-requests']).toBe('read');
++});
++
++test('labeled runs keep the full job window while caller PR events stay short', () => {
++  for (const job of Object.values(jobs)) {
++    expect(job['timeout-minutes']).toBe(
++      "${{ github.event_name == 'pull_request' && github.event.action != 'labeled' && 5 || 30 }}",
++    );
++  }
++});
+diff --git a/tests/commit-fix.test.js b/tests/commit-fix.test.js
+index 2202db1..58c84e7 100644
+--- a/tests/commit-fix.test.js
++++ b/tests/commit-fix.test.js
+@@ -31,6 +31,19 @@ function makeGithub(commit = { oid: 'newoid', url: 'https://x/commit/newoid' })
+   return { graphql: mock(async () => ({ createCommitOnBranch: { commit } })) };
+ }
+ 
++// The merge-queue check reads pullRequest.mergeQueueEntry before the commit
++// mutation, so the mock dispatches on the query text.
++function makeGithubWithQueue(entry, commit = { oid: 'newoid', url: 'https://x/commit/newoid' }) {
++  return {
++    graphql: mock(async (query) => {
++      if (query.includes('mergeQueueEntry')) {
++        return { repository: { pullRequest: { mergeQueueEntry: entry } } };
++      }
++      return { createCommitOnBranch: { commit } };
++    }),
++  };
++}
++
+ // Run the script with cwd pointed at the temp repo, restoring cwd afterwards.
+ async function runIn(dir, deps) {
+   const prev = process.cwd();
+@@ -167,4 +180,50 @@ describe('commit-fix', () => {
+     expect(core.failures.length).toBe(1);
+     expect(github.graphql).not.toHaveBeenCalled();
+   });
++
++  it('skips the push while the PR sits in a merge queue', async () => {
++    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n');
++    process.env.PR_NUMBER = '7';
++    const github = makeGithubWithQueue({ state: 'QUEUED' });
++
++    try {
++      await runIn(dir, { github, context, core });
++    } finally {
++      delete process.env.PR_NUMBER;
++    }
++
++    const queries = github.graphql.mock.calls.map((c) => c[0]);
++    expect(queries.some((q) => q.includes('mergeQueueEntry'))).toBe(true);
++    expect(queries.some((q) => q.includes('createCommitOnBranch'))).toBe(false);
++    expect(core.getOutput('committed')).toBe('false');
++    expect(core.notices.join('\n')).toMatch(/merge queue/);
++  });
++
++  it('pushes when the PR has no merge queue entry', async () => {
++    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n');
++    process.env.PR_NUMBER = '7';
++    const github = makeGithubWithQueue(null);
++
++    try {
++      await runIn(dir, { github, context, core });
++    } finally {
++      delete process.env.PR_NUMBER;
++    }
++
++    const queries = github.graphql.mock.calls.map((c) => c[0]);
++    expect(queries.some((q) => q.includes('mergeQueueEntry'))).toBe(true);
++    expect(queries.some((q) => q.includes('createCommitOnBranch'))).toBe(true);
++    expect(core.getOutput('committed')).toBe('true');
++  });
++
++  it('pushes without a queue check when no PR number is available', async () => {
++    fs.writeFileSync(path.join(dir, 'main.tf'), 'fixed\n');
++    const github = makeGithub();
++
++    await runIn(dir, { github, context, core });
++
++    const queries = github.graphql.mock.calls.map((c) => c[0]);
++    expect(queries.every((q) => q.includes('createCommitOnBranch'))).toBe(true);
++    expect(core.getOutput('committed')).toBe('true');
++  });
+ });
+diff --git a/tests/get-failure-logs.test.js b/tests/get-failure-logs.test.js
+index 999a04e..5cbeee6 100644
+--- a/tests/get-failure-logs.test.js
++++ b/tests/get-failure-logs.test.js
+@@ -83,4 +83,47 @@ describe('get-failure-logs', () => {
+     expect(core.getOutput('logs')).toContain('caller log');
+     delete process.env.FAILURE_RUN_ID;
+   });
++
++  it('falls back to the newest failed run on the branch for label-triggered runs', async () => {
++    context = createMockContext({ payload: {} });
++    process.env.FAILURE_HEAD_BRANCH = 'feat/x';
++    github.rest.actions.listWorkflowRunsForRepo.mockResolvedValue({
++      data: { workflow_runs: [{ id: 777, name: 'AI Merge Gate' }] },
++    });
++    github.paginate.mockResolvedValue([{ name: 'gate', conclusion: 'failure', id: 9 }]);
++    github.rest.actions.downloadJobLogsForWorkflowRun.mockResolvedValue({ data: 'label log' });
++
++    await run({ github, context, core });
++
++    expect(github.rest.actions.listWorkflowRunsForRepo).toHaveBeenCalledWith(
++      expect.objectContaining({ branch: 'feat/x', status: 'failure' }),
++    );
++    expect(github.paginate.mock.calls[0][1].run_id).toBe(777);
++    expect(core.getOutput('logs')).toContain('label log');
++    delete process.env.FAILURE_HEAD_BRANCH;
++  });
++
++  it('fails when neither a run id nor a branch is available', async () => {
++    context = createMockContext({ payload: {} });
++
++    await run({ github, context, core });
++
++    expect(core.failures).toEqual(['FAILURE_RUN_ID is required']);
++    expect(github.paginate).not.toHaveBeenCalled();
++  });
++
++  it('fails when the branch has no failed run', async () => {
++    context = createMockContext({ payload: {} });
++    process.env.FAILURE_HEAD_BRANCH = 'feat/y';
++    github.rest.actions.listWorkflowRunsForRepo.mockResolvedValue({ data: { workflow_runs: [] } });
++
++    try {
++      await run({ github, context, core });
++    } finally {
++      delete process.env.FAILURE_HEAD_BRANCH;
++    }
++
++    expect(core.failures).toEqual(['No failed CI run found for branch feat/y']);
++    expect(github.paginate).not.toHaveBeenCalled();
++  });
+ });
+diff --git a/tests/helpers.js b/tests/helpers.js
+index e72f5cf..1997e84 100644
+--- a/tests/helpers.js
++++ b/tests/helpers.js
+@@ -7,16 +7,19 @@ function createMockCore() {
+   const infos = [];
+   const warnings = [];
+   const failures = [];
++  const notices = [];
+   return {
+     setOutput: mock((key, value) => outputs.set(key, value)),
+     setFailed: mock((msg) => failures.push(msg)),
+     info: mock((msg) => infos.push(msg)),
+     warning: mock((msg) => warnings.push(msg)),
++    notice: mock((msg) => notices.push(msg)),
+     getOutput: (key) => outputs.get(key),
+     outputs,
+     infos,
+     warnings,
+     failures,
++    notices,
+   };
+ }
+ 
+@@ -62,6 +65,7 @@ function createMockGithub() {
+         listJobsForWorkflowRun: mock(),
+         downloadJobLogsForWorkflowRun: mock(),
+         listWorkflowRuns: mock(),
++        listWorkflowRunsForRepo: mock(),
+       },
+     },
+     paginate,

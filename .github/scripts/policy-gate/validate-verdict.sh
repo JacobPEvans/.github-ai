@@ -4,7 +4,7 @@
 # verifiable added line are removed; private-host findings also need a candidate. Unparsed paths
 # stay fail-closed. Dropped findings are recorded in GITHUB_STEP_SUMMARY.
 #
-# The fixed rubrics (policy, security, code, semantic) return exactly one finding per check, so a
+# The fixed rubrics (policy, security, semantic) return exactly one finding per check, so a
 # verdict must name each of its checks once and no other. The leak rubric returns one finding
 # per suspected item, and an empty array when nothing matches, so its verdict may repeat a
 # category and may have no findings. Every rubric accepts only the keys the renderer reads.
@@ -16,7 +16,6 @@ set -euo pipefail
 case "$RUBRIC" in
   policy) names='dry native_first disclosure missing_test token_budget'; exact=1 ;;
   security) names='auth injection permission_widening unsafe_trigger secret_handling'; exact=1 ;;
-  code) names='correctness regression missing_test native_first'; exact=1 ;;
   leak) names='credential private_host_or_ip internal_topology incident_detail'; exact=0 ;;
   semantic) names='claim_mismatch omitted_behavior'; exact=1 ;;
   *) echo "::error::Unknown rubric: $RUBRIC" >&2; exit 2 ;;
