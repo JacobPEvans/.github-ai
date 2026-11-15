@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.7.0](https://github.com/JacobPEvans/.github-ai/compare/v2.6.2...v2.7.0) (2026-11-15)
+
+
+### Features
+
+* **run-ai-agent:** add OpenHands as an agent ([#129](https://github.com/JacobPEvans/.github-ai/issues/129)) ([ba76cce](https://github.com/JacobPEvans/.github-ai/commit/ba76ccec9152ead230c9d75f345564d5583d3585))
+
 ## [2.6.2](https://github.com/JacobPEvans/.github-ai/compare/v2.6.1...v2.6.2) (2026-11-14)
 
 
