@@ -101,4 +101,6 @@ jobs:
           github-token: ${{ steps.mint.outputs.token }}
           sweep_owner: ${{ matrix.owner }}
           resolver_repo: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
+          ci_fix_workflow: ${{ vars.PR_RECONCILE_CI_FIX_WORKFLOW }}
+          ci_fix_skip_checks: ${{ vars.PR_RECONCILE_CI_FIX_SKIP_CHECKS }}
           exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
