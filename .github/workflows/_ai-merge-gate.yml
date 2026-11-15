@@ -7,13 +7,14 @@
 # "AI Merge Gate" on the pull request head, posted with the reviewer App
 # token so rulesets can pin the App. Its summary prepends the first rubric
 # line and carries exactly these contract lines:
-#   model:         the model ids the router reported for the reviews that ran
+#   model:         the model ids the reviews ran on, "override" for a review
+#                  that passed through its rubric's override label, else "none"
 #   author_family: the author's families, from the Assisted-by commit
 #                  trailers of the pull request, else "unknown"
 #   head:          the pull request head commit
 #   VERDICT:       MERGE, CHANGES or DEFERRED
 # The reviewer family is the family of the MODEL that wrote the review -
-# the "model" field of the router's chat completion, never the identity of
+# the model id policy-gate called the router with, never the identity of
 # the App that posts the check. A review from one of the author's own
 # families is refused: no model reviews its own work. The comparison lives
 # in the merge-gate mode of .github/scripts/policy-gate/validate-verdict.sh,
@@ -194,12 +195,17 @@ jobs:
       LEAK_RESULT: ${{ needs.leak.result }}
       SECURITY_RESULT: ${{ needs.security.result }}
       SEMANTIC_RESULT: ${{ needs.semantic.result }}
-      # The model id each review's router response reported, passed through
-      # policy-gate.yml's reviewer_model output. Empty for a review that
-      # never ran.
+      # The model id each review ran on, passed through policy-gate.yml's
+      # reviewer_model output. Empty for a review that never ran or was
+      # overridden. The status says which: "override" marks a review that
+      # passed through its rubric's override label, which counts as passed
+      # without the reviewer family rule.
       LEAK_MODEL: ${{ needs.leak.outputs.reviewer_model }}
       SECURITY_MODEL: ${{ needs.security.outputs.reviewer_model }}
       SEMANTIC_MODEL: ${{ needs.semantic.outputs.reviewer_model }}
+      LEAK_STATUS: ${{ needs.leak.outputs.verdict_status }}
+      SECURITY_STATUS: ${{ needs.security.outputs.verdict_status }}
+      SEMANTIC_STATUS: ${{ needs.semantic.outputs.verdict_status }}
       GH_TOKEN: ${{ github.token }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -262,15 +268,13 @@ jobs:
           FAMILIES_FILE: .ai-workflows/.github/scripts/policy-gate/model-families.json
         run: |
           set -euo pipefail
-          # One family per model vendor, from the shared map. A model id may
-          # carry a "provider/" path, which is ignored for matching.
+          # One family per model vendor, from the shared map. The definition
+          # of family_of lives once, in family-of.jq next to
+          # model-families.json; validate-verdict.sh includes the same file.
+          families_dir="${FAMILIES_FILE%/*}"
           family_of() {
-            jq -rn --slurpfile families "$FAMILIES_FILE" --arg model "$1" '
-              ($model | gsub("^\\s+|\\s+$"; "") | sub("^[^/]+/"; "") | ascii_downcase) as $id
-              | ($families[0]
-                 | map(select((.prefix | ascii_downcase) as $prefix | $id | startswith($prefix)))
-                 | first | .family) // "unknown"
-            '
+            jq -rnL "$families_dir" --slurpfile families "$FAMILIES_FILE" --arg model "$1" \
+              'include "family-of"; $model | family_of'
           }
 
           # A human-pushed pull request can still carry agent-written commits:
@@ -341,21 +345,29 @@ jobs:
             esac
           done
 
-          # The reviewer is the MODEL that wrote each review, taken from the
-          # "model" field of the router's chat completion - never the App that
-          # posts the check. A review that ran without one leaves the model
-          # list empty and refuses the gate below; with no review at all the
-          # family rule has nothing to compare and the model line reads "none".
+          # The reviewer is the MODEL that wrote each review, the model id
+          # policy-gate called the router with - never the App that posts the
+          # check. A review that passed through its rubric's override label
+          # counts as passed and is named "override"; the family rule in the
+          # validator does not apply to it. A review that ran without a model
+          # id leaves the model list empty and refuses the gate below; with
+          # no review at all the family rule has nothing to compare and the
+          # model line reads "none".
           models=""
           missing_model=false
-          for pair in "$LEAK_RESULT|$LEAK_MODEL" "$SECURITY_RESULT|$SECURITY_MODEL" "$SEMANTIC_RESULT|$SEMANTIC_MODEL"; do
+          for pair in "$LEAK_RESULT|$LEAK_STATUS|$LEAK_MODEL" "$SECURITY_RESULT|$SECURITY_STATUS|$SECURITY_MODEL" "$SEMANTIC_RESULT|$SEMANTIC_STATUS|$SEMANTIC_MODEL"; do
             result="${pair%%|*}"
-            model="${pair#*|}"
-            [[ "$result" == "success" ]] || continue
-            if [[ -n "$model" ]]; then
-              models+="$model"$'\n'
-            else
-              missing_model=true
+            model_status="${pair#*|}"
+            status="${model_status%%|*}"
+            model="${model_status#*|}"
+            if [[ "$status" == "override" ]]; then
+              models+="override"$'\n'
+            elif [[ "$result" == "success" ]]; then
+              if [[ -n "$model" ]]; then
+                models+="$model"$'\n'
+              else
+                missing_model=true
+              fi
             fi
           done
           if [[ "$missing_model" == true ]]; then

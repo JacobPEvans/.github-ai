@@ -96,9 +96,16 @@ on:
     outputs:
       reviewer_model:
         description: >-
-          The model id the router reported for this rubric's review, taken
-          from the chat completion response. Empty when no review ran.
+          The model id this workflow called the router with for this rubric's
+          review, the same input the inference step receives. Empty when no
+          review ran or the rubric's override label skipped the router call.
         value: ${{ jobs.review.outputs.reviewer_model }}
+      verdict_status:
+        description: >-
+          How the review settled: ok for a staged verdict, override when the
+          rubric's override label skipped the router call, and
+          router-request-failed when no verdict was produced.
+        value: ${{ jobs.review.outputs.verdict_status }}
     secrets:
       LLM_ROUTER_BASE_URL:
         description: >-
@@ -234,17 +241,25 @@ jobs:
           HAS_OVERRIDE: ${{ steps.override.outputs.has_override }}
           VERDICT_OUTCOME: ${{ steps.verdict.outcome }}
           RESPONSE_FILE: ${{ steps.verdict.outputs.response-file }}
+          # The reviewer model is the model id this workflow called the router
+          # with - the same input the inference step receives. The response
+          # file holds only the message content, so the id cannot be read
+          # from it. The AI Merge Gate compares this id's family against the
+          # author's families.
+          REVIEWER_MODEL: ${{ inputs.model }}
         run: |
           mkdir -p handoff
           if [ "$HAS_OVERRIDE" = "true" ]; then
             echo "status=override" >> "$GITHUB_OUTPUT"
           elif [ "$VERDICT_OUTCOME" = "success" ]; then
             cp "$RESPONSE_FILE" handoff/verdict.json
-            # The model that wrote the review, as the router resolved the role
-            # alias in its chat completion. The AI Merge Gate compares the
-            # family of this model id against the author's families, so it
-            # needs the real id, not the alias this workflow was called with.
-            reviewer_model="$(jq -r 'if (.model | type == "string") then .model else "" end | split("\n")[0]' handoff/verdict.json)"
+            # Never publish the literal "null": an empty or "null" id is an
+            # empty output, which the merge gate reports as an unknown
+            # reviewer model.
+            reviewer_model="$REVIEWER_MODEL"
+            case "$reviewer_model" in
+              ("" | "null") reviewer_model="" ;;
+            esac
             echo "reviewer_model=$reviewer_model" >> "$GITHUB_OUTPUT"
             echo "status=ok" >> "$GITHUB_OUTPUT"
           else

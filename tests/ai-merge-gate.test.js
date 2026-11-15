@@ -163,6 +163,17 @@ test('the reviewer family comes from the router responses, and the comparison li
   // logic read the App slug and the bot login to name families.
   expect(text).not.toContain('MODEL_LANES');
   expect(text).not.toMatch(/REVIEWER_SLUG|PR_AUTHOR_TYPE|app-slug.*family/);
+  // family_of is defined exactly once, in family-of.jq, and both consumers
+  // include that file instead of carrying their own copy of the definition.
+  const familiesDir = join('.github', 'scripts', 'policy-gate');
+  const shared = readFileSync(join(familiesDir, 'family-of.jq'), 'utf8');
+  expect(shared.match(/def family_of/g)).toHaveLength(1);
+  const validator = readFileSync(join(familiesDir, 'validate-verdict.sh'), 'utf8');
+  expect(validator).toContain('include "family-of"');
+  expect(validator).not.toContain('def family_of');
+  const authorFamily = stepById('author-family').run;
+  expect(authorFamily).toContain('include "family-of"');
+  expect(authorFamily).not.toContain('def family_of');
 });
 
 test('policy-gate publishes the model that wrote the review to its caller', () => {
@@ -172,8 +183,20 @@ test('policy-gate publishes the model that wrote the review to its caller', () =
   expect(review.outputs.reviewer_model).toBe('$' + '{{ steps.handoff.outputs.reviewer_model }}');
   const handoff = review.steps.find((step) => step.id === 'handoff');
   expect(handoff.env.RESPONSE_FILE).toBe('$' + '{{ steps.verdict.outputs.response-file }}');
-  expect(handoff.run).toContain('.model');
+  // The reviewer model is the model id the router is called with - the same
+  // input the inference step receives. The response file holds only the
+  // message content, so the model never comes from there.
+  expect(handoff.env.REVIEWER_MODEL).toBe('$' + '{{ inputs.model }}');
   expect(handoff.run).toContain('reviewer_model=');
+  expect(handoff.run).not.toContain('.model');
+});
+
+test('policy-gate exposes how each review settled to its caller', () => {
+  expect(policy.on.workflow_call.outputs.verdict_status.value).toBe('$' + '{{ jobs.review.outputs.verdict_status }}');
+  expect(policy.jobs.review.outputs.verdict_status).toBe('$' + '{{ steps.handoff.outputs.status }}');
+  for (const job of ['leak', 'security', 'semantic']) {
+    expect(gate.jobs.gate.env[`${job.toUpperCase()}_STATUS`]).toBe(`\${{ needs.${job}.outputs.verdict_status }}`);
+  }
 });
 
 test('the verdict check run is published with the reviewer App token', () => {
@@ -197,6 +220,7 @@ test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFER
   for (const scenario of fixture.gate_scenarios) {
     const [gitleaks, leak, security, semantic] = scenario.results;
     const [leakModel, securityModel, semanticModel] = scenario.models;
+    const [leakStatus, securityStatus, semanticStatus] = scenario.statuses ?? [];
     withGateWorkspace((dir) => {
       const { result, outputs } = runGateStep('verdict', dir, {
         IS_DRAFT: String(scenario.draft),
@@ -209,6 +233,9 @@ test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFER
         LEAK_MODEL: leakModel,
         SECURITY_MODEL: securityModel,
         SEMANTIC_MODEL: semanticModel,
+        LEAK_STATUS: leakStatus ?? '',
+        SECURITY_STATUS: securityStatus ?? '',
+        SEMANTIC_STATUS: semanticStatus ?? '',
         COPILOT_OUTCOME: 'success',
         COPILOT_FAILURES: scenario.copilot_failures ?? '0',
         AUTHOR_FAMILY: scenario.author_family ?? 'human',
@@ -235,6 +262,89 @@ test('the verdict aggregates every scan and review into MERGE, CHANGES, or DEFER
       expect(enforce.exitCode, scenario.name).toBe(scenario.exit_code);
     });
   }
+});
+
+test('the real handoff and verdict steps pass a cross-family review from a response file the action writes', () => {
+  withGateWorkspace((dir) => {
+    // actions/ai-inference writes only the message content to its response
+    // file: the verdict, {summary, findings} - no envelope, no model field.
+    const response = join(dir, 'response.json');
+    writeFileSync(response, JSON.stringify({ summary: 'No suspected leaks.', findings: [] }));
+
+    const handoffOutput = join(dir, 'handoff-output');
+    writeFileSync(handoffOutput, '');
+    const handoff = Bun.spawnSync(['/bin/bash', '-c', policy.jobs.review.steps.find((step) => step.id === 'handoff').run], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: handoffOutput,
+        HAS_OVERRIDE: 'false',
+        VERDICT_OUTCOME: 'success',
+        RESPONSE_FILE: response,
+        REVIEWER_MODEL: 'glm-4.7',
+      },
+    });
+    expect(handoff.exitCode, handoff.stderr.toString()).toBe(0);
+    const handoffOutputs = readOutputs(handoffOutput);
+    expect(handoffOutputs.status).toBe('ok');
+    // The reviewer model is the configured value, not anything read from the
+    // response file, so it is non-empty on a real run.
+    expect(handoffOutputs.reviewer_model).toBe('glm-4.7');
+
+    const model = handoffOutputs.reviewer_model;
+    const { result, outputs } = runGateStep('verdict', dir, {
+      IS_DRAFT: 'false',
+      REPO_PRIVATE: 'false',
+      ROUTER_AVAILABLE: 'true',
+      GITLEAKS_RESULT: 'success',
+      LEAK_RESULT: 'success',
+      SECURITY_RESULT: 'success',
+      SEMANTIC_RESULT: 'success',
+      LEAK_MODEL: model,
+      SECURITY_MODEL: model,
+      SEMANTIC_MODEL: model,
+      LEAK_STATUS: 'ok',
+      SECURITY_STATUS: 'ok',
+      SEMANTIC_STATUS: 'ok',
+      COPILOT_OUTCOME: 'success',
+      COPILOT_FAILURES: '0',
+      AUTHOR_FAMILY: 'human',
+      HEAD_SHA: 'b'.repeat(40),
+    });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    expect(outputs.conclusion, result.stderr.toString()).toBe('success');
+    const contract = JSON.parse(readFileSync(join(dir, 'ai-merge-gate.verdict.json'), 'utf8'));
+    expect(contract.model).toBe(model);
+    expect(contract.verdict).toBe('MERGE');
+
+    // The published summary shows that non-empty model line and the MERGE verdict.
+    const helperDir = join(dir, '.ai-workflows', '.github', 'scripts', 'shared');
+    const summaryArg = join(dir, 'captured-summary');
+    writeFileSync(join(helperDir, 'check-run.sh'), [
+      '#!/bin/sh',
+      `printf '%s' "$5" > '${summaryArg}'`,
+      '',
+    ].join('\n'));
+    chmodSync(join(helperDir, 'check-run.sh'), 0o755);
+    const publish = Bun.spawnSync(['/bin/bash', '-c', stepById('publish').run], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        GH_TOKEN: 'app-token',
+        CHECK_APP_SLUG: 'jpe-claude-bot',
+        CHECK_HEAD_SHA: 'b'.repeat(40),
+        GATE_CONCLUSION: outputs.conclusion,
+        GATE_REASON: '',
+        VERDICT_FILE: 'ai-merge-gate.verdict.json',
+        SUMMARY_FILE: 'ai-merge-gate.summary.md',
+        RUBRIC_LINE: fixture.rubric_line,
+      },
+    });
+    expect(publish.exitCode, publish.stderr.toString()).toBe(0);
+    const summary = readFileSync(summaryArg, 'utf8');
+    expect(summary.split('\n').find((line) => line.startsWith('model: '))).toBe(`model: ${model}`);
+    expect(summary).toContain('VERDICT: MERGE');
+  });
 });
 
 test('the author family comes from the Assisted-by trailers of the commits in the change', () => {

@@ -261,6 +261,35 @@ test('a model of none keeps the scan verdict and the scan reason', () => {
   });
 });
 
+test('keeps the verdict when every review passed through its override label', () => {
+  // An override has no reviewer model, so the family rule cannot and must
+  // not apply - even against an author family the map would otherwise
+  // refuse.
+  const result = mergeResult(mergeVerdict({ model: 'override', author_family: 'zhipu' }));
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('MERGE');
+  expect(result.outputs).toEqual({ verdict: 'MERGE', reason: '' });
+});
+
+test('an override keeps the scan verdict and the scan reason', () => {
+  const result = mergeResult(mergeVerdict({ model: 'override', verdict: 'DEFERRED' }), {
+    MERGE_GATE_REASON: '2 Copilot agent check(s) failed',
+  });
+  expect(result.exitCode).toBe(0);
+  expect(result.verdict).toBe('DEFERRED');
+  expect(result.outputs.reason).toBe('2 Copilot agent check(s) failed');
+});
+
+test('applies the family rule to the non-override reviewers only', () => {
+  const shared = mergeResult(mergeVerdict({ model: 'override, glm-4.7', author_family: 'zhipu' }));
+  expect(shared.exitCode).toBe(0);
+  expect(shared.verdict).toBe('CHANGES');
+  expect(shared.outputs.reason).toBe('reviewer and author share the family zhipu');
+  const cross = mergeResult(mergeVerdict({ model: 'override, glm-4.7', author_family: 'anthropic' }));
+  expect(cross.exitCode).toBe(0);
+  expect(cross.verdict).toBe('MERGE');
+});
+
 test('keeps the scan reason when the family check passes', () => {
   const result = mergeResult(mergeVerdict({}), { MERGE_GATE_REASON: '2 Copilot agent check(s) failed' });
   expect(result.exitCode).toBe(0);
