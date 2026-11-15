@@ -19,6 +19,11 @@
 # in the merge-gate mode of .github/scripts/policy-gate/validate-verdict.sh,
 # with the model-to-family map in model-families.json next to it.
 #
+# A merge_group run carries no reviews of its own: one mechanical job reads
+# the queue entry's pull request head and reports the required check name on
+# the queue commit, passing only when the reviewer App's verdict check run
+# is already successful there with VERDICT: MERGE or VERDICT: DEFERRED.
+#
 # Usage:
 #   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate.yml@v1
 name: _ai-merge-gate
@@ -34,6 +39,14 @@ on:
         type: string
         required: false
         default: ubuntu-24.04
+      reviewer_app_slug:
+        description: >-
+          Slug of the GitHub App whose "AI Merge Gate" verdict check run the
+          merge_group job accepts. Defaults to the reviewer App that
+          publishes the check run.
+        type: string
+        required: false
+        default: jpe-claude-bot
     secrets:
       LLM_ROUTER_BASE_URL:
         description: OpenAI-compatible base URL for the review router.
@@ -63,6 +76,7 @@ permissions:
 jobs:
   gitleaks:
     name: Gitleaks secret scan
+    if: github.event_name == 'pull_request'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
@@ -84,6 +98,7 @@ jobs:
 
   router:
     name: Review router availability
+    if: github.event_name == 'pull_request'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 2
     permissions: {}
@@ -106,7 +121,7 @@ jobs:
   leak:
     name: Leak review
     needs: router
-    if: needs.router.outputs.available == 'true' && !github.event.repository.private
+    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true' && !github.event.repository.private
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -127,7 +142,7 @@ jobs:
   security:
     name: Security review
     needs: router
-    if: needs.router.outputs.available == 'true'
+    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true'
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -146,7 +161,7 @@ jobs:
   semantic:
     name: Semantic review
     needs: router
-    if: needs.router.outputs.available == 'true'
+    if: github.event_name == 'pull_request' && needs.router.outputs.available == 'true'
     uses: ./.github/workflows/policy-gate.yml
     permissions:
       contents: read
@@ -164,7 +179,7 @@ jobs:
 
   gate:
     name: AI Merge Gate
-    if: always()
+    if: always() && github.event_name == 'pull_request'
     needs: [gitleaks, router, leak, security, semantic]
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 5
@@ -416,3 +431,116 @@ jobs:
             exit 1
           fi
           echo "AI Merge Gate verdict: $GATE_VERDICT"
+
+  # The merge queue's mechanical check: an entry is queued only after its
+  # required checks passed, so the verdict check run already exists on the
+  # pull request head. This job re-reads it and reports the same check name
+  # the ruleset requires on the queue commit, once - no model call.
+  merge-group:
+    name: AI Merge Gate
+    if: github.event_name == 'merge_group'
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 2
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Mint the check-run token
+        id: check-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+          permission-checks: write
+
+      - name: Checkout ai-workflows scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Verify the queued entry already carries its verdict
+        id: queue-verdict
+        timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ steps.check-token.outputs.token }}
+          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
+          CHECK_HEAD_SHA: ${{ github.event.merge_group.head_sha || github.sha }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          REPO_TOKEN: ${{ github.token }}
+          REVIEWER_APP_SLUG: ${{ inputs.reviewer_app_slug }}
+        run: |
+          set -euo pipefail
+          # The queue branch is [refs/heads/]gh-readonly-queue/<base>/pr-<number>-<sha>.
+          # Only the number is taken from it; the pull request head the verdict
+          # was posted on is read from the API below.
+          HEAD_SHA=unknown
+          if [[ "$HEAD_REF" =~ gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$ ]]; then
+            PR_NUMBER=${BASH_REMATCH[1]}
+          else
+            echo "::error::AI Merge Gate: unexpected queue branch '$HEAD_REF'; expected gh-readonly-queue/<base>/pr-<number>-<sha>"
+            bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
+              "AI Merge Gate" failure "AI Merge Gate" \
+              "unexpected queue branch '$HEAD_REF'; expected gh-readonly-queue/<base>/pr-<number>-<sha>"
+            exit 1
+          fi
+          # The gate reports the ruleset's required check from the reviewer
+          # App; without a minted token this job cannot report it at all.
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::AI Merge Gate: pull request #$PR_NUMBER (head $HEAD_SHA): cannot report the verdict without an App token"
+            exit 1
+          fi
+          # A refusal reports failure under the same check name and fails the
+          # job, so the queue entry never waits on a verdict that will never
+          # arrive.
+          refuse() {
+            echo "::error::AI Merge Gate: pull request #$PR_NUMBER (head $HEAD_SHA): $1"
+            bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
+              "AI Merge Gate" failure "AI Merge Gate" "pull request #$PR_NUMBER (head $HEAD_SHA): $1"
+            exit 1
+          }
+          HEAD_SHA="$(GH_TOKEN="$REPO_TOKEN" gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)" || HEAD_SHA=""
+          if [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA=unknown
+            refuse "could not read its head commit"
+          fi
+          # The API occasionally returns a transient HTML error page; retry
+          # with backoff and judge only a readable response, as the gate does.
+          RUNS=""
+          for i in 1 2 3; do
+            RUNS=$(gh api -X GET \
+              "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs" \
+              -f check_name="AI Merge Gate" \
+              -f filter=latest \
+              -f per_page=100) && break
+            sleep $((i * 5))
+          done
+          if [ -z "$RUNS" ]; then
+            refuse "could not read its check runs"
+          fi
+          if ! RUN="$(jq -r --arg name "AI Merge Gate" --arg slug "$REVIEWER_APP_SLUG" \
+            '(if type == "array" then . else (.check_runs // []) end)
+             | map(select(.name == $name and .app.slug == $slug))
+             | first // empty' <<< "$RUNS" 2>/dev/null)"; then
+            refuse "the check-run lookup returned an unreadable response"
+          fi
+          if [ -z "$RUN" ]; then
+            refuse "carries no 'AI Merge Gate' check run from the reviewer App $REVIEWER_APP_SLUG"
+          fi
+          CONCLUSION="$(jq -r '.conclusion // ""' <<< "$RUN")"
+          SUMMARY="$(jq -r '.output.summary // ""' <<< "$RUN")"
+          if [ "$CONCLUSION" != "success" ]; then
+            refuse "verdict check run concluded '${CONCLUSION:-none}', not success"
+          fi
+          if ! VERDICT_LINE="$(grep -xE 'VERDICT: (MERGE|DEFERRED)' <<< "$SUMMARY" | tail -n 1)"; then
+            refuse "verdict summary carries no 'VERDICT: MERGE' or 'VERDICT: DEFERRED' line"
+          fi
+          echo "AI Merge Gate: pull request #$PR_NUMBER (head $HEAD_SHA) carries an accepted verdict: $VERDICT_LINE"
+          bash .ai-workflows/.github/scripts/shared/check-run.sh upsert \
+            "AI Merge Gate" success "AI Merge Gate" \
+            "pull request #$PR_NUMBER (head $HEAD_SHA) carries $VERDICT_LINE from the reviewer App $REVIEWER_APP_SLUG"
