@@ -108,9 +108,12 @@ jobs:
   # passes on a clean verdict and fails on anything else, including an unknown
   # author model, a moved head or a router failure. Dependency and release bots
   # pass without a model, like the dependency-bot job above.
+  # The repository and same-repository terms match pr-agent's condition; a test keeps them equal.
   verdict:
     name: verdict/merge
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      (github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true') &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     concurrency:
       group: verdict-merge-${{ github.repository }}-${{ github.event.pull_request.number }}

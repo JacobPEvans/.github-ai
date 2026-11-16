@@ -67,6 +67,10 @@ test('the input-free AI Review entry fetches OpenBao credentials before running 
     expect(credsIndex, name).toBeGreaterThan(0);
     expect(job.steps.findIndex((step) => step.name === firstUse), name).toBeGreaterThan(credsIndex);
   }
+  // verdict/merge runs wherever pr-agent can obtain credentials: never in this repository unless dogfooding.
+  const gate = "(github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true') && github.event.pull_request.head.repo.full_name == github.repository";
+  expect(workflow.jobs.verdict.if).toBe(gate);
+  expect(workflow.jobs['pr-agent'].if).toContain(gate);
   expect(vault.with.role).toBe('ci-ai-review');
   expect(vault.with.path).toBe('github-actions');
   expect(vault.with.jwtGithubAudience).toBe('openbao');
