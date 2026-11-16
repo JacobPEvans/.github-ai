@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.14.0](https://github.com/JacobPEvans/.github-ai/compare/v2.13.1...v2.14.0) (2026-11-16)
+
+
+### Features
+
+* **ci-fix:** install the repository pre-commit hooks before the agent runs ([#164](https://github.com/JacobPEvans/.github-ai/issues/164)) ([cf6d7b9](https://github.com/JacobPEvans/.github-ai/commit/cf6d7b904c74b0185f3aff4301a976d3c9426918))
+
+
+### Bug Fixes
+
+* **ci-fix:** keep one failure comment per pull request ([#163](https://github.com/JacobPEvans/.github-ai/issues/163)) ([b138c1d](https://github.com/JacobPEvans/.github-ai/commit/b138c1dfdc54e1be5de9dc8bc9e6351faf962b6e))
+
 ## [2.13.1](https://github.com/JacobPEvans/.github-ai/compare/v2.13.0...v2.13.1) (2026-11-16)
 
 
