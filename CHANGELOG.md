@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.14.1](https://github.com/JacobPEvans/.github-ai/compare/v2.14.0...v2.14.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **ci-fix:** stop agent patches that edit any .github path ([#167](https://github.com/JacobPEvans/.github-ai/issues/167)) ([e4aadc3](https://github.com/JacobPEvans/.github-ai/commit/e4aadc358d3403665ce28e433e4a6c16aa78dcd5))
+
 ## [2.14.0](https://github.com/JacobPEvans/.github-ai/compare/v2.13.1...v2.14.0) (2026-11-16)
 
 
