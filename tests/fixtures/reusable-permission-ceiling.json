@@ -135,5 +135,11 @@
   "thread-triage.yml": {
     "contents": "read",
     "pull-requests": "write"
+  },
+  "verdict.yml": {
+    "actions": "read",
+    "contents": "read",
+    "id-token": "write",
+    "pull-requests": "read"
   }
 }

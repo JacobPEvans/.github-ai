@@ -2,15 +2,9 @@
 #
 # This entry has no inputs or secrets. It keeps the scope classifier, bot skip,
 # and fork guard, then runs the shared PR-Agent runner with the central rubric.
-# The OpenBao role binds to this workflow's OIDC identity, so its credential
-# lookup lives in this workflow instead of the reusable workflow below.
+# The verdict job calls verdict.yml, whose OIDC identity the ci-ai-review
+# OpenBao role binds; pr-agent here shares the router-creds action.
 name: AI Review
-
-# Each value is a vault-action selector: `<mount>/data/<path> <field>`, readable by the ci-ai-review policy.
-env:
-  OPENBAO_ROUTER_KEY_PATH: "secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key"
-  OPENBAO_ROUTER_OSS_KEY_PATH: "secret/data/apps/github-actions-oss github_actions_oss_llm_router_key"
-  OPENBAO_ROUTER_URL_PATH: "config/data/ci-ai-review base_url"
 
 on:
   pull_request:
@@ -83,10 +77,6 @@ jobs:
       - name: Read PR-Agent router credentials from OpenBao
         id: router-creds
         uses: ./.ai-workflows/.github/actions/router-creds
-        with:
-          key-path: ${{ env.OPENBAO_ROUTER_KEY_PATH }}
-          oss-key-path: ${{ env.OPENBAO_ROUTER_OSS_KEY_PATH }}
-          url-path: ${{ env.OPENBAO_ROUTER_URL_PATH }}
 
       - name: Run PR-Agent review
         env:
@@ -103,157 +93,12 @@ jobs:
           RUN_DESCRIBE: 'false'
         run: bash .ai-workflows/.github/scripts/pr-agent/run.sh
 
-  # Hold class: a changed path in the shared hold-class list, or a hold label.
-  # A hold-class pull request runs verdict/merge in the `hold` Environment,
-  # which waits for its required reviewers.
-  hold-class:
-    name: Classify hold
-    runs-on: ubuntu-26.04
+  # Dogfood path for this repository's own pull requests; org AI Review
+  # workflows call verdict.yml@v2 the same way.
+  verdict:
     permissions:
       contents: read
       pull-requests: read
       actions: read
-    timeout-minutes: 5
-    outputs:
-      hold: ${{ steps.classify.outputs.hold }}
-    steps:
-      - name: Checkout hold-class list
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: JacobPEvans/.github-ai
-          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
-          sparse-checkout: .github/scripts/verdict
-          sparse-checkout-cone-mode: false
-          path: .ai-workflows
-          persist-credentials: false
-
-      - name: Classify the pull request
-        id: classify
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HOLD_FILE: .ai-workflows/.github/scripts/verdict/hold-class.json
-        with:
-          script: |
-            const run = require('./.ai-workflows/.github/scripts/verdict/hold-class.js');
-            await run({ github, context, core });
-
-  # Job id `verdict`; its check name, the one rulesets require, is `verdict/merge`.
-  # The merge verdict: the code rubric, answered by a model of a different family
-  # than every commit's Assisted-by trailer names, at the event's exact head. It
-  # passes on a clean verdict and fails on anything else, including an unknown
-  # author model, a moved head or a router failure. A dependency or release bot
-  # that authored every commit passes without a model.
-  # Assisted-by trailers are self-declared, so the family check holds only
-  # against agents that declare their model honestly.
-  # The repository term matches pr-agent's condition; a test keeps them equal.
-  # Never skipped elsewhere: a skipped job would satisfy a required check, so a
-  # fork head or a failed classification fails inside the job.
-  verdict:
-    name: verdict/merge
-    needs: hold-class
-    if: >-
-      !cancelled() &&
-      (github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true')
-    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'self-hosted' || 'ubuntu-26.04' }}
-    environment: ${{ needs.hold-class.outputs.hold == 'true' && 'hold' || '' }}
-    concurrency:
-      group: verdict-merge-${{ github.repository }}-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
-    permissions:
-      contents: read
-      pull-requests: read
       id-token: write
-    timeout-minutes: 5
-    env:
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-    steps:
-      - name: Require a same-repository head
-        if: github.event.pull_request.head.repo.full_name != github.repository
-        run: echo "::error::A fork pull request gets no verdict." && exit 1
-
-      - name: Require a hold classification
-        if: needs.hold-class.result != 'success'
-        run: echo "::error::The hold classification did not succeed." && exit 1
-
-      # Data only: the diff is read, no pull request code runs in this job.
-      # Checked out first, at the root, because a root checkout clears the
-      # workspace.
-      - name: Checkout pull request head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ env.HEAD_SHA }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Checkout verdict scripts and actions
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: JacobPEvans/.github-ai
-          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
-          sparse-checkout: |
-            .github/scripts
-            .github/actions/router-creds
-            .github/actions/rubric-verdict
-            .github/actions/checkout-prompts
-          sparse-checkout-cone-mode: false
-          path: .ai-workflows
-          persist-credentials: false
-
-      - name: Read router credentials from OpenBao
-        id: router-creds
-        uses: ./.ai-workflows/.github/actions/router-creds
-        with:
-          key-path: ${{ env.OPENBAO_ROUTER_KEY_PATH }}
-          oss-key-path: ${{ env.OPENBAO_ROUTER_OSS_KEY_PATH }}
-          url-path: ${{ env.OPENBAO_ROUTER_URL_PATH }}
-
-      - name: List the models the router serves for this key
-        id: served
-        env:
-          BASE_URL: ${{ steps.router-creds.outputs.base-url }}
-          API_KEY: ${{ steps.router-creds.outputs.api-key }}
-        run: bash .ai-workflows/.github/scripts/verdict/served-models.sh
-
-      - name: Pick a reviewer of another model family
-        id: pick
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          VISIBILITY: ${{ github.event.repository.private && 'private' || 'public' }}
-          ROUTER_MODELS: ${{ steps.served.outputs.models }}
-          FAMILIES_FILE: .ai-workflows/.github/scripts/verdict/model-families.json
-        with:
-          script: |
-            const run = require('./.ai-workflows/.github/scripts/verdict/pick-reviewer.js');
-            await run({ github, context, core });
-
-      - name: Checkout prompt catalog
-        if: steps.pick.outputs.skip != 'true'
-        uses: ./.ai-workflows/.github/actions/checkout-prompts
-        with:
-          sparse-checkout: automation/ai-workflows-code-review.prompt.yml
-
-      - name: Request the code verdict
-        id: verdict
-        if: steps.pick.outputs.skip != 'true'
-        uses: ./.ai-workflows/.github/actions/rubric-verdict
-        with:
-          rubric: code
-          prompt-name: code-review
-          model: ${{ steps.pick.outputs.model }}
-          endpoint: ${{ steps.router-creds.outputs.base-url }}
-          token: ${{ steps.router-creds.outputs.api-key }}
-          base-sha: ${{ github.event.pull_request.base.sha }}
-          head-sha: ${{ env.HEAD_SHA }}
-
-      - name: Decide the verdict
-        if: steps.pick.outputs.skip != 'true'
-        env:
-          OUTCOME: ${{ steps.verdict.outputs.outcome }}
-          RESPONSE_FILE: ${{ steps.verdict.outputs.response-file }}
-          MODEL: ${{ steps.pick.outputs.model }}
-          FAMILY: ${{ steps.pick.outputs.family }}
-          AUTHOR_FAMILIES: ${{ steps.pick.outputs.author_families }}
-        run: bash .ai-workflows/.github/scripts/verdict/decide.sh
+    uses: ./.github/workflows/verdict.yml

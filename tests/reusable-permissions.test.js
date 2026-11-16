@@ -35,11 +35,15 @@ test('finds the reusable workflows whose daily-limit check needs actions: read',
   expect(names).toContain('best-practices.yml');
 });
 
+// verdict.yml is the one reusable whose OIDC identity an OpenBao role binds.
+const OIDC_REUSABLES = { 'verdict.yml': ['verdict'] };
+
 for (const [name, workflow] of reusables) {
-  test(`${name} does not require id-token from reusable callers`, () => {
+  test(`${name} requires id-token only in the jobs an OpenBao role binds`, () => {
     expect(workflow.permissions?.['id-token']).toBeUndefined();
     for (const [job, definition] of Object.entries(workflow.jobs ?? {})) {
-      expect(definition.permissions?.['id-token'], `job ${job}`).toBeUndefined();
+      const expected = (OIDC_REUSABLES[name] ?? []).includes(job) ? 'write' : undefined;
+      expect(definition.permissions?.['id-token'], `job ${job}`).toBe(expected);
     }
   });
 
@@ -51,42 +55,48 @@ for (const [name, workflow] of reusables) {
   });
 }
 
-test('the input-free AI Review entry fetches OpenBao credentials before running PR-Agent', () => {
-  const workflow = Bun.YAML.parse(readFileSync(join(dir, 'ai-review.yml'), 'utf8'));
+test('pr-agent and verdict read OpenBao credentials through router-creds before using them', () => {
+  const review = Bun.YAML.parse(readFileSync(join(dir, 'ai-review.yml'), 'utf8'));
+  const verdictFile = Bun.YAML.parse(readFileSync(join(dir, 'verdict.yml'), 'utf8'));
   const action = Bun.YAML.parse(readFileSync(join('.github', 'actions', 'router-creds', 'action.yml'), 'utf8'));
   const vault = action.runs.steps.find((step) => step.uses?.startsWith('hashicorp/vault-action@'));
 
-  expect(workflow.jobs.scope.permissions['id-token']).toBeUndefined();
-  expect(workflow.jobs['dependency-bot'].permissions['id-token']).toBeUndefined();
-  for (const [name, firstUse] of [['pr-agent', 'Run PR-Agent review'], ['verdict', 'List the models the router serves for this key']]) {
-    const job = workflow.jobs[name];
+  expect(review.jobs.scope.permissions['id-token']).toBeUndefined();
+  expect(review.jobs['dependency-bot'].permissions['id-token']).toBeUndefined();
+  for (const [job, firstUse] of [[review.jobs['pr-agent'], 'Run PR-Agent review'], [verdictFile.jobs.verdict, 'List the models the router serves for this key']]) {
     const credsIndex = job.steps.findIndex((step) => step.uses === './.ai-workflows/.github/actions/router-creds');
-    expect(job.permissions['id-token'], name).toBe('write');
-    expect(credsIndex, name).toBeGreaterThan(0);
-    expect(job.steps.findIndex((step) => step.name === firstUse), name).toBeGreaterThan(credsIndex);
+    expect(job.permissions['id-token'], firstUse).toBe('write');
+    expect(credsIndex, firstUse).toBeGreaterThan(0);
+    expect(job.steps[credsIndex].with, firstUse).toBeUndefined();
+    expect(job.steps.findIndex((step) => step.name === firstUse), firstUse).toBeGreaterThan(credsIndex);
   }
-  const sameRepo = 'github.event.pull_request.head.repo.full_name == github.repository';
-  expect(workflow.jobs['pr-agent']['runs-on']).toBe('self-hosted');
-  expect(workflow.jobs['pr-agent'].if).toContain(sameRepo);
-  // verdict/merge is never skipped for a fork: it runs on a hosted runner and fails before any credential step.
-  const verdict = workflow.jobs.verdict;
-  expect(verdict['runs-on']).toBe(`\${{ ${sameRepo} && 'self-hosted' || 'ubuntu-26.04' }}`);
-  const forkStep = verdict.steps.findIndex((step) => step.name === 'Require a same-repository head');
-  expect(forkStep).toBe(0);
-  expect(verdict.steps[forkStep].if).toBe(sameRepo.replace('==', '!='));
-  expect(verdict.environment).toBe("${{ needs.hold-class.outputs.hold == 'true' && 'hold' || '' }}");
-  // verdict/merge runs where pr-agent can obtain credentials: never in this repository unless dogfooding.
-  const gate = "(github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true')";
-  expect(verdict.if).toBe(`!cancelled() && ${gate}`);
-  expect(workflow.jobs['pr-agent'].if).toContain(gate);
-  expect(workflow.jobs['hold-class'].permissions['id-token']).toBeUndefined();
   expect(vault.with.role).toBe('ci-ai-review');
   expect(vault.with.path).toBe('github-actions');
   expect(vault.with.jwtGithubAudience).toBe('openbao');
   expect(vault.with.exportEnv).toBe(false);
-  expect(workflow.env.OPENBAO_ROUTER_KEY_PATH).toBe('secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key');
-  expect(workflow.env.OPENBAO_ROUTER_OSS_KEY_PATH).toBe('secret/data/apps/github-actions-oss github_actions_oss_llm_router_key');
-  expect(workflow.env.OPENBAO_ROUTER_URL_PATH).toBe('config/data/ci-ai-review base_url');
+  expect(action.inputs['key-path'].default).toBe('secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key');
+  expect(action.inputs['oss-key-path'].default).toBe('secret/data/apps/github-actions-oss github_actions_oss_llm_router_key');
+  expect(action.inputs['url-path'].default).toBe('config/data/ci-ai-review base_url');
+});
+
+test('verdict.yml never skips verdict/merge outside this repository', () => {
+  const review = Bun.YAML.parse(readFileSync(join(dir, 'ai-review.yml'), 'utf8'));
+  const { jobs } = Bun.YAML.parse(readFileSync(join(dir, 'verdict.yml'), 'utf8'));
+  const sameRepo = 'github.event.pull_request.head.repo.full_name == github.repository';
+  const gate = "github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true'";
+
+  expect(review.jobs['pr-agent']['runs-on']).toBe('self-hosted');
+  expect(review.jobs['pr-agent'].if).toContain(sameRepo);
+  // Both run only where pr-agent can obtain credentials: never in this repository unless dogfooding.
+  expect(review.jobs['pr-agent'].if).toContain(`(${gate})`);
+  expect(jobs['hold-class'].if).toBe(gate);
+  expect(jobs.verdict.if).toBe(`!cancelled() && (${gate})`);
+  // A fork head runs on a hosted runner and fails before any credential step.
+  expect(jobs.verdict['runs-on']).toBe(`\${{ ${sameRepo} && 'self-hosted' || 'ubuntu-26.04' }}`);
+  expect(jobs.verdict.steps[0].name).toBe('Require a same-repository head');
+  expect(jobs.verdict.steps[0].if).toBe(sameRepo.replace('==', '!='));
+  expect(jobs.verdict.environment).toBe("${{ needs.hold-class.outputs.hold == 'true' && 'hold' || '' }}");
+  expect(review.jobs.verdict.uses).toBe('./.github/workflows/verdict.yml');
 });
 
 test('PR-Agent keeps its existing secret interface and uses the reachable open-source role by default', () => {
