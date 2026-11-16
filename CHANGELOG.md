@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.13.0](https://github.com/JacobPEvans/.github-ai/compare/v2.12.0...v2.13.0) (2026-11-16)
+
+
+### Features
+
+* **ai-review:** add the reusable verdict workflow with hold review ([#158](https://github.com/JacobPEvans/.github-ai/issues/158)) ([11230df](https://github.com/JacobPEvans/.github-ai/commit/11230df0a0e60026a5974606d235d7664a4a534c))
+
 ## [2.12.0](https://github.com/JacobPEvans/.github-ai/compare/v2.11.4...v2.12.0) (2026-11-16)
 
 
