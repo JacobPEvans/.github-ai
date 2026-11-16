@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.13.1](https://github.com/JacobPEvans/.github-ai/compare/v2.13.0...v2.13.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** run the sweep on the org self-hosted runners ([#160](https://github.com/JacobPEvans/.github-ai/issues/160)) ([43ae86e](https://github.com/JacobPEvans/.github-ai/commit/43ae86e15b7d0e365394d2009b7e80f2b48bad82))
+
 ## [2.13.0](https://github.com/JacobPEvans/.github-ai/compare/v2.12.0...v2.13.0) (2026-11-16)
 
 
