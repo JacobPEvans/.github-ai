@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.12.0](https://github.com/JacobPEvans/.github-ai/compare/v2.11.4...v2.12.0) (2026-11-16)
+
+
+### Features
+
+* **ai-review:** add the verdict/merge job ([#156](https://github.com/JacobPEvans/.github-ai/issues/156)) ([6d9b854](https://github.com/JacobPEvans/.github-ai/commit/6d9b8543d821f032c3ed0ffcac938c9cb73f82c3))
+
 ## [2.11.4](https://github.com/JacobPEvans/.github-ai/compare/v2.11.3...v2.11.4) (2026-11-16)
 
 
