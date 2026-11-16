@@ -62,15 +62,24 @@ test('the input-free AI Review entry fetches OpenBao credentials before running 
     const job = workflow.jobs[name];
     const credsIndex = job.steps.findIndex((step) => step.uses === './.ai-workflows/.github/actions/router-creds');
     expect(job.permissions['id-token'], name).toBe('write');
-    expect(job['runs-on'], name).toBe('self-hosted');
-    expect(job.if, name).toContain('github.event.pull_request.head.repo.full_name == github.repository');
     expect(credsIndex, name).toBeGreaterThan(0);
     expect(job.steps.findIndex((step) => step.name === firstUse), name).toBeGreaterThan(credsIndex);
   }
-  // verdict/merge runs wherever pr-agent can obtain credentials: never in this repository unless dogfooding.
-  const gate = "(github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true') && github.event.pull_request.head.repo.full_name == github.repository";
-  expect(workflow.jobs.verdict.if).toBe(gate);
+  const sameRepo = 'github.event.pull_request.head.repo.full_name == github.repository';
+  expect(workflow.jobs['pr-agent']['runs-on']).toBe('self-hosted');
+  expect(workflow.jobs['pr-agent'].if).toContain(sameRepo);
+  // verdict/merge is never skipped for a fork: it runs on a hosted runner and fails before any credential step.
+  const verdict = workflow.jobs.verdict;
+  expect(verdict['runs-on']).toBe(`\${{ ${sameRepo} && 'self-hosted' || 'ubuntu-26.04' }}`);
+  const forkStep = verdict.steps.findIndex((step) => step.name === 'Require a same-repository head');
+  expect(forkStep).toBe(0);
+  expect(verdict.steps[forkStep].if).toBe(sameRepo.replace('==', '!='));
+  expect(verdict.environment).toBe("${{ needs.hold-class.outputs.hold == 'true' && 'hold' || '' }}");
+  // verdict/merge runs where pr-agent can obtain credentials: never in this repository unless dogfooding.
+  const gate = "(github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true')";
+  expect(verdict.if).toBe(`!cancelled() && ${gate}`);
   expect(workflow.jobs['pr-agent'].if).toContain(gate);
+  expect(workflow.jobs['hold-class'].permissions['id-token']).toBeUndefined();
   expect(vault.with.role).toBe('ci-ai-review');
   expect(vault.with.path).toBe('github-actions');
   expect(vault.with.jwtGithubAudience).toBe('openbao');

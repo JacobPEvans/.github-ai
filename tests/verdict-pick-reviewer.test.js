@@ -45,14 +45,38 @@ describe('pick-reviewer', () => {
     delete process.env.ROUTER_MODELS;
   });
 
-  it('skips for no-model authors without calling pulls.get', async () => {
+  it('skips the model when a no-model bot authored every commit', async () => {
     process.env.PR_AUTHOR = 'renovate[bot]';
-    const { github, pullsGet } = makeGithub(HEAD_SHA, []);
+    const commits = [
+      { sha: 'b0b0000111122223', parents: ['a'], author: { login: 'renovate[bot]' }, commit: { message: 'chore(deps): bump x' } },
+    ];
+    const { github } = makeGithub(HEAD_SHA, commits);
     await run({ github, context, core });
+    expect(core.failures).toHaveLength(0);
     expect(core.getOutput('skip')).toBe('true');
     expect(core.getOutput('model')).toBe('');
     expect(core.getOutput('family')).toBe('');
-    expect(pullsGet).not.toHaveBeenCalled();
+  });
+
+  it('reviews a bot pull request that carries a commit by someone else', async () => {
+    process.env.PR_AUTHOR = 'renovate[bot]';
+    const commits = [
+      { sha: 'b0b0000111122223', parents: ['a'], author: { login: 'renovate[bot]' }, commit: { message: 'chore(deps): bump x' } },
+      { sha: 'b0b0000444455556', parents: ['b'], author: { login: 'someone' }, commit: { message: 'fix: y\n\nAssisted-by: Claude:claude-opus-5-5' } },
+    ];
+    const { github } = makeGithub(HEAD_SHA, commits);
+    await run({ github, context, core });
+    expect(core.getOutput('skip')).not.toBe('true');
+    expect(core.failures).toHaveLength(1);
+    expect(core.failures[0]).toContain('no Assisted-by trailer');
+  });
+
+  it('checks the head before skipping a bot pull request', async () => {
+    process.env.PR_AUTHOR = 'renovate[bot]';
+    const { github } = makeGithub('deadbeef0001111', []);
+    await run({ github, context, core });
+    expect(core.failures[0]).toContain('head moved');
+    expect(core.getOutput('skip')).toBeUndefined();
   });
 
   it('picks medium for a Claude-authored commit', async () => {

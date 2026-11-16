@@ -103,19 +103,60 @@ jobs:
           RUN_DESCRIBE: 'false'
         run: bash .ai-workflows/.github/scripts/pr-agent/run.sh
 
+  # Hold class: a changed path in the shared hold-class list, or a hold label.
+  # A hold-class pull request runs verdict/merge in the `hold` Environment,
+  # which waits for its required reviewers.
+  hold-class:
+    name: Classify hold
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    timeout-minutes: 5
+    outputs:
+      hold: ${{ steps.classify.outputs.hold }}
+    steps:
+      - name: Checkout hold-class list
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
+          sparse-checkout: .github/scripts/verdict
+          sparse-checkout-cone-mode: false
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Classify the pull request
+        id: classify
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HOLD_FILE: .ai-workflows/.github/scripts/verdict/hold-class.json
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/verdict/hold-class.js');
+            await run({ github, context, core });
+
   # Job id `verdict`; its check name, the one rulesets require, is `verdict/merge`.
   # The merge verdict: the code rubric, answered by a model of a different family
   # than every commit's Assisted-by trailer names, at the event's exact head. It
   # passes on a clean verdict and fails on anything else, including an unknown
-  # author model, a moved head or a router failure. Dependency and release bots
-  # pass without a model, like the dependency-bot job above.
-  # The repository and same-repository terms match pr-agent's condition; a test keeps them equal.
+  # author model, a moved head or a router failure. A dependency or release bot
+  # that authored every commit passes without a model.
+  # Assisted-by trailers are self-declared, so the family check holds only
+  # against agents that declare their model honestly.
+  # The repository term matches pr-agent's condition; a test keeps them equal.
+  # Never skipped elsewhere: a skipped job would satisfy a required check, so a
+  # fork head or a failed classification fails inside the job.
   verdict:
     name: verdict/merge
+    needs: hold-class
     if: >-
-      (github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true') &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: self-hosted
+      !cancelled() &&
+      (github.repository != 'JacobPEvans/.github-ai' || vars.DOGFOOD_SELF_HOSTED == 'true')
+    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'self-hosted' || 'ubuntu-26.04' }}
+    environment: ${{ needs.hold-class.outputs.hold == 'true' && 'hold' || '' }}
     concurrency:
       group: verdict-merge-${{ github.repository }}-${{ github.event.pull_request.number }}
       cancel-in-progress: true
@@ -127,6 +168,14 @@ jobs:
     env:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
+      - name: Require a same-repository head
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: echo "::error::A fork pull request gets no verdict." && exit 1
+
+      - name: Require a hold classification
+        if: needs.hold-class.result != 'success'
+        run: echo "::error::The hold classification did not succeed." && exit 1
+
       # Data only: the diff is read, no pull request code runs in this job.
       # Checked out first, at the root, because a root checkout clears the
       # workspace.
