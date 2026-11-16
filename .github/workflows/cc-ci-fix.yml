@@ -434,32 +434,12 @@ jobs:
         with:
           name: ci-fix-${{ github.run_id }}
 
-      # The commit token has contents: write only, which cannot change workflow
-      # files; such a patch stops here, and stays in the run's agent patch artifact.
-      - name: Stop a patch that edits workflow files
+      # The publisher never commits a patch that touches any .github/ path; such a
+      # patch stops here, and stays in the run's agent patch artifact.
+      - name: Stop a patch that edits .github files
         id: workflow-files
         if: steps.pr-open.outputs.open == 'true'
-        run: |
-          if [ -s agent.patch ] && grep -qE '^diff --git a/\.github/workflows/' agent.patch; then
-            echo "touched=true" >> "$GITHUB_OUTPUT"
-            echo "::notice title=CI fix stopped by design::The patch edits .github/workflows/; it was not committed."
-            {
-              echo "### CI fix stopped by design"
-              echo
-              echo "The patch edits \`.github/workflows/\`, which the publisher does not commit."
-              echo "The patch is in the \`ci-fix-${GITHUB_RUN_ID}\` artifact of this run."
-              echo
-              echo "<details><summary>Patch</summary>"
-              echo
-              echo '```diff'
-              head -c 60000 agent.patch
-              echo '```'
-              echo
-              echo "</details>"
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "touched=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: bash .ai-workflows/.github/scripts/ci-fix/stop-github-patch.sh
 
       - name: Apply agent patch
         if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
