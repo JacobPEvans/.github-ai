@@ -53,22 +53,24 @@ for (const [name, workflow] of reusables) {
 
 test('the input-free AI Review entry fetches OpenBao credentials before running PR-Agent', () => {
   const workflow = Bun.YAML.parse(readFileSync(join(dir, 'ai-review.yml'), 'utf8'));
-  const agent = workflow.jobs['pr-agent'];
-  const steps = agent.steps;
-  const vaultIndex = steps.findIndex((step) => step.uses?.startsWith('hashicorp/vault-action@'));
-  const reviewIndex = steps.findIndex((step) => step.name === 'Run PR-Agent review');
+  const action = Bun.YAML.parse(readFileSync(join('.github', 'actions', 'router-creds', 'action.yml'), 'utf8'));
+  const vault = action.runs.steps.find((step) => step.uses?.startsWith('hashicorp/vault-action@'));
 
-  expect(workflow.jobs['pr-agent'].permissions['id-token']).toBe('write');
   expect(workflow.jobs.scope.permissions['id-token']).toBeUndefined();
   expect(workflow.jobs['dependency-bot'].permissions['id-token']).toBeUndefined();
-  expect(agent['runs-on']).toBe('self-hosted');
-  expect(agent.if).toContain('github.event.pull_request.head.repo.full_name == github.repository');
-  expect(vaultIndex).toBeGreaterThan(0);
-  expect(reviewIndex).toBeGreaterThan(vaultIndex);
-  expect(steps[vaultIndex].with.role).toBe('ci-ai-review');
-  expect(steps[vaultIndex].with.path).toBe('github-actions');
-  expect(steps[vaultIndex].with.jwtGithubAudience).toBe('openbao');
-  expect(steps[vaultIndex].with.exportEnv).toBe(false);
+  for (const [name, firstUse] of [['pr-agent', 'Run PR-Agent review'], ['verdict', 'List the models the router serves for this key']]) {
+    const job = workflow.jobs[name];
+    const credsIndex = job.steps.findIndex((step) => step.uses === './.ai-workflows/.github/actions/router-creds');
+    expect(job.permissions['id-token'], name).toBe('write');
+    expect(job['runs-on'], name).toBe('self-hosted');
+    expect(job.if, name).toContain('github.event.pull_request.head.repo.full_name == github.repository');
+    expect(credsIndex, name).toBeGreaterThan(0);
+    expect(job.steps.findIndex((step) => step.name === firstUse), name).toBeGreaterThan(credsIndex);
+  }
+  expect(vault.with.role).toBe('ci-ai-review');
+  expect(vault.with.path).toBe('github-actions');
+  expect(vault.with.jwtGithubAudience).toBe('openbao');
+  expect(vault.with.exportEnv).toBe(false);
   expect(workflow.env.OPENBAO_ROUTER_KEY_PATH).toBe('secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key');
   expect(workflow.env.OPENBAO_ROUTER_OSS_KEY_PATH).toBe('secret/data/apps/github-actions-oss github_actions_oss_llm_router_key');
   expect(workflow.env.OPENBAO_ROUTER_URL_PATH).toBe('config/data/ci-ai-review base_url');

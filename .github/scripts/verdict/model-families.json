@@ -1,0 +1,21 @@
+{
+  "families": {
+    "claude": ["claude", "anthropic", "opus", "sonnet", "haiku", "fable"],
+    "openai": ["codex", "gpt", "openai"],
+    "qwen": ["qwen", "mimo"],
+    "glm": ["glm", "zai", "z.ai"],
+    "gemini": ["gemini", "antigravity"]
+  },
+  "reviewers": {
+    "claude": { "public": ["review-oss"], "private": ["medium"] },
+    "openai": { "public": ["review-oss"], "private": ["medium"] },
+    "qwen": { "public": [], "private": [] },
+    "glm": { "public": ["review-oss"], "private": ["medium"] },
+    "gemini": { "public": ["review-oss"], "private": ["medium"] }
+  },
+  "alias_families": {
+    "review-oss": "qwen",
+    "medium": "qwen"
+  },
+  "no_model_authors": ["renovate[bot]", "jacobpevans-release-please[bot]"]
+}
