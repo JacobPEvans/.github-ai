@@ -378,14 +378,8 @@ jobs:
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: write
+      pull-requests: read
     steps:
-      - name: Checkout PR branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
-          fetch-depth: 0
-          persist-credentials: false
-
       - name: Checkout publisher
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -395,12 +389,72 @@ jobs:
           path: .ai-workflows
           persist-credentials: false
 
+      # The PR may merge or close while the agent runs, and its branch is then
+      # often deleted; every later step is skipped instead of failing.
+      - name: Check the pull request is still open
+        id: pr-open
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/pr-still-open.js');
+            await run({ github, context, core });
+
+      - name: Checkout PR branch
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The root checkout above empties the workspace, publisher included.
+      - name: Checkout publisher again
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+          persist-credentials: false
+
       - name: Download agent patch
+        if: steps.pr-open.outputs.open == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ci-fix-${{ github.run_id }}
 
+      # The commit token has contents: write only, which cannot change workflow
+      # files; such a patch stops here, and stays in the run's agent patch artifact.
+      - name: Stop a patch that edits workflow files
+        id: workflow-files
+        if: steps.pr-open.outputs.open == 'true'
+        run: |
+          if [ -s agent.patch ] && grep -qE '^diff --git a/\.github/workflows/' agent.patch; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=CI fix stopped by design::The patch edits .github/workflows/; it was not committed."
+            {
+              echo "### CI fix stopped by design"
+              echo
+              echo "The patch edits \`.github/workflows/\`, which the publisher does not commit."
+              echo "The patch is in the \`ci-fix-${GITHUB_RUN_ID}\` artifact of this run."
+              echo
+              echo "<details><summary>Patch</summary>"
+              echo
+              echo '```diff'
+              head -c 60000 agent.patch
+              echo '```'
+              echo
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Apply agent patch
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
         run: |
           if [ -s agent.patch ]; then
             git apply agent.patch
@@ -410,6 +464,7 @@ jobs:
       # The fresh publisher alone receives the App token.
       - name: Mint commit token
         id: commit-token
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}
@@ -417,6 +472,7 @@ jobs:
           permission-contents: write
 
       - name: Commit fix to PR branch
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}

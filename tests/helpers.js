@@ -51,6 +51,7 @@ function createMockGithub() {
         listForRef: mock(),
       },
       repos: {
+        get: mock(async () => ({ data: { default_branch: 'main' } })),
         getContent: mock(),
         getCommit: mock(),
         listCommits: mock(),

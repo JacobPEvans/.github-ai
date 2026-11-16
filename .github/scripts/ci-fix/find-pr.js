@@ -4,6 +4,19 @@ module.exports = async ({ github, context, core }) => {
     core.setFailed('FAILURE_HEAD_BRANCH is required');
     return;
   }
+  let defaultBranch = context.payload.repository?.default_branch;
+  if (!defaultBranch) {
+    const { data } = await github.rest.repos.get({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+    });
+    defaultBranch = data.default_branch;
+  }
+  if (branch === defaultBranch) {
+    core.info(`Branch ${branch} is the default branch; no fix`);
+    core.setOutput('pr_number', '');
+    return;
+  }
   const { data: prs } = await github.rest.pulls.list({
     owner: context.repo.owner,
     repo: context.repo.repo,
