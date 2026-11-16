@@ -165,6 +165,7 @@ jobs:
           sparse-checkout: |
             .github/scripts
             .github/actions/checkout-prompts
+            .github/actions/rubric-verdict
           path: .ai-workflows
           persist-credentials: false
 
@@ -180,44 +181,23 @@ jobs:
             ${{ contains(github.event.pull_request.labels.*.name, env.OVERRIDE_LABEL) }}
         run: echo "has_override=$HAS_OVERRIDE" >> "$GITHUB_OUTPUT"
 
-      - name: Collect the diff and file sizes
-        if: steps.override.outputs.has_override != 'true'
-        env:
-          RUBRIC: ${{ inputs.rubric }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          MAX_DIFF_KB: ${{ inputs.max_diff_kb }}
-        run: bash .ai-workflows/.github/scripts/policy-gate/collect.sh
-
-      # The semantic rubric judges the title and body against the diff, so they
-      # go in front of the diff; its prompt reads them from {{diff}}.
-      - name: Put the pull request title and body in front of the diff
-        if: steps.override.outputs.has_override != 'true' && inputs.rubric == 'semantic'
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          printf 'PULL REQUEST TITLE: %s\n\nPULL REQUEST BODY (first 8 KiB):\n%s\n\n----- end of pull request text; the diff follows -----\n' "$PR_TITLE" "${PR_BODY:0:8192}" | cat - diff.txt > diff.with-text.txt
-          mv diff.with-text.txt diff.txt
-
+      # A failed request is handled by the gate job, not by failing this job.
       - name: Request the rubric verdict
         id: verdict
         if: steps.override.outputs.has_override != 'true'
-        # A failed request is handled by the gate job, not by failing this job.
-        continue-on-error: true
-        uses: actions/ai-inference@a7805884c80886efc241e94a5351df715968a0ad # v2.1.1
+        uses: ./.ai-workflows/.github/actions/rubric-verdict
         with:
+          rubric: ${{ inputs.rubric }}
+          prompt-name: ${{ env.REVIEW_NAME }}
+          model: ${{ inputs.model }}
           endpoint: ${{ secrets.LLM_ROUTER_BASE_URL }}
           token: ${{ secrets.LLM_ROUTER_API_KEY }}
-          model: ${{ inputs.model }}
-          max-completion-tokens: ${{ inputs.max_tokens }}
-          temperature: "0"
-          prompt-file: .ai-llm-prompts/automation/ai-workflows-${{ env.REVIEW_NAME }}.prompt.yml
-          file_input: |
-            changed: changed.txt
-            sizes: sizes.txt
-            diff: diff.txt
-          custom-headers: "x-langfuse-trace-name: ${{ env.REVIEW_NAME }}"
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          max-diff-kb: ${{ inputs.max_diff_kb }}
+          max-tokens: ${{ inputs.max_tokens }}
+          pr-title: ${{ github.event.pull_request.title }}
+          pr-body: ${{ github.event.pull_request.body }}
 
       # Stages the verdict for the gate job. The verdict is only a model reply here; the
       # gate job validates it before it is rendered or posted.
@@ -225,7 +205,7 @@ jobs:
         id: handoff
         env:
           HAS_OVERRIDE: ${{ steps.override.outputs.has_override }}
-          VERDICT_OUTCOME: ${{ steps.verdict.outcome }}
+          VERDICT_OUTCOME: ${{ steps.verdict.outputs.outcome }}
           RESPONSE_FILE: ${{ steps.verdict.outputs.response-file }}
         run: |
           mkdir -p handoff

@@ -17,8 +17,12 @@ test('workflow prompts live only in the catalog', () => {
   expect(localPrompts).toEqual([]);
 });
 
-const workflows = readdirSync(join('.github', 'workflows'))
-  .map((f) => readFileSync(join('.github', 'workflows', f), 'utf8'))
+// Shared composite actions hold the ai-inference step for the rubric reviews.
+const workflows = [
+  ...readdirSync(join('.github', 'workflows')).map((f) => join('.github', 'workflows', f)),
+  ...readdirSync(join('.github', 'actions')).map((d) => join('.github', 'actions', d, 'action.yml')),
+]
+  .map((f) => readFileSync(f, 'utf8'))
   .join('\n');
 
 test('at least one prompt file exists', () => {

@@ -46,7 +46,7 @@ module.exports = async ({ github, context, core }) => {
   const pr = context.payload.pull_request;
   if (!pr) return skip('No pull_request payload — skipping');
 
-  const authors = (process.env.BOT_AUTHORS || 'renovate[bot],dependabot[bot]').split(',').map((s) => s.trim());
+  const authors = (process.env.BOT_AUTHORS || require('../shared/constants.js').dependencyBots.join(',')).split(',').map((s) => s.trim());
   const login = pr.user && pr.user.login;
   if (!authors.includes(login)) return skip(`PR author "${login}" is not a dependency bot — skipping`);
 
