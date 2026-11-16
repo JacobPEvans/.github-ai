@@ -103,6 +103,7 @@ jobs:
           RUN_DESCRIBE: 'false'
         run: bash .ai-workflows/.github/scripts/pr-agent/run.sh
 
+  # Job id `verdict`; its check name, the one rulesets require, is `verdict/merge`.
   # The merge verdict: the code rubric, answered by a model of a different family
   # than every commit's Assisted-by trailer names, at the event's exact head. It
   # passes on a clean verdict and fails on anything else, including an unknown

@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { noModelBots } = require('../shared/constants.js');
 
 module.exports = async ({ github, context, core }) => {
   const prNumber = parseInt(process.env.PR_NUMBER, 10);
@@ -7,13 +8,13 @@ module.exports = async ({ github, context, core }) => {
   const familiesFile = process.env.FAMILIES_FILE;
   const visibility = process.env.VISIBILITY;
   const served = new Set((process.env.ROUTER_MODELS || '').split('\n').map((name) => name.trim()).filter(Boolean));
-  const { families, reviewers, alias_families: aliasFamilies, no_model_authors } = JSON.parse(fs.readFileSync(familiesFile, 'utf8'));
+  const { families, reviewers, alias_families: aliasFamilies } = JSON.parse(fs.readFileSync(familiesFile, 'utf8'));
   if (visibility !== 'public' && visibility !== 'private') {
     core.setFailed(`VISIBILITY must be public or private, not "${visibility}".`);
     return;
   }
 
-  if (no_model_authors.includes(prAuthor)) {
+  if (noModelBots.includes(prAuthor)) {
     core.setOutput('skip', 'true');
     core.setOutput('model', '');
     core.setOutput('family', '');

@@ -16,6 +16,5 @@
   "alias_families": {
     "review-oss": "qwen",
     "medium": "qwen"
-  },
-  "no_model_authors": ["renovate[bot]", "jacobpevans-release-please[bot]"]
+  }
 }

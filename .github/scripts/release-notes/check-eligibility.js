@@ -14,7 +14,7 @@ module.exports = async ({ github, context, core }) => {
   const pr = context.payload.pull_request;
   if (!pr) return skip('No pull_request payload — skipping');
 
-  const releaseBot = process.env.RELEASE_BOT || 'jacobpevans-release-please[bot]';
+  const releaseBot = process.env.RELEASE_BOT || require('../shared/constants.js').RELEASE_BOT;
   const login = pr.user && pr.user.login;
   if (login !== releaseBot) return skip(`PR author "${login}" is not ${releaseBot} — skipping`);
 
