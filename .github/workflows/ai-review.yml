@@ -74,54 +74,24 @@ jobs:
           ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
           sparse-checkout: |
             .github/scripts
+            .github/actions/router-creds
             pr-agent/rubric.toml
           sparse-checkout-cone-mode: false
           path: .ai-workflows
           persist-credentials: false
 
-      - name: Resolve OpenBao address
-        id: bao
-        run: |
-          test -n "${OPENBAO_ADDR:-}" || { echo "::error::OPENBAO_ADDR is not set on this runner" >&2; exit 1; }
-          echo "addr=$OPENBAO_ADDR" >> "$GITHUB_OUTPUT"
-
       - name: Read PR-Agent router credentials from OpenBao
         id: router-creds
-        continue-on-error: true
-        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        uses: ./.ai-workflows/.github/actions/router-creds
         with:
-          url: ${{ steps.bao.outputs.addr }}
-          method: jwt
-          path: github-actions
-          role: ci-ai-review
-          jwtGithubAudience: openbao
-          exportEnv: false
-          exportToken: false
-          secrets: |
-            ${{ env.OPENBAO_ROUTER_KEY_PATH }} | LLM_ROUTER_API_KEY ;
-            ${{ env.OPENBAO_ROUTER_OSS_KEY_PATH }} | LLM_ROUTER_OSS_API_KEY ;
-            ${{ env.OPENBAO_ROUTER_URL_PATH }} | LLM_ROUTER_BASE_URL ;
-
-      - name: Verify PR-Agent router credentials
-        env:
-          LOOKUP_OUTCOME: ${{ steps.router-creds.outcome }}
-          BASE_URL: ${{ steps.router-creds.outputs.LLM_ROUTER_BASE_URL }}
-          PRIVATE_API_KEY: ${{ steps.router-creds.outputs.LLM_ROUTER_API_KEY }}
-          OSS_API_KEY: ${{ steps.router-creds.outputs.LLM_ROUTER_OSS_API_KEY }}
-          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
-        run: |
-          test "$LOOKUP_OUTCOME" = success || { echo "::error::OpenBao could not provide the PR-Agent router credentials" >&2; exit 1; }
-          test -n "$BASE_URL" || { echo "::error::OpenBao did not return LLM_ROUTER_BASE_URL" >&2; exit 1; }
-          if [ "$REPOSITORY_PRIVATE" = "true" ]; then
-            test -n "$PRIVATE_API_KEY" || { echo "::error::OpenBao did not return LLM_ROUTER_API_KEY for a private repository" >&2; exit 1; }
-          else
-            test -n "$OSS_API_KEY" || { echo "::error::OpenBao did not return LLM_ROUTER_OSS_API_KEY for an open-source repository" >&2; exit 1; }
-          fi
+          key-path: ${{ env.OPENBAO_ROUTER_KEY_PATH }}
+          oss-key-path: ${{ env.OPENBAO_ROUTER_OSS_KEY_PATH }}
+          url-path: ${{ env.OPENBAO_ROUTER_URL_PATH }}
 
       - name: Run PR-Agent review
         env:
-          BASE_URL: ${{ steps.router-creds.outputs.LLM_ROUTER_BASE_URL }}
-          API_KEY: ${{ github.event.repository.private && steps.router-creds.outputs.LLM_ROUTER_API_KEY || steps.router-creds.outputs.LLM_ROUTER_OSS_API_KEY }}
+          BASE_URL: ${{ steps.router-creds.outputs.base-url }}
+          API_KEY: ${{ steps.router-creds.outputs.api-key }}
           JOB_TOKEN: ${{ github.token }}
           MODEL: ${{ github.event.repository.private && 'medium' || 'review-oss' }}
           MAX_TOKENS: 32000

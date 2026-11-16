@@ -44,8 +44,12 @@ test('policy-gate.yml validates the rubric against every rubric it supports', ()
   expect(text).toContain('printf \'%s\\n\' policy security leak semantic code |');
 });
 
-test('policy-gate.yml passes the selected rubric to the collector', () => {
-  const collect = workflow('policy-gate.yml').jobs.review.steps.find(({ name }) => name === 'Collect the diff and file sizes');
+test('policy-gate.yml passes the selected rubric to the shared verdict action', () => {
+  const verdict = workflow('policy-gate.yml').jobs.review.steps.find(({ id }) => id === 'verdict');
+  expect(verdict.uses).toBe('./.ai-workflows/.github/actions/rubric-verdict');
+  expect(verdict.with.rubric).toBe('${{ inputs.rubric }}');
+  const action = Bun.YAML.parse(readFileSync(join('.github', 'actions', 'rubric-verdict', 'action.yml'), 'utf8'));
+  const collect = action.runs.steps.find(({ name }) => name === 'Collect the diff and file sizes');
   expect(collect.env.RUBRIC).toBe('${{ inputs.rubric }}');
 });
 

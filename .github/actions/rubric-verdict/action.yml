@@ -1,0 +1,92 @@
+name: Rubric verdict
+description: >-
+  Collect a pull request diff and ask the model router for one rubric's verdict.
+  Shared by policy-gate.yml and the verdict/merge job in ai-review.yml. Expects
+  the pull request head checked out with history at the workspace root, the
+  ai-workflows scripts at .ai-workflows and the rubric prompt at .ai-llm-prompts.
+  The request never fails the step: callers read `outcome`.
+inputs:
+  rubric:
+    description: One of policy, security, leak, semantic, code.
+    required: true
+  prompt-name:
+    description: Prompt file stem under .ai-llm-prompts/automation/ai-workflows-<name>.prompt.yml.
+    required: true
+  model:
+    description: Router capability alias.
+    required: true
+  endpoint:
+    description: Router base URL ending in /v1.
+    required: true
+  token:
+    description: Router key.
+    required: true
+  base-sha:
+    description: Pull request base commit.
+    required: true
+  head-sha:
+    description: Pull request head commit.
+    required: true
+  max-diff-kb:
+    description: Diff size cap in KiB.
+    required: false
+    default: "150"
+  max-tokens:
+    description: Completion token ceiling.
+    required: false
+    default: "4000"
+  pr-title:
+    description: Pull request title; read only by the semantic rubric.
+    required: false
+    default: ""
+  pr-body:
+    description: Pull request body; read only by the semantic rubric.
+    required: false
+    default: ""
+outputs:
+  outcome:
+    description: success when the router answered, failure otherwise.
+    value: ${{ steps.request.outcome }}
+  response-file:
+    description: Path of the router's reply.
+    value: ${{ steps.request.outputs.response-file }}
+runs:
+  using: composite
+  steps:
+    - name: Collect the diff and file sizes
+      shell: bash
+      env:
+        RUBRIC: ${{ inputs.rubric }}
+        BASE_SHA: ${{ inputs.base-sha }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        MAX_DIFF_KB: ${{ inputs.max-diff-kb }}
+      run: bash .ai-workflows/.github/scripts/policy-gate/collect.sh
+
+    # The semantic rubric judges the title and body against the diff, so they
+    # go in front of the diff; its prompt reads them from {{diff}}.
+    - name: Put the pull request title and body in front of the diff
+      if: inputs.rubric == 'semantic'
+      shell: bash
+      env:
+        PR_TITLE: ${{ inputs.pr-title }}
+        PR_BODY: ${{ inputs.pr-body }}
+      run: |
+        printf 'PULL REQUEST TITLE: %s\n\nPULL REQUEST BODY (first 8 KiB):\n%s\n\n----- end of pull request text; the diff follows -----\n' "$PR_TITLE" "${PR_BODY:0:8192}" | cat - diff.txt > diff.with-text.txt
+        mv diff.with-text.txt diff.txt
+
+    - name: Request the rubric verdict
+      id: request
+      continue-on-error: true
+      uses: actions/ai-inference@a7805884c80886efc241e94a5351df715968a0ad # v2.1.1
+      with:
+        endpoint: ${{ inputs.endpoint }}
+        token: ${{ inputs.token }}
+        model: ${{ inputs.model }}
+        max-completion-tokens: ${{ inputs.max-tokens }}
+        temperature: "0"
+        prompt-file: .ai-llm-prompts/automation/ai-workflows-${{ inputs.prompt-name }}.prompt.yml
+        file_input: |
+          changed: changed.txt
+          sizes: sizes.txt
+          diff: diff.txt
+        custom-headers: "x-langfuse-trace-name: ${{ inputs.prompt-name }}"
