@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.11.4](https://github.com/JacobPEvans/.github-ai/compare/v2.11.3...v2.11.4) (2026-11-16)
+
+
+### Bug Fixes
+
+* **ci-fix:** skip the default branch, publish only to open PRs, stop workflow-file patches ([#154](https://github.com/JacobPEvans/.github-ai/issues/154)) ([50b119d](https://github.com/JacobPEvans/.github-ai/commit/50b119dcda54eede1fe4d27a2afea685bc2f9e60))
+
 ## [2.11.3](https://github.com/JacobPEvans/.github-ai/compare/v2.11.2...v2.11.3) (2026-11-15)
 
 
