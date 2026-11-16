@@ -1,0 +1,14 @@
+{
+  "labels": ["hold"],
+  "paths": [
+    { "class": "workflow", "pattern": "^\\.github/(workflows|actions|scripts)/" },
+    { "class": "workflow", "pattern": "(^|/)action\\.ya?ml$" },
+    { "class": "ruleset", "pattern": "(^|/)CODEOWNERS$" },
+    { "class": "ruleset", "pattern": "(^|[/_.-])(rulesets?|branch[_-]protection)([/_.-]|$)" },
+    { "class": "secret", "pattern": "(^|[/_.-])(secrets?|vault|openbao|sops|credentials?|kms)([/_.-]|$)" },
+    { "class": "identity", "pattern": "(^|[/_.-])(iam|oidc|jwt|approle|identity|auth|authn|authz|rbac|sso|saml)([/_.-]|$)" },
+    { "class": "policy", "pattern": "(^|[/_.-])(polic(y|ies)|permissions?)([/_.-]|$)" },
+    { "class": "policy", "pattern": "\\.(rego|sentinel)$" },
+    { "class": "network", "pattern": "(^|[/_.-])(firewall|nftables|iptables|network(s|ing)?|acls?|vlans?|wireguard|vpn)([/_.-]|$)" }
+  ]
+}

@@ -14,14 +14,6 @@ module.exports = async ({ github, context, core }) => {
     return;
   }
 
-  if (noModelBots.includes(prAuthor)) {
-    core.setOutput('skip', 'true');
-    core.setOutput('model', '');
-    core.setOutput('family', '');
-    core.info(`Author ${prAuthor} has no model; skipping review.`);
-    return;
-  }
-
   const pr = (await github.rest.pulls.get({
     owner: context.repo.owner,
     repo: context.repo.repo,
@@ -38,6 +30,15 @@ module.exports = async ({ github, context, core }) => {
     pull_number: prNumber,
     per_page: 100,
   });
+
+  // A bot pull request skips the model only when the bot authored every commit.
+  if (noModelBots.includes(prAuthor) && commits.every((commit) => commit.author?.login === prAuthor)) {
+    core.setOutput('skip', 'true');
+    core.setOutput('model', '');
+    core.setOutput('family', '');
+    core.info(`Author ${prAuthor} has no model and wrote every commit; skipping review.`);
+    return;
+  }
 
   const authorFamilies = new Set();
   for (const commit of commits) {
