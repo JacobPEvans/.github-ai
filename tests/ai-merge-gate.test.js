@@ -88,7 +88,7 @@ test('the final check waits for every required job and only accepts draft skips'
       env: {
         IS_DRAFT: String(scenario.draft),
         REPO_PRIVATE: String(scenario.private ?? false),
-        ROUTER_AVAILABLE: 'true',
+        ROUTER_AVAILABLE: String(scenario.router ?? true),
         GITLEAKS_RESULT: gitleaks,
         LEAK_RESULT: leak,
         SECURITY_RESULT: security,
