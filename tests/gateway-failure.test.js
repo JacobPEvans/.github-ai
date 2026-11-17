@@ -359,11 +359,6 @@ describe('gateway wiring in the workflows', () => {
     expect(step(job, 'Find the OpenBao check-token role').run).toContain('role=gate-checks-${OWNER,,}');
     expect(mint.if).toBe("steps.state.outputs.state != 'override' && steps.check-token-oidc.outputs.CHECK_TOKEN == ''");
     expect(step(job, 'Record which path minted the check-run token').run).toContain('GITHUB_STEP_SUMMARY');
-    const gate = load('_ai-merge-gate.yml');
-    expect(gate.permissions).toBeUndefined();
-    for (const name of ['leak', 'security', 'semantic', 'code']) {
-      expect(gate.jobs[name].permissions).toBeUndefined();
-    }
     expect(verdict.if).toBe("steps.state.outputs.state == 'ok'");
     expect(verdict.run).toContain('check-run.sh update');
     expect(verdict.run).toContain('check-run.sh upsert');

@@ -323,8 +323,9 @@ jobs:
 
       # The check run is posted with a checks: write token. The job first reads one
       # from OpenBao through its org's gate-checks OIDC role, which binds to this
-      # workflow on main or a release tag. A caller that grants no id-token: write,
-      # or a runner without OPENBAO_ADDR, mints with the Claude bot App key instead.
+      # workflow on main or a release tag. Only _ai-merge-gate-oidc.yml grants this job
+      # id-token: write. A call without it, or a runner without OPENBAO_ADDR, mints
+      # with the Claude bot App key instead.
       # A failed mint is named by the report step.
       - name: Find the OpenBao check-token role
         id: check-role

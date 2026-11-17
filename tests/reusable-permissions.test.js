@@ -35,8 +35,12 @@ test('finds the reusable workflows whose daily-limit check needs actions: read',
   expect(names).toContain('best-practices.yml');
 });
 
-// verdict.yml is the one reusable whose OIDC identity an OpenBao role binds.
-const OIDC_REUSABLES = { 'verdict.yml': ['verdict'] };
+// OpenBao roles bind verdict.yml and policy-gate.yml. The OIDC gate entry grants
+// id-token only to the jobs that call policy-gate.yml.
+const OIDC_REUSABLES = {
+  'verdict.yml': ['verdict'],
+  '_ai-merge-gate-oidc.yml': ['leak', 'security', 'semantic', 'code'],
+};
 
 for (const [name, workflow] of reusables) {
   test(`${name} requires id-token only in the jobs an OpenBao role binds`, () => {

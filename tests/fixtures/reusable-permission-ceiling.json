@@ -1,8 +1,14 @@
 {
+  "_ai-merge-gate-oidc.yml": {
+    "checks": "read",
+    "contents": "read",
+    "id-token": "write",
+    "pull-requests": "write"
+  },
   "_ai-merge-gate.yml": {
     "checks": "read",
     "contents": "read",
-    "pull-requests": "read"
+    "pull-requests": "write"
   },
   "best-practices.yml": {
     "actions": "read",

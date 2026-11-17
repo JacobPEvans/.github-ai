@@ -39,10 +39,10 @@ concurrency:
   group: ai-merge-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
-# No workflow-level permissions block. The four review jobs inherit the caller's
-# grant, so a caller that adds id-token: write lets policy-gate read its check-run
-# token from OpenBao, and a caller without it starts as before. The callers grant
-# checks: read, contents: read and pull-requests: write.
+permissions:
+  checks: read
+  contents: read
+  pull-requests: write
 
 jobs:
   gitleaks:
@@ -92,6 +92,9 @@ jobs:
     needs: router
     if: needs.router.outputs.available == 'true' && !github.event.repository.private
     uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       rubric: leak
       model: standard
@@ -110,6 +113,9 @@ jobs:
     needs: router
     if: needs.router.outputs.available == 'true'
     uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       rubric: security
       model: critical
@@ -126,6 +132,9 @@ jobs:
     needs: router
     if: needs.router.outputs.available == 'true'
     uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       rubric: semantic
       model: standard
@@ -143,6 +152,9 @@ jobs:
     needs: router
     if: needs.router.outputs.available == 'true'
     uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       rubric: code
       model: standard

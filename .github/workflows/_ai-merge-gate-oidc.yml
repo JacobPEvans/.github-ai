@@ -1,0 +1,241 @@
+# Reusable: AI Merge Gate, OIDC entry
+#
+# The same job graph as _ai-merge-gate.yml. Each review job also grants
+# id-token: write, so policy-gate reads its check-run token from OpenBao through
+# the org's gate-checks OIDC role. A caller that uses this file grants
+# id-token: write on the calling job. tests/ai-merge-gate.test.js keeps the two
+# graphs identical apart from that scope.
+#
+# Usage:
+#   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate-oidc.yml@v2
+name: _ai-merge-gate-oidc
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        description: >-
+          GitHub Actions runner label to run the job(s) on. Defaults to
+          ubuntu-24.04. Pass a RunsOn label (see runs-on.com job labels
+          docs) to opt the calling repo into self-hosted runners.
+        type: string
+        required: false
+        default: ubuntu-24.04
+    secrets:
+      LLM_ROUTER_BASE_URL:
+        description: OpenAI-compatible base URL for the review router.
+        required: false
+      LLM_ROUTER_API_KEY:
+        description: Scoped virtual key for the review router.
+        required: false
+      NTFY_BASE_URL:
+        description: Optional base URL for policy-gate override audit notices.
+        required: false
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY:
+        description: Private key used by policy-gate to publish review checks.
+        required: false
+      GITLEAKS_LICENSE_KEY:
+        description: Org gitleaks-action license key; the scan fails closed without it.
+        required: false
+
+concurrency:
+  group: ai-merge-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  checks: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  gitleaks:
+    name: Gitleaks secret scan
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE_KEY }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_SUMMARY: "false"
+
+  router:
+    name: Review router availability
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      available: ${{ steps.probe.outputs.available }}
+    steps:
+      - id: probe
+        env:
+          LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+          LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+        run: |
+          if [[ -n "$LLM_ROUTER_BASE_URL" && -n "$LLM_ROUTER_API_KEY" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Router secrets are not passed to this caller; model reviews are skipped and only the secret scan gates."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Public repos only. The gitleaks job still scans every repo for secrets.
+  leak:
+    name: Leak review
+    needs: router
+    if: needs.router.outputs.available == 'true' && !github.event.repository.private
+    uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    with:
+      rubric: leak
+      model: standard
+      max_tokens: 4000
+      max_diff_kb: 150
+      blocking: true
+      runner_label: ${{ inputs.runner_label }}
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
+  security:
+    name: Security review
+    needs: router
+    if: needs.router.outputs.available == 'true'
+    uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    with:
+      rubric: security
+      model: critical
+      blocking: true
+      runner_label: ${{ inputs.runner_label }}
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
+  semantic:
+    name: Semantic review
+    needs: router
+    if: needs.router.outputs.available == 'true'
+    uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    with:
+      rubric: semantic
+      model: standard
+      blocking: true
+      runner_label: ${{ inputs.runner_label }}
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
+  # Advisory: posts its comment and check, never fails, and the final check does not wait for it.
+  code:
+    name: Code review
+    needs: router
+    if: needs.router.outputs.available == 'true'
+    uses: ./.github/workflows/policy-gate.yml
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    with:
+      rubric: code
+      model: standard
+      blocking: false
+      runner_label: ${{ inputs.runner_label }}
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
+  gate:
+    name: AI Merge Gate
+    if: always()
+    needs: [gitleaks, router, leak, security, semantic]
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    permissions:
+      checks: read
+      contents: read
+    env:
+      IS_DRAFT: ${{ github.event.pull_request.draft }}
+      REPO_PRIVATE: ${{ github.event.repository.private }}
+      ROUTER_AVAILABLE: ${{ needs.router.outputs.available }}
+      GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
+      LEAK_RESULT: ${{ needs.leak.result }}
+      SECURITY_RESULT: ${{ needs.security.result }}
+      SEMANTIC_RESULT: ${{ needs.semantic.result }}
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Verify Copilot agent checks
+        run: |
+          # The API occasionally returns a transient HTML error page; piping it
+          # straight into --jq crashed the gate (false-negative merge block).
+          # Retry with backoff and require a numeric answer before judging.
+          for i in 1 2 3; do
+            FAILED=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/check-runs" \
+              --jq '[.check_runs[] | select(.app.slug | test("copilot"; "i")) | select(.conclusion == "failure" or .conclusion == "timed_out")] | length') && break
+            sleep $((i * 5))
+          done
+          if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then
+            echo "::error::check-runs API unreadable after retries"
+            exit 1
+          fi
+          echo "Copilot agent failures: $FAILED"
+          if [ "$FAILED" -gt "0" ]; then
+            echo "::error::$FAILED Copilot agent check(s) failed"
+            exit 1
+          fi
+      - name: Enforce scan and review conclusions
+        run: |
+          set -euo pipefail
+          if [[ "$REPO_PRIVATE" == "true" && "$LEAK_RESULT" == "skipped" ]]; then
+            LEAK_RESULT=success
+          fi
+          for result in "$GITLEAKS_RESULT" "$LEAK_RESULT" "$SECURITY_RESULT" "$SEMANTIC_RESULT"; do
+            case "$result" in
+              success)
+                ;;
+              skipped)
+                if [[ "$IS_DRAFT" != "true" && "$ROUTER_AVAILABLE" == "true" ]]; then
+                  echo "::error::A required scan or review was skipped for a non-draft pull request."
+                  exit 1
+                fi
+                ;;
+              failure|cancelled)
+                echo "::error::A required scan or review concluded with $result."
+                exit 1
+                ;;
+              *)
+                echo "::error::A required scan or review has an unexpected conclusion: $result"
+                exit 1
+                ;;
+            esac
+          done
+          echo "All required scans and reviews passed or were skipped on a draft pull request."

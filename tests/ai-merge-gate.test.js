@@ -8,6 +8,22 @@ const workflow = (name) => Bun.YAML.parse(readFileSync(join('.github', 'workflow
 const frontdoor = workflow('ai-merge-gate.yml');
 const gate = workflow('_ai-merge-gate.yml');
 
+test('the OIDC entry is the same graph with id-token: write on each review job only', () => {
+  const oidc = workflow('_ai-merge-gate-oidc.yml');
+  const reviews = ['leak', 'security', 'semantic', 'code'];
+  for (const job of reviews) {
+    expect(gate.jobs[job].permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
+    expect(oidc.jobs[job].permissions).toEqual({ contents: 'read', 'id-token': 'write', 'pull-requests': 'write' });
+  }
+  const withoutIdToken = structuredClone(oidc.jobs);
+  for (const job of reviews) delete withoutIdToken[job].permissions['id-token'];
+  expect(withoutIdToken).toEqual(gate.jobs);
+  expect(oidc.on).toEqual(gate.on);
+  expect(oidc.permissions).toEqual(gate.permissions);
+  expect(oidc.concurrency).toEqual(gate.concurrency);
+  expect(JSON.stringify(gate)).not.toContain('id-token');
+});
+
 test('the public workflow starts the gate for the required pull request events and passes named secrets', () => {
   expect(frontdoor.on.pull_request.types).toEqual(fixture.pull_request_types);
   expect(frontdoor.jobs.gate.with.runner_label).toContain("&& 'review' || 'ubuntu-latest'");
