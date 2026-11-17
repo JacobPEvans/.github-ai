@@ -340,10 +340,27 @@ describe('gateway wiring in the workflows', () => {
     expect(gateway.env.CONCLUSION).toContain("inputs.blocking && 'failure'");
     expect(gateway.env.CONCLUSION).toContain("'neutral'");
     expect(gateway.env.CHECK_NAME).toBe('${{ env.REVIEW_NAME }}');
-    expect(gateway.env.CHECK_APP_SLUG).toBe('${{ steps.check-token.outputs.app-slug }}');
+    const slug = '${{ steps.check-token.outputs.app-slug || vars.GH_APP_CLAUDE_BOT_SLUG }}';
+    const token = '${{ steps.check-token-oidc.outputs.CHECK_TOKEN || steps.check-token.outputs.token }}';
+    expect(gateway.env.CHECK_APP_SLUG).toBe(slug);
+    expect(gateway.env.GITHUB_TOKEN).toBe(token);
+    expect(verdict.env.CHECK_APP_SLUG).toBe(slug);
+    expect(verdict.env.GH_TOKEN).toBe(token);
     expect(gateway.run).toContain('gateway-failure.sh report "$REVIEW_NAME"');
     expect(job.env.REVIEW_NAME).toContain("'policy-gate'");
-    expect(mint.if).toBe("steps.state.outputs.state != 'override'");
+    const oidc = step(job, 'Read the check-run token from OpenBao');
+    expect(oidc.uses).toBe('hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc');
+    expect(oidc.with.method).toBe('jwt');
+    expect(oidc.with.role).toBe('${{ steps.check-role.outputs.role }}');
+    expect(oidc.with.secrets).toContain('github/token/${{ steps.check-role.outputs.role }} token | CHECK_TOKEN');
+    expect(step(job, 'Find the OpenBao check-token role').run).toContain('role=gate-checks-${OWNER,,}');
+    expect(mint.if).toBe("steps.state.outputs.state != 'override' && steps.check-token-oidc.outputs.CHECK_TOKEN == ''");
+    expect(step(job, 'Record which path minted the check-run token').run).toContain('GITHUB_STEP_SUMMARY');
+    const gate = load('_ai-merge-gate.yml');
+    expect(gate.permissions).toBeUndefined();
+    for (const name of ['leak', 'security', 'semantic', 'code']) {
+      expect(gate.jobs[name].permissions).toBeUndefined();
+    }
     expect(verdict.if).toBe("steps.state.outputs.state == 'ok'");
     expect(verdict.run).toContain('check-run.sh update');
     expect(verdict.run).toContain('check-run.sh upsert');
