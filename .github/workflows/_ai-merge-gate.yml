@@ -82,7 +82,7 @@ jobs:
           if [[ -n "$LLM_ROUTER_BASE_URL" && -n "$LLM_ROUTER_API_KEY" ]]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Router secrets are not passed to this caller; model reviews are skipped and only the secret scan gates."
+            echo "::warning::Router secrets are not passed to this caller; model reviews are skipped and the final check fails on a non-draft pull request."
             echo "available=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -216,8 +216,12 @@ jobs:
               success)
                 ;;
               skipped)
-                if [[ "$IS_DRAFT" != "true" && "$ROUTER_AVAILABLE" == "true" ]]; then
-                  echo "::error::A required scan or review was skipped for a non-draft pull request."
+                if [[ "$IS_DRAFT" != "true" ]]; then
+                  if [[ "$ROUTER_AVAILABLE" != "true" ]]; then
+                    echo "::error::The review router secrets are not available to this workflow, so the required model reviews did not run."
+                  else
+                    echo "::error::A required scan or review was skipped for a non-draft pull request."
+                  fi
                   exit 1
                 fi
                 ;;

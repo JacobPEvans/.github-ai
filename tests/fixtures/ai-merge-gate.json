@@ -39,6 +39,28 @@
       "exit_code": 1
     },
     {
+      "name": "router unavailable",
+      "draft": false,
+      "router": false,
+      "results": ["success", "skipped", "skipped", "skipped"],
+      "exit_code": 1
+    },
+    {
+      "name": "private repo router unavailable",
+      "draft": false,
+      "private": true,
+      "router": false,
+      "results": ["success", "skipped", "skipped", "skipped"],
+      "exit_code": 1
+    },
+    {
+      "name": "draft router unavailable",
+      "draft": true,
+      "router": false,
+      "results": ["success", "skipped", "skipped", "skipped"],
+      "exit_code": 0
+    },
+    {
       "name": "unknown result",
       "draft": false,
       "results": ["action_required", "success", "success", "success"],
