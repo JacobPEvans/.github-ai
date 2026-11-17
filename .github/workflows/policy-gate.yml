@@ -387,7 +387,8 @@ jobs:
           CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'OpenBao gave no token and GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set' || 'the mint step failed' }}
           CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           CHECK_NAME: ${{ env.REVIEW_NAME }}
-          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug || vars.GH_APP_CLAUDE_BOT_SLUG }}
+          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
+          CHECK_APP_ID: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           REASON: ${{ steps.state.outputs.state }}
         run: |
           if [ "$REASON" = truncated-response ]; then
@@ -449,7 +450,8 @@ jobs:
         continue-on-error: ${{ steps.enforcement.outputs.blocking != 'true' }}
         env:
           GH_TOKEN: ${{ steps.check-token-oidc.outputs.CHECK_TOKEN || steps.check-token.outputs.token }}
-          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug || vars.GH_APP_CLAUDE_BOT_SLUG }}
+          CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
+          CHECK_APP_ID: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           BLOCKING: ${{ steps.enforcement.outputs.blocking }}
           CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |

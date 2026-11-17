@@ -340,11 +340,14 @@ describe('gateway wiring in the workflows', () => {
     expect(gateway.env.CONCLUSION).toContain("inputs.blocking && 'failure'");
     expect(gateway.env.CONCLUSION).toContain("'neutral'");
     expect(gateway.env.CHECK_NAME).toBe('${{ env.REVIEW_NAME }}');
-    const slug = '${{ steps.check-token.outputs.app-slug || vars.GH_APP_CLAUDE_BOT_SLUG }}';
+    const slug = '${{ steps.check-token.outputs.app-slug }}';
+    const appId = '${{ vars.GH_APP_CLAUDE_BOT_ID }}';
     const token = '${{ steps.check-token-oidc.outputs.CHECK_TOKEN || steps.check-token.outputs.token }}';
     expect(gateway.env.CHECK_APP_SLUG).toBe(slug);
     expect(gateway.env.GITHUB_TOKEN).toBe(token);
     expect(verdict.env.CHECK_APP_SLUG).toBe(slug);
+    expect(gateway.env.CHECK_APP_ID).toBe(appId);
+    expect(verdict.env.CHECK_APP_ID).toBe(appId);
     expect(verdict.env.GH_TOKEN).toBe(token);
     expect(gateway.run).toContain('gateway-failure.sh report "$REVIEW_NAME"');
     expect(job.env.REVIEW_NAME).toContain("'policy-gate'");
