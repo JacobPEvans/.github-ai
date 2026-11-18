@@ -1,7 +1,7 @@
 name: AI Merge Gate
 on:
   pull_request:
-    types: [opened, ready_for_review, synchronize, reopened]
+    types: [opened, ready_for_review, synchronize, reopened, edited]
 permissions:
   checks: read
   contents: read
