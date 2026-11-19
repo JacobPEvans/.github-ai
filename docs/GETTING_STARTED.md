@@ -37,6 +37,16 @@ jobs:
 `@main`, `@develop`, a branch, or a bare major tag such as `@vN`. Renovate moves the SHA and the comment together. A patch bump merges
 after the Merge Gate is green. A minor or major bump is merged by a person.
 
+## AI Merge Gate
+
+For OIDC-based check publishing, call `_ai-merge-gate-oidc.yml` with a reviewed
+release SHA. Grant the calling job `checks: read`, `contents: read`,
+`pull-requests: write`, and `id-token: write`.
+
+Run the caller on a test PR and verify that both the security and semantic
+review jobs publish their verdict checks before switching other repositories
+to that release.
+
 ---
 
 ## Available Workflows
