@@ -62,7 +62,7 @@ test('the OIDC entry defaults hosted jobs to Ubuntu 26.04 and forwards runner ov
   }
 
   const source = readFileSync(join('.github', 'workflows', '_ai-merge-gate-oidc.yml'), 'utf8');
-  expect(source).toContain('_ai-merge-gate-oidc.yml@v3');
+  expect(source).toMatch(/_ai-merge-gate-oidc\.yml@[0-9a-f]{40} # v2\.\d+\.\d+\n/);
 });
 
 test('the three policy reviews use dogfood rubrics, models, and blocking mode', () => {

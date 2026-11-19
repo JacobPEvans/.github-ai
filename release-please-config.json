@@ -1,10 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "last-release-sha": "c4db0bef4e46875b34ca286ab248aa0a3c9c12c6",
   "packages": {
     ".": {
       "release-type": "simple",
       "version-file": "VERSION",
-      "bump-minor-pre-major": true,
+      "versioning": "always-bump-minor",
       "include-v-in-tag": true,
       "changelog-sections": [
         {"type": "feat", "section": "Features"},

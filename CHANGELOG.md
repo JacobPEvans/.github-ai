@@ -5,13 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [3.0.0](https://github.com/JacobPEvans/.github-ai/compare/v2.15.0...v3.0.0) (2026-11-19)
-
-
-### Features
-
-* **release:** prepare the v3 AI Merge Gate release ([33d4c19](https://github.com/JacobPEvans/.github-ai/commit/33d4c19c872a428805bbcef7de8bf145f11ac33f))
-
 ## [2.15.0](https://github.com/JacobPEvans/.github-ai/compare/v2.14.2...v2.15.0) (2026-11-19)
 
 
