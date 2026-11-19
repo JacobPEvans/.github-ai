@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.15.0](https://github.com/JacobPEvans/.github-ai/compare/v2.14.2...v2.15.0) (2026-11-19)
+
+
+### Features
+
+* **ai-merge-gate:** add the _ai-merge-gate-oidc.yml entry ([77f476d](https://github.com/JacobPEvans/.github-ai/commit/77f476d9227311b46e9f27acc833e00db2417a74))
+* **check-run:** find an earlier check run by App ID when the slug is empty ([f4654dd](https://github.com/JacobPEvans/.github-ai/commit/f4654dd826faf902fe96a67baa9ff883c9b68595))
+* **policy-gate:** read the check-run token from OpenBao through OIDC ([3bb6bea](https://github.com/JacobPEvans/.github-ai/commit/3bb6bea8ab1d01f41027b82d724ff7b8106d6efb))
+* **policy-gate:** read the check-run token from OpenBao through OIDC ([#169](https://github.com/JacobPEvans/.github-ai/issues/169)) ([116edb6](https://github.com/JacobPEvans/.github-ai/commit/116edb6b1650f397fc01effcd1b7180ed434b144))
+
+
+### Bug Fixes
+
+* **ci:** update the OIDC review runner defaults ([97229cf](https://github.com/JacobPEvans/.github-ai/commit/97229cf5c4dff4028132122391f88a73f00b81bb))
+
 ## [2.14.2](https://github.com/JacobPEvans/.github-ai/compare/v2.14.1...v2.14.2) (2026-11-19)
 
 
