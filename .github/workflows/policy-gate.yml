@@ -152,14 +152,14 @@ jobs:
           : "${LLM_ROUTER_API_KEY:?LLM_ROUTER_API_KEY not set}"
 
       - name: Checkout pull request head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout ai-workflows scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
@@ -249,7 +249,7 @@ jobs:
       # Only this job checks out the trusted scripts it runs with the App token. It never
       # checks out the pull request.
       - name: Checkout ai-workflows scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
@@ -292,7 +292,7 @@ jobs:
           elif [ "$VALID_OUTCOME" != "success" ]; then
             truncated="$(bash .ai-workflows/.github/scripts/shared/gateway-failure.sh truncated "$RESPONSE_FILE")"
             if [ "$truncated" = truncated ]; then
-              state=truncated-response
+              state="truncated-response"
             else
               state=invalid-response
             fi

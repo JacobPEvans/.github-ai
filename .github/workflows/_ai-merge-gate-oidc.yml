@@ -1,13 +1,14 @@
 # Reusable: AI Merge Gate, OIDC entry
 #
-# The same job graph as _ai-merge-gate.yml. Each review job also grants
-# id-token: write, so policy-gate reads its check-run token from OpenBao through
-# the org's gate-checks OIDC role. A caller that uses this file grants
-# id-token: write on the calling job. tests/ai-merge-gate.test.js keeps the two
-# graphs identical apart from that scope.
+# The same job graph as _ai-merge-gate.yml, with ubuntu-26.04 as its
+# GitHub-hosted runner default. Each review job also grants id-token: write, so
+# policy-gate reads its check-run token from OpenBao through the org's
+# gate-checks OIDC role. A caller that uses this file grants id-token: write on
+# the calling job. tests/ai-merge-gate.test.js keeps the rest of the graph
+# identical apart from that scope.
 #
 # Usage:
-#   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate-oidc.yml@v2
+#   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate-oidc.yml@v3
 name: _ai-merge-gate-oidc
 
 on:
@@ -16,11 +17,11 @@ on:
       runner_label:
         description: >-
           GitHub Actions runner label to run the job(s) on. Defaults to
-          ubuntu-24.04. Pass a RunsOn label (see runs-on.com job labels
+          ubuntu-26.04. Pass a RunsOn label (see runs-on.com job labels
           docs) to opt the calling repo into self-hosted runners.
         type: string
         required: false
-        default: ubuntu-24.04
+        default: ubuntu-26.04
     secrets:
       LLM_ROUTER_BASE_URL:
         description: OpenAI-compatible base URL for the review router.
@@ -50,13 +51,13 @@ permissions:
 jobs:
   gitleaks:
     name: Gitleaks secret scan
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.runner_label || 'ubuntu-26.04' }}
     timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -71,7 +72,7 @@ jobs:
 
   router:
     name: Review router availability
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.runner_label || 'ubuntu-26.04' }}
     timeout-minutes: 2
     permissions: {}
     outputs:
@@ -177,7 +178,7 @@ jobs:
     name: AI Merge Gate
     if: always()
     needs: [gitleaks, router, leak, security, semantic]
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.runner_label || 'ubuntu-26.04' }}
     timeout-minutes: 5
     permissions:
       checks: read

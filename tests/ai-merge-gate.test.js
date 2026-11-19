@@ -17,8 +17,19 @@ test('the OIDC entry is the same graph with id-token: write on each review job o
   }
   const withoutIdToken = structuredClone(oidc.jobs);
   for (const job of reviews) delete withoutIdToken[job].permissions['id-token'];
+  for (const job of ['gitleaks', 'router', 'gate']) {
+    expect(withoutIdToken[job]['runs-on']).toBe("${{ inputs.runner_label || 'ubuntu-26.04' }}");
+    withoutIdToken[job]['runs-on'] = gate.jobs[job]['runs-on'];
+  }
   expect(withoutIdToken).toEqual(gate.jobs);
-  expect(oidc.on).toEqual(gate.on);
+
+  const normalizeRunnerDefault = (workflow) => {
+    const normalized = structuredClone(workflow.on);
+    normalized.workflow_call.inputs.runner_label.default = '<runner default>';
+    normalized.workflow_call.inputs.runner_label.description = '<runner description>';
+    return normalized;
+  };
+  expect(normalizeRunnerDefault(oidc)).toEqual(normalizeRunnerDefault(gate));
   expect(oidc.permissions).toEqual(gate.permissions);
   expect(oidc.concurrency).toEqual(gate.concurrency);
   expect(JSON.stringify(gate)).not.toContain('id-token');
@@ -36,6 +47,22 @@ test('the reusable workflow exposes router and check credentials to its caller',
   expect(fixture.router_secrets.every((name) => call.secrets[name].required === false)).toBe(true);
   expect(call.secrets.NTFY_BASE_URL.required).toBe(false);
   expect(call.secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY.required).toBe(false);
+});
+
+test('the OIDC entry defaults hosted jobs to Ubuntu 26.04 and forwards runner overrides', () => {
+  const oidc = workflow('_ai-merge-gate-oidc.yml');
+  expect(oidc.on.workflow_call.inputs.runner_label.default).toBe('ubuntu-26.04');
+  expect(oidc.on.workflow_call.inputs.runner_label.description).toContain('ubuntu-26.04');
+
+  for (const job of ['gitleaks', 'router', 'gate']) {
+    expect(oidc.jobs[job]['runs-on']).toBe("${{ inputs.runner_label || 'ubuntu-26.04' }}");
+  }
+  for (const job of ['leak', 'security', 'semantic', 'code']) {
+    expect(oidc.jobs[job].with.runner_label).toBe('$' + '{{ inputs.runner_label }}');
+  }
+
+  const source = readFileSync(join('.github', 'workflows', '_ai-merge-gate-oidc.yml'), 'utf8');
+  expect(source).toContain('_ai-merge-gate-oidc.yml@v3');
 });
 
 test('the three policy reviews use dogfood rubrics, models, and blocking mode', () => {
