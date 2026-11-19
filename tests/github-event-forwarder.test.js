@@ -73,10 +73,13 @@ test('reruns preserve delivery and correlation identifiers', () => {
   expect(second.correlation_id).toBe(first.correlation_id);
 });
 
-test('workflow selects the inherited secret and requests no token permissions or checkout', () => {
+test('workflow requires one named secret and requests no token permissions or checkout', () => {
+  const call = workflow.on.workflow_call;
   expect(workflow.permissions).toEqual({});
-  expect(workflow.on.workflow_call.inputs.runner_label.default).toBe('self-hosted');
-  expect(step.env.WEBHOOK_URL).toBe('${{ secrets[inputs.webhook_url_secret_name] }}');
+  expect(Object.keys(call.inputs).sort()).toEqual(['agent_name', 'runner_label']);
+  expect(call.inputs.runner_label.default).toBe('self-hosted');
+  expect(call.secrets).toEqual({ webhook_url: expect.objectContaining({ required: true }) });
+  expect(step.env.WEBHOOK_URL).toBe('${{ secrets.webhook_url }}');
   expect(workflow.jobs.forward.steps).toHaveLength(1);
   expect(step.uses).toBeUndefined();
 });
