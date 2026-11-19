@@ -19,6 +19,7 @@
 #   CHECK_TOKEN_CAUSE why no token exists (key not set, mint failed); named in the error
 #   CHECK_HEAD_SHA    commit the check run attaches to (required)
 #   CHECK_APP_SLUG    app slug used to select an existing check run (optional)
+#   CHECK_APP_ID      numeric App ID used instead when the slug is empty (optional)
 #   CHECK_NAME        optional: overrides the default check-run name
 #   CHECK_SUMMARY     optional: overrides the check-run summary
 #   GITHUB_REPOSITORY owner/repo, set by the runner
@@ -93,6 +94,7 @@ create_check() {
     GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
     CHECK_HEAD_SHA="$CHECK_HEAD_SHA" \
     CHECK_APP_SLUG="${CHECK_APP_SLUG:-}" \
+    CHECK_APP_ID="${CHECK_APP_ID:-}" \
     bash "$(dirname -- "${BASH_SOURCE[0]}")/check-run.sh" \
       upsert "$check_name" neutral "AI review not performed" "$summary" 2>&1)"; then
     if [ -n "$response" ]; then

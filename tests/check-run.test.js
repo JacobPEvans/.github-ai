@@ -87,8 +87,8 @@ function writes(w) {
   });
 }
 
-function runRecord(id, name, appSlug = 'review-bot') {
-  return { id, name, app: { slug: appSlug }, conclusion: 'neutral' };
+function runRecord(id, name, appSlug = 'review-bot', appId = 101) {
+  return { id, name, app: { slug: appSlug, id: appId }, conclusion: 'neutral' };
 }
 
 describe('shared check-run helper', () => {
@@ -152,6 +152,37 @@ describe('shared check-run helper', () => {
 
     expect(result.exitCode).toBe(0);
     expect(writes(w)).toHaveLength(1);
+    expect(writes(w)[0].method).toBe('POST');
+  });
+
+  it('with an empty slug, PATCHes the run whose App ID matches instead of POSTing', () => {
+    const w = workdir();
+    const result = invoke(w, script, ['upsert', 'security-review', 'success', 'Security review', 'Clean.'], {
+      runs: {
+        check_runs: [
+          runRecord(45, 'security-review', 'other-app', 202),
+          runRecord(46, 'security-review', 'review-bot', 101),
+        ],
+      },
+      extraEnv: { CHECK_APP_SLUG: '', CHECK_APP_ID: '101' },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).not.toContain('::warning::');
+    expect(writes(w)).toHaveLength(1);
+    expect(writes(w)[0].method).toBe('PATCH');
+    expect(writes(w)[0].path).toBe('repos/dryvist/example/check-runs/46');
+  });
+
+  it('with neither slug nor App ID, POSTs with a warning', () => {
+    const w = workdir();
+    const result = invoke(w, script, ['upsert', 'security-review', 'success', 'Security review', 'Clean.'], {
+      runs: { check_runs: [runRecord(47, 'security-review')] },
+      extraEnv: { CHECK_APP_SLUG: '', CHECK_APP_ID: '' },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain('CHECK_APP_SLUG and CHECK_APP_ID are empty');
     expect(writes(w)[0].method).toBe('POST');
   });
 

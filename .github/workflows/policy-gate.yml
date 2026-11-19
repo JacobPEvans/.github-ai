@@ -113,8 +113,9 @@ on:
         required: false
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         description: >-
-          Private key of the Claude bot App. Mints the token that posts the
-          neutral or failure check run on a gateway failure. Without it the
+          Deprecated: the check-run token comes from OpenBao when the caller
+          grants id-token: write and the runner sets OPENBAO_ADDR. Otherwise
+          this private key of the Claude bot App mints it. Without either, the
           gateway path fails the job.
         required: false
 
@@ -151,14 +152,14 @@ jobs:
           : "${LLM_ROUTER_API_KEY:?LLM_ROUTER_API_KEY not set}"
 
       - name: Checkout pull request head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout ai-workflows scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
@@ -248,7 +249,7 @@ jobs:
       # Only this job checks out the trusted scripts it runs with the App token. It never
       # checks out the pull request.
       - name: Checkout ai-workflows scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: JacobPEvans/.github-ai
           ref: ${{ job.workflow_sha }}
@@ -291,7 +292,7 @@ jobs:
           elif [ "$VALID_OUTCOME" != "success" ]; then
             truncated="$(bash .ai-workflows/.github/scripts/shared/gateway-failure.sh truncated "$RESPONSE_FILE")"
             if [ "$truncated" = truncated ]; then
-              state=truncated-response
+              state="truncated-response"
             else
               state=invalid-response
             fi
@@ -320,17 +321,58 @@ jobs:
           fi
           echo "blocking=$blocking" >> "$GITHUB_OUTPUT"
 
-      # The check run is posted with the Claude bot App token. Mint it whenever
-      # a rubric can publish or update its run. A failed mint is named by the report step.
+      # The check run is posted with a checks: write token. The job first reads one
+      # from OpenBao through its org's gate-checks OIDC role, which binds to this
+      # workflow on main or a release tag. Only _ai-merge-gate-oidc.yml grants this job
+      # id-token: write. A call without it, or a runner without OPENBAO_ADDR, mints
+      # with the Claude bot App key instead.
+      # A failed mint is named by the report step.
+      - name: Find the OpenBao check-token role
+        id: check-role
+        if: steps.state.outputs.state != 'override'
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ -n "${OPENBAO_ADDR:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "addr=$OPENBAO_ADDR" >> "$GITHUB_OUTPUT"
+            echo "role=gate-checks-${OWNER,,}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Read the check-run token from OpenBao
+        id: check-token-oidc
+        if: steps.check-role.outputs.addr != ''
+        continue-on-error: true
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ steps.check-role.outputs.addr }}
+          method: jwt
+          path: github-actions
+          role: ${{ steps.check-role.outputs.role }}
+          jwtGithubAudience: https://github.com/dryvist
+          exportEnv: false
+          exportToken: false
+          secrets: |
+            github/token/${{ steps.check-role.outputs.role }} token | CHECK_TOKEN ;
+
       - name: Mint the check-run token
         id: check-token
-        if: steps.state.outputs.state != 'override'
+        if: steps.state.outputs.state != 'override' && steps.check-token-oidc.outputs.CHECK_TOKEN == ''
         continue-on-error: true
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
           permission-checks: write
+
+      - name: Record which path minted the check-run token
+        if: steps.state.outputs.state != 'override'
+        env:
+          FROM_OIDC: ${{ steps.check-token-oidc.outputs.CHECK_TOKEN != '' }}
+          FROM_KEY: ${{ steps.check-token.outputs.token != '' }}
+        run: |
+          if [ "$FROM_OIDC" = true ]; then path=oidc; elif [ "$FROM_KEY" = true ]; then path=key; else path=none; fi
+          echo "check-run token: $path"
+          echo "Check-run token: $path" >> "$GITHUB_STEP_SUMMARY"
 
       # actions/ai-inference does not expose the HTTP status or error text, so a
       # failed request is reported as router-request-failed.
@@ -342,11 +384,12 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # Advisory: neutral. Blocking: failure, so the report exits 1 and the gate fails closed.
           CONCLUSION: ${{ inputs.blocking && 'failure' || 'neutral' }}
-          GITHUB_TOKEN: ${{ steps.check-token.outputs.token }}
-          CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set' || 'the mint step failed' }}
+          GITHUB_TOKEN: ${{ steps.check-token-oidc.outputs.CHECK_TOKEN || steps.check-token.outputs.token }}
+          CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'OpenBao gave no token and GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set' || 'the mint step failed' }}
           CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           CHECK_NAME: ${{ env.REVIEW_NAME }}
           CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
+          CHECK_APP_ID: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           REASON: ${{ steps.state.outputs.state }}
         run: |
           if [ "$REASON" = truncated-response ]; then
@@ -407,8 +450,9 @@ jobs:
         if: steps.state.outputs.state == 'ok'
         continue-on-error: ${{ steps.enforcement.outputs.blocking != 'true' }}
         env:
-          GH_TOKEN: ${{ steps.check-token.outputs.token }}
+          GH_TOKEN: ${{ steps.check-token-oidc.outputs.CHECK_TOKEN || steps.check-token.outputs.token }}
           CHECK_APP_SLUG: ${{ steps.check-token.outputs.app-slug }}
+          CHECK_APP_ID: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
           BLOCKING: ${{ steps.enforcement.outputs.blocking }}
           CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
