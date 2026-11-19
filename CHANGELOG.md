@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.14.2](https://github.com/JacobPEvans/.github-ai/compare/v2.14.1...v2.14.2) (2026-11-19)
+
+
+### Bug Fixes
+
+* **ci:** rerun the AI merge gate on PR edits ([b337715](https://github.com/JacobPEvans/.github-ai/commit/b3377151e29b7d36e724a62d4039ac08a45fa343))
+* **ci:** rerun the AI merge gate on PR edits ([#170](https://github.com/JacobPEvans/.github-ai/issues/170)) ([382e957](https://github.com/JacobPEvans/.github-ai/commit/382e957854b6ff0d5b0c60d26ca021167afe4590))
+
 ## [2.14.1](https://github.com/JacobPEvans/.github-ai/compare/v2.14.0...v2.14.1) (2026-11-16)
 
 
