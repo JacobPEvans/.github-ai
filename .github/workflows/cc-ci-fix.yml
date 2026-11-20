@@ -493,43 +493,37 @@ jobs:
           python3 .gh-shared/scripts/pr-policy.py "$GITHUB_WORKSPACE" --diff "$RUNNER_TEMP/pr.diff"
           bash .gh-shared/scripts/ci-gate-workflow-lint.sh
 
-      - name: Find the OpenBao workflow-fix role
-        id: workflow-role
-        if: steps.workflow-patch.outputs.workflow_fix == 'true'
+      # Every commit token comes from OpenBao through GitHub OIDC; no App key is used. A workflow fix reads the
+      # openhands-workflows role (contents and workflows write), every other fix the openhands-write role.
+      - name: Find the OpenBao commit-token role
+        id: commit-role
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
         env:
           OWNER: ${{ github.repository_owner }}
           ADDR: ${{ secrets.OPENBAO_ADDR }}
+          WORKFLOW_FIX: ${{ steps.workflow-patch.outputs.workflow_fix }}
         run: |
           addr="${ADDR:-${OPENBAO_ADDR:-}}"
-          test -n "$addr" || { echo "::error::OPENBAO_ADDR is not set; a workflow fix needs the OpenBao token" >&2; exit 1; }
+          test -n "$addr" || { echo "::error::OPENBAO_ADDR is not set; the publisher reads its commit token from OpenBao" >&2; exit 1; }
+          route=openhands-write
+          [ "$WORKFLOW_FIX" = true ] && route=openhands-workflows
           echo "addr=$addr" >> "$GITHUB_OUTPUT"
-          echo "role=openhands-workflows-${OWNER,,}" >> "$GITHUB_OUTPUT"
+          echo "role=${route}-${OWNER,,}" >> "$GITHUB_OUTPUT"
 
-      # Contents and workflows write, bound to this workflow on main or a release tag.
-      - name: Read the workflow-fix token from OpenBao
-        id: workflow-token
-        if: steps.workflow-patch.outputs.workflow_fix == 'true'
+      - name: Read the commit token from OpenBao
+        id: commit-token
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
         uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
-          url: ${{ steps.workflow-role.outputs.addr }}
+          url: ${{ steps.commit-role.outputs.addr }}
           method: jwt
           path: github-actions
-          role: ${{ steps.workflow-role.outputs.role }}
+          role: ${{ steps.commit-role.outputs.role }}
           jwtGithubAudience: https://github.com/${{ github.repository_owner }}
           exportEnv: false
           exportToken: false
           secrets: |
-            github-openhands/token/${{ steps.workflow-role.outputs.role }} token | WORKFLOW_TOKEN ;
-
-      # The fresh publisher alone receives the App token.
-      - name: Mint commit token
-        id: commit-token
-        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true' && steps.workflow-patch.outputs.workflow_fix != 'true'
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
-        with:
-          client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}
-          private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
-          permission-contents: write
+            github-openhands/token/${{ steps.commit-role.outputs.role }} token | COMMIT_TOKEN ;
 
       - name: Commit fix to PR branch
         if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
@@ -540,7 +534,7 @@ jobs:
           COMMIT_MESSAGE: "fix: resolve CI failure (auto-fix attempt ${{ needs.should-fix.outputs.attempt }})"
           EXTRA_EXCLUDES: .gh-shared
         with:
-          github-token: ${{ steps.workflow-token.outputs.WORKFLOW_TOKEN || steps.commit-token.outputs.token }}
+          github-token: ${{ steps.commit-token.outputs.COMMIT_TOKEN }}
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/commit-fix.js');
             await run({ github, context, core });
