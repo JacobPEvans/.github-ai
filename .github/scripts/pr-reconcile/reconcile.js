@@ -61,6 +61,7 @@ const CI_FIX_SKIP_DEFAULT = 'merge gate|router availability|review the diff|free
 const RERUN_CHECKS = /review the diff|uses resolve/i;
 const RERUN_CONTEXT = 'pr-reconcile-rerun';
 const RERUN_MAX = 2;
+const GATEWAY_STEP = /gateway unavailab/i;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -214,17 +215,25 @@ async function mergeBaseFirst(github, owner, repo, pr, check) {
 
 // Re-runs one workflow run behind a re-run check while the head has fewer than RERUN_MAX recorded re-runs.
 // The combined status holds only the latest status per context, so the count lives in its description: 'rerun N: ...'.
-async function rerunFirst(github, owner, repo, pr, broken, statuses) {
+async function rerunFirst(github, owner, repo, pr, broken, statuses, down) {
   const last = statuses.find((status) => status.context === RERUN_CONTEXT);
   const done = Number(/^rerun (\d+):/.exec(last?.description || '')?.[1] || 0);
   if (done >= RERUN_MAX) return null;
-  const check = broken.find((run) => RERUN_CHECKS.test(run.name) && ciFixRunId(run));
+  const check = broken.find((run) => (RERUN_CHECKS.test(run.name) || down.has(run)) && ciFixRunId(run));
   if (!check) return null;
   await github.rest.actions.reRunWorkflowFailedJobs({ owner, repo, run_id: Number(ciFixRunId(check)) });
   await github.rest.repos.createCommitStatus({
     owner, repo, sha: pr.head.sha, state: 'success', context: RERUN_CONTEXT, description: `rerun ${done + 1}: ${check.name}`.slice(0, 140),
   });
   return { outcome: 'rerun', check: check.name };
+}
+
+// A Policy gate job that failed in its gateway-unavailability step stopped before a verdict: re-run, never fixed.
+async function gatewayDown(github, owner, repo, check) {
+  const job = /\/job\/(\d+)/.exec(check.details_url || '')?.[1];
+  if (!/policy gate/i.test(check.name) || !job) return false;
+  const { data } = await github.rest.actions.getJobForWorkflowRun({ owner, repo, job_id: Number(job) });
+  return (data.steps || []).some((step) => step.conclusion === 'failure' && GATEWAY_STEP.test(step.name));
 }
 
 async function startCiFix(github, owner, repo, pr, settings, statuses = []) {
@@ -235,9 +244,11 @@ async function startCiFix(github, owner, repo, pr, settings, statuses = []) {
     .filter((check) => ['failure', 'cancelled', 'timed_out'].includes(check.conclusion)
       && check.app && check.app.slug === 'github-actions')
     .sort(byName);
-  const rerun = await rerunFirst(github, owner, repo, pr, broken, statuses);
+  const down = new Set();
+  for (const check of broken) if (await gatewayDown(github, owner, repo, check)) down.add(check);
+  const rerun = await rerunFirst(github, owner, repo, pr, broken, statuses, down);
   if (rerun) return rerun;
-  const failures = broken.filter((check) => check.conclusion === 'failure');
+  const failures = broken.filter((check) => check.conclusion === 'failure' && !down.has(check));
   for (const check of failures) {
     if (await mergeBaseFirst(github, owner, repo, pr, check)) return { outcome: 'base-merged', check: check.name };
   }

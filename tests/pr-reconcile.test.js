@@ -501,6 +501,40 @@ describe('reconcile', () => {
     ]);
   });
 
+  it('re-runs a Policy gate job that failed in its gateway step, and after two re-runs leaves it alone', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const name = 'gate / Semantic review / Policy gate';
+    const check = checkRun({ name, details_url: 'https://github.com/test-owner/test-repo/actions/runs/424242/job/77' });
+    for (const [statuses, outcome, reruns] of [
+      [[], 'rerun', 1],
+      [[{ context: 'pr-reconcile-rerun', description: `rerun 2: ${name}` }], 'noop', 0],
+    ]) {
+      const gh = github(pr(), { statuses });
+      gh.rest.actions.getJobForWorkflowRun = mock().mockResolvedValue({
+        data: { steps: [{ name: 'Report gateway unavailability', conclusion: 'failure' }] },
+      });
+      gh.paginate.mockResolvedValueOnce([check]);
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      expect(gh.rest.actions.getJobForWorkflowRun).toHaveBeenCalledWith({ owner: 'test-owner', repo: 'test-repo', job_id: 77 });
+      expect(gh.rest.actions.reRunWorkflowFailedJobs).toHaveBeenCalledTimes(reruns);
+      expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+      expect(event).toMatchObject({ action: 'ci-fix', outcome });
+    }
+  });
+
+  it('sends a Policy gate job that failed on its verdict to the CI fix', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const name = 'gate / Semantic review / Policy gate';
+    const gh = github(pr());
+    gh.rest.actions.getJobForWorkflowRun = mock().mockResolvedValue({
+      data: { steps: [{ name: 'Enforce the verdict', conclusion: 'failure' }] },
+    });
+    gh.paginate.mockResolvedValueOnce([checkRun({ name, details_url: 'https://github.com/test-owner/test-repo/actions/runs/424242/job/78' })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.reRunWorkflowFailedJobs).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched', check: name });
+  });
+
   it('after two re-runs leaves an AI review alone and sends Uses Resolve to the CI fix', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const statuses = [{ context: 'pr-reconcile-rerun', description: 'rerun 2: x' }];
