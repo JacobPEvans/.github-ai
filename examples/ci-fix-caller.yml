@@ -1,37 +1,64 @@
-# Example consumer caller for JacobPEvans/.github-ai cc-ci-fix.yml
+# Canonical CI-fix caller for JacobPEvans/.github-ai cc-ci-fix.yml
 #
-# Drop this in your repo at .github/workflows/ci-fix.yml. When your CI workflow
-# fails on a PR branch, Claude analyzes the failure logs and pushes a fix commit
-# to that PR branch (max 2 attempts/PR). It stops before merge — a human merges.
+# Copy this file unchanged to .github/workflows/ci-fix.yml in every repository.
+# The PR Reconcile sweep dispatches it once per head commit of a pull request
+# whose checks failed, with the failed run and the head branch as inputs.
+# OpenHands makes the fix on a local router role and pushes one commit to the
+# pull request branch. The called workflow handles gating, attempt caps and
+# concurrency.
 #
-# Required configuration on the consumer repo (or org):
-#   - secret  LLM_ROUTER_BASE_URL             model router base URL, ending in /v1
-#   - secret  LLM_ROUTER_API_KEY              scoped router key for CI
-#   - var     GH_ACTION_AI_MODEL_CODE (or GH_ACTION_AI_MODEL)   a router role alias
-#   - var     GH_APP_CLAUDE_BOT_ID            GitHub App id (commit signing/attribution)
-#   - secret  GH_APP_CLAUDE_BOT_PRIVATE_KEY   GitHub App private key (PEM)
+# Per-repository text comes from repository variables, so the file itself is the
+# same everywhere (all optional):
+#   - var CI_FIX_REPO_CONTEXT  what the repository is and how it builds
+#                              (default: the repository description)
+#   - var CI_FIX_CI_STRUCTURE  which checks CI runs and how to run them locally
+#   - var CI_FIX_EXTRA_TOOLS   extra allowed tools, e.g. Bash(ansible-lint:*)
+#
+# Secrets (repository or organization): LLM_ROUTER_BASE_URL, LLM_ROUTER_API_KEY,
+# OPENBAO_ADDR, GH_APP_CLAUDE_BOT_ID, GH_APP_CLAUDE_BOT_PRIVATE_KEY.
 
-name: CI Fix (Claude)
+name: CI Fix
 
 on:
-  workflow_run:
-    workflows: ["CI"] # exact name: of the CI workflow you want auto-fixed
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      failure_run_id:
+        description: ID of the failed run
+        required: true
+        type: string
+      failure_head_branch:
+        description: Head branch of the failed run
+        required: true
+        type: string
 
-# Consumer callers must declare permissions explicitly.
+# The called workflow's jobs request exactly these scopes (fix commit, pull
+# request comment through the issues API, run logs); a caller that grants less
+# fails at graph validation.
 permissions:
   actions: read
   contents: write
-  id-token: write
   issues: write
   pull-requests: write
 
 jobs:
-  ci-fix:
-    uses: JacobPEvans/.github-ai/.github/workflows/cc-ci-fix.yml@v1
-    secrets: inherit
+  fix:
+    uses: JacobPEvans/.github-ai/.github/workflows/cc-ci-fix.yml@5743e07e094f6ca410a4b85a0d3681064013f946 # v2.16.0
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+      OPENBAO_ADDR: ${{ secrets.OPENBAO_ADDR }}
+      GH_APP_CLAUDE_BOT_ID: ${{ secrets.GH_APP_CLAUDE_BOT_ID }}
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
     with:
-      repo_context: "Describe your repo: language, frameworks, how it builds."
-      ci_structure: "Describe what CI checks (lint, unit tests, typecheck, ...)."
-      # extra_tools: "Bash(bun:*)"   # optional extra allowed tools for the fix
-      # daily_run_limit: "5"          # optional, default 5; must be a positive integer
+      # Hosted runners cannot reach the model router; the review pool can.
+      runner_label: review
+      agent: openhands
+      local_model: medium
+      failure_conclusion: failure
+      failure_run_id: ${{ inputs.failure_run_id }}
+      failure_head_branch: ${{ inputs.failure_head_branch }}
+      failure_head_repository: ${{ github.repository }}
+      failure_actor: ${{ github.actor }}
+      repo_context: ${{ vars.CI_FIX_REPO_CONTEXT }}
+      ci_structure: ${{ vars.CI_FIX_CI_STRUCTURE || 'The workflow of the failed run under .github/workflows/ lists the checks. Run the same commands locally before publishing a fix.' }}
+      extra_tools: ${{ vars.CI_FIX_EXTRA_TOOLS }}
