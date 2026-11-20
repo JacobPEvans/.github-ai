@@ -6,6 +6,7 @@
 // repository's Merge Gate instead), no review asks for changes, no review thread is open, and no release freeze holds the
 // base. It merges with the head SHA, so a push after the read makes the merge fail instead of landing unreviewed code.
 // On a git-flow repository the labelled develop-to-main promotion also merges through this path, with a merge commit.
+// A pull request based on any other branch than the default branch (or main on a git-flow repository) is stacked and waits.
 // A promotion that carries any major release commit is held for a human merge and noted once on the pull request. Auto-merge armed on an agent pull request is disarmed. Every decision returns a reason for the run summary.
 
 const GATE_CHECK = /(^|\/ )AI Merge Gate$/;
@@ -84,6 +85,8 @@ function staticBlocker(pr, held) {
   // Only the labelled promotion on a git-flow repository is eligible to merge here; every other develop-to-main pull request waits.
   if (pr.base.ref === 'main' && pr.head.ref === 'develop'
     && (pr.base.repo.default_branch !== 'develop' || !labels.includes(FREEZE_LABEL))) return 'promotion';
+  const base = pr.base.ref;
+  if (base !== pr.base.repo.default_branch && !(base === 'main' && pr.base.repo.default_branch === 'develop')) return `stacked:${base}`;
   if (majorRelease(pr)) return 'major-release';
   if (!['clean', 'unstable'].includes(pr.mergeable_state)) return `state:${pr.mergeable_state}`;
   return '';
