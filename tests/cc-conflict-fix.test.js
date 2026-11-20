@@ -2,7 +2,7 @@ const { mock, describe, it, expect } = require('bun:test');
 const { readFileSync } = require('node:fs');
 const { createMockCore, createMockContext, createMockGithub } = require('./helpers.js');
 const { refusal, prepare } = require('../.github/scripts/conflict-fix/prepare.js');
-const { patchFiles, subsetRefusal } = require('../.github/scripts/conflict-fix/subset.js');
+const { numstatPaths, subsetRefusal, readPatch } = require('../.github/scripts/conflict-fix/subset.js');
 const { v2Body, v2Labels, waitForCi, publish } = require('../.github/scripts/conflict-fix/publish.js');
 
 const repoName = { full_name: 'test-owner/test-repo' };
@@ -62,22 +62,72 @@ describe('prepare', () => {
 });
 
 describe('subset rule', () => {
-  const patch = (...files) => files.map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b`).join('\n');
+  const { execFileSync } = require('node:child_process');
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync, renameSync } = require('node:fs');
+  const { join, dirname } = require('node:path');
+  const { tmpdir } = require('node:os');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 
-  it('lists every path the patch touches', () => {
-    expect(patchFiles(patch('src/a.js', 'README.md'))).toEqual(['src/a.js', 'README.md']);
+  // A real git patch from a scratch repository: `before` files are committed, `edit` changes the tree, and the patch
+  // is collected the way the fix job collects it.
+  function realPatch(before, edit, { noRenames = true } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'conflict-subset-'));
+    try {
+      const git = (...args) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' });
+      git('init', '-q');
+      git('config', 'user.email', 't@example.com');
+      git('config', 'user.name', 't');
+      const write = (path, text) => { mkdirSync(dirname(join(dir, path)), { recursive: true }); writeFileSync(join(dir, path), text); };
+      for (const [path, text] of Object.entries(before)) write(path, text);
+      git('add', '-A');
+      git('commit', '-qm', 'base');
+      edit({ write, move: (from, to) => { mkdirSync(dirname(join(dir, to)), { recursive: true }); renameSync(join(dir, from), join(dir, to)); } });
+      git('add', '-N', '-A');
+      const patch = join(dir, 'agent.patch');
+      writeFileSync(patch, git('diff', '--binary', ...(noRenames ? ['--no-renames'] : ['-M']), 'HEAD'));
+      return readPatch(patch);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const long = 'one\ntwo\nthree\nfour\nfive\nsix\n';
+
+  it('reads unquoted paths, including the rename form, from numstat -z output', () => {
+    expect(numstatPaths('1\t1\tsrc/my file.js\u00000\t0\t\u0000old.txt\u0000new.txt\u0000')).toEqual(['src/my file.js', 'old.txt', 'new.txt']);
   });
 
-  it('allows a patch inside the original changed files', () => {
-    expect(subsetRefusal(patch('src/a.js'), ['src/a.js', 'README.md'])).toBe('');
+  it('allows a patch inside the original changed files, including a path with a space', () => {
+    const patch = realPatch({ 'src/my file.js': 'a\n' }, ({ write }) => write('src/my file.js', 'b\n'));
+    expect(patch.paths).toEqual(['src/my file.js']);
+    expect(subsetRefusal(patch, ['src/my file.js'])).toBe('');
+    expect(subsetRefusal(patch, ['src/my-file.js'])).toMatch(/does not: src\/my file\.js/);
+  });
+
+  it('refuses a .github path that git quotes in the diff header', () => {
+    const patch = realPatch({ '.github/é.yml': 'a\n' }, ({ write }) => write('.github/é.yml', 'b\n'));
+    expect(patch.paths).toEqual(['.github/é.yml']);
+    expect(subsetRefusal(patch, ['.github/é.yml'])).toMatch(/edits \.github\/: \.github\/é\.yml/);
+  });
+
+  it('checks both names of a rename collected with --no-renames', () => {
+    const patch = realPatch({ 'outside.txt': long }, ({ move }) => move('outside.txt', 'src/a.js'));
+    expect(patch.paths.sort()).toEqual(['outside.txt', 'src/a.js']);
+    expect(subsetRefusal(patch, ['src/a.js'])).toMatch(/does not: outside\.txt/);
+  });
+
+  it('refuses a patch that still carries a rename', () => {
+    const patch = realPatch({ 'src/a.js': long }, ({ move }) => move('src/a.js', 'src/b.js'), { noRenames: false });
+    expect(subsetRefusal(patch, ['src/a.js', 'src/b.js'])).toMatch(/renames or copies/);
   });
 
   it('refuses a file the original did not change', () => {
-    expect(subsetRefusal(patch('src/a.js', 'src/b.js'), ['src/a.js'])).toMatch(/does not: src\/b\.js/);
+    const patch = realPatch({ 'src/a.js': 'a\n', 'src/b.js': 'a\n' }, ({ write }) => { write('src/a.js', 'b\n'); write('src/b.js', 'b\n'); });
+    expect(subsetRefusal(patch, ['src/a.js'])).toMatch(/does not: src\/b\.js/);
   });
 
   it('refuses an empty patch', () => {
-    expect(subsetRefusal('', ['src/a.js'])).toMatch(/empty/);
+    expect(subsetRefusal(readPatch('/nonexistent/agent.patch'), ['src/a.js'])).toMatch(/empty/);
+    expect(subsetRefusal(realPatch({ 'src/a.js': 'a\n' }, () => {}), ['src/a.js'])).toMatch(/empty/);
   });
 });
 
@@ -155,8 +205,8 @@ describe('workflow', () => {
   const { publish: job } = workflow.jobs;
   const names = job.steps.map((step) => step.name);
 
-  it('refuses .github edits and extra files before applying the patch, and reads the token after', () => {
-    const order = ['Refuse a patch that edits .github files', 'Refuse files the original did not change', 'Apply agent patch',
+  it('refuses an uncovered patch before applying it, and reads the token after', () => {
+    const order = ['Refuse a patch the original does not cover', 'Apply agent patch',
       'Read the commit token from OpenBao', 'Open the v2 and close the original'].map((name) => names.indexOf(name));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -177,5 +227,10 @@ describe('workflow', () => {
   it('starts the v2 from the base tip the agent worked on', () => {
     const checkout = job.steps.find((step) => step.name === 'Checkout the base tip the agent worked on');
     expect(checkout.with.ref).toBe('${{ needs.fix.outputs.base_sha }}');
+  });
+
+  it('collects the agent patch without rename detection', () => {
+    const collect = workflow.jobs.fix.steps.find((step) => step.name === 'Collect agent patch');
+    expect(collect.run).toContain('git diff --binary --no-renames HEAD > agent.patch');
   });
 });

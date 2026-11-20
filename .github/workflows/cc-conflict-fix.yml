@@ -194,7 +194,7 @@ jobs:
         run: |
           git add -N -A
           git reset -q -- .ai-workflows .ai-llm-prompts
-          git diff --binary HEAD > agent.patch
+          git diff --binary --no-renames HEAD > agent.patch
 
       - name: Upload agent patch
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -259,15 +259,8 @@ jobs:
         with:
           name: conflict-fix-${{ github.run_id }}
 
-      - name: Refuse a patch that edits .github files
-        if: steps.pr-open.outputs.open == 'true'
-        run: |
-          if grep -qE '^diff --git a/\.github/' agent.patch; then
-            echo "::error::conflict fix refused: the agent patch edits .github/"
-            exit 1
-          fi
-
-      - name: Refuse files the original did not change
+      # Empty patches, renames, .github/ edits and files the original did not change are refused.
+      - name: Refuse a patch the original does not cover
         if: steps.pr-open.outputs.open == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
