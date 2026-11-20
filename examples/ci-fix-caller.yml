@@ -32,11 +32,13 @@ on:
         type: string
 
 # The called workflow's jobs request exactly these scopes (fix commit, pull
-# request comment through the issues API, run logs); a caller that grants less
-# fails at graph validation.
+# request comment through the issues API, run logs, and the OpenBao identity the
+# workflow-fix publisher uses); a caller that grants less fails at graph
+# validation.
 permissions:
   actions: read
   contents: write
+  id-token: write
   issues: write
   pull-requests: write
 
