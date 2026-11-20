@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.28.1](https://github.com/JacobPEvans/.github-ai/compare/v2.28.0...v2.28.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **prompts:** release the ai-llm-prompts v1.126.3 pin ([#219](https://github.com/JacobPEvans/.github-ai/issues/219)) ([d96d0b4](https://github.com/JacobPEvans/.github-ai/commit/d96d0b4565fe434c65d92a720bf446a53d4094eb))
+
 ## [2.28.0](https://github.com/JacobPEvans/.github-ai/compare/v2.27.0...v2.28.0) (2026-11-20)
 
 
