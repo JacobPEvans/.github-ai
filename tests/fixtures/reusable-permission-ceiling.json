@@ -19,6 +19,7 @@
   "cc-ci-fix.yml": {
     "actions": "read",
     "contents": "write",
+    "id-token": "write",
     "issues": "write",
     "pull-requests": "write"
   },

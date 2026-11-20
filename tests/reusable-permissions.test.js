@@ -41,6 +41,7 @@ const OIDC_REUSABLES = {
   'verdict.yml': ['verdict'],
   '_ai-merge-gate-oidc.yml': ['leak', 'security', 'semantic', 'code'],
   'cc-conflict-fix.yml': ['publish'],
+  'cc-ci-fix.yml': ['publish'],
 };
 
 for (const [name, workflow] of reusables) {

@@ -386,8 +386,10 @@ jobs:
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     outputs:
       commit_token: ${{ steps.commit-token.outcome }}
+    # id-token: write reads the workflow-fix token from OpenBao; the caller must grant it.
     permissions:
       contents: write
+      id-token: write
       pull-requests: read
     steps:
       - name: Checkout publisher
@@ -436,12 +438,26 @@ jobs:
         with:
           name: ci-fix-${{ github.run_id }}
 
-      # The publisher never commits a patch that touches any .github/ path; such a
-      # patch stops here and fails the job, so the failure comment reaches the
-      # pull request; the patch stays in the run's agent patch artifact.
+      # A .github/ patch is published only as a workflow fix: a workflow-class failure, edits to workflow files the
+      # pull request already changes, and no new uses, secrets or permission grants.
+      - name: Classify a .github patch
+        id: workflow-patch
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+          FAILURE_RUN_ID: ${{ inputs.failure_run_id || github.event.workflow_run.id }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/workflow-patch.js');
+            await run({ github, context, core });
+
+      # Any other patch that touches a .github/ path stops here and fails the job, so
+      # the failure comment reaches the pull request; the patch stays in the run's
+      # agent patch artifact.
       - name: Stop a patch that edits .github files
         id: workflow-files
-        if: steps.pr-open.outputs.open == 'true'
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-patch.outputs.workflow_fix != 'true'
         run: bash .ai-workflows/.github/scripts/ci-fix/stop-github-patch.sh
 
       - name: Apply agent patch
@@ -452,10 +468,63 @@ jobs:
           fi
           rm agent.patch
 
+      # A workflow fix must pass the org workflow policy and actionlint on the patched tree before it is committed.
+      - name: Check out the org workflow checks
+        if: steps.workflow-patch.outputs.workflow_fix == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github
+          path: .gh-shared
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/pr-policy.py
+            scripts/ci-gate-workflow-lint.sh
+            .github/actionlint.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Check the workflow fix
+        if: steps.workflow-patch.outputs.workflow_fix == 'true'
+        env:
+          BASE_REF: ${{ steps.workflow-patch.outputs.base_ref }}
+          PYTHONPATH: ${{ runner.temp }}/pr-policy-deps
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-warn-script-location --target "$RUNNER_TEMP/pr-policy-deps" 'PyYAML>=6.0.2,<7'
+          git diff "$(git merge-base "origin/$BASE_REF" HEAD)" -- .github/workflows > "$RUNNER_TEMP/pr.diff"
+          python3 .gh-shared/scripts/pr-policy.py "$GITHUB_WORKSPACE" --diff "$RUNNER_TEMP/pr.diff"
+          bash .gh-shared/scripts/ci-gate-workflow-lint.sh
+
+      - name: Find the OpenBao workflow-fix role
+        id: workflow-role
+        if: steps.workflow-patch.outputs.workflow_fix == 'true'
+        env:
+          OWNER: ${{ github.repository_owner }}
+          ADDR: ${{ secrets.OPENBAO_ADDR }}
+        run: |
+          addr="${ADDR:-${OPENBAO_ADDR:-}}"
+          test -n "$addr" || { echo "::error::OPENBAO_ADDR is not set; a workflow fix needs the OpenBao token" >&2; exit 1; }
+          echo "addr=$addr" >> "$GITHUB_OUTPUT"
+          echo "role=openhands-workflows-${OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      # Contents and workflows write, bound to this workflow on main or a release tag.
+      - name: Read the workflow-fix token from OpenBao
+        id: workflow-token
+        if: steps.workflow-patch.outputs.workflow_fix == 'true'
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ steps.workflow-role.outputs.addr }}
+          method: jwt
+          path: github-actions
+          role: ${{ steps.workflow-role.outputs.role }}
+          jwtGithubAudience: https://github.com/${{ github.repository_owner }}
+          exportEnv: false
+          exportToken: false
+          secrets: |
+            github-openhands/token/${{ steps.workflow-role.outputs.role }} token | WORKFLOW_TOKEN ;
+
       # The fresh publisher alone receives the App token.
       - name: Mint commit token
         id: commit-token
-        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true' && steps.workflow-patch.outputs.workflow_fix != 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}
@@ -469,8 +538,9 @@ jobs:
           HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
           FIX_BASE_SHA: ${{ needs.fix.outputs.fix_base_sha }}
           COMMIT_MESSAGE: "fix: resolve CI failure (auto-fix attempt ${{ needs.should-fix.outputs.attempt }})"
+          EXTRA_EXCLUDES: .gh-shared
         with:
-          github-token: ${{ steps.commit-token.outputs.token }}
+          github-token: ${{ steps.workflow-token.outputs.WORKFLOW_TOKEN || steps.commit-token.outputs.token }}
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/commit-fix.js');
             await run({ github, context, core });
