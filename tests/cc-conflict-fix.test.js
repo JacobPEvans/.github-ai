@@ -129,6 +129,7 @@ describe('publish', () => {
     expect(result).toEqual({ closed: true, v2: 9 });
     expect(open.mock.calls[0][0]).toMatchObject({
       branch: 'feat/x-v2', baseBranch: 'develop', title: 'feat: thing', body: 'Adds a thing.\n\nSupersedes #7', labels: ['enhancement'],
+      autoMerge: false,
     });
     expect(gh.rest.checks.listForRef.mock.calls[0][0]).toMatchObject({ ref: 'v2sha' });
     expect(gh.rest.issues.createComment.mock.calls[0][0]).toMatchObject({ issue_number: 7, body: 'Superseded by #9.' });

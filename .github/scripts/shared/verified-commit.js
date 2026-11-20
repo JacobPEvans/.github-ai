@@ -102,8 +102,9 @@ async function commitToBranch({ github, context, core, branch, message, extraExc
 }
 
 // Shape 2: create a new branch off the checked-out HEAD, verified-commit the diff,
-// and open a PR. Returns { opened, pr } (opened: false when there were no changes).
-async function openPr({ github, context, core, branch, title, body, baseBranch, extraExcludes, repoWithOwner, labels }) {
+// and open a PR. Returns { opened, pr } (opened: false when there were no changes). autoMerge: false leaves native
+// auto-merge off, as the human:review label does.
+async function openPr({ github, context, core, branch, title, body, baseBranch, extraExcludes, repoWithOwner, labels, autoMerge = true }) {
   if (!branch || !title) { core.setFailed('openPr: branch and title are required'); return { opened: false }; }
   const [owner, repo] = repoWithOwner ? repoWithOwner.split('/') : [context.repo.owner, context.repo.repo];
   if (!owner || !repo) { core.setFailed('openPr: repoWithOwner must be owner/repo'); return { opened: false }; }
@@ -122,7 +123,7 @@ async function openPr({ github, context, core, branch, title, body, baseBranch, 
   const { data: pr } = await github.rest.pulls.create({ owner, repo, head: branch, base, title, body });
   // The opener enables native auto-merge; human:review keeps a person in the loop by leaving it off.
   if (labels?.length) await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
-  if (labels?.includes('human:review')) {
+  if (labels?.includes('human:review') || !autoMerge) {
     core.setOutput('auto_merge', 'false');
   } else {
     try {
