@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.36.0](https://github.com/JacobPEvans/.github-ai/compare/v2.35.0...v2.36.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** re-run crashed reviews and Uses Resolve before a CI fix ([#235](https://github.com/JacobPEvans/.github-ai/issues/235)) ([c322f66](https://github.com/JacobPEvans/.github-ai/commit/c322f66745b6a48fbd6203615aa0436ec9be1488))
+
 ## [2.35.0](https://github.com/JacobPEvans/.github-ai/compare/v2.34.0...v2.35.0) (2026-11-20)
 
 
