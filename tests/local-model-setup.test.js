@@ -41,3 +41,8 @@ test('both existing flows use the shared setup only in local-only mode', () => {
   expect(key.with.exportEnv).toBe(false);
   expect(key.with.exportToken).toBe(false);
 });
+
+test('the router key read asks GitHub for the calling owner audience', () => {
+  const read = action.runs.steps.find((step) => step.uses?.startsWith('hashicorp/vault-action@'));
+  expect(read.with.jwtGithubAudience).toBe('https://github.com/${{ github.repository_owner }}');
+});

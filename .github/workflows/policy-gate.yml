@@ -348,7 +348,7 @@ jobs:
           method: jwt
           path: github-actions
           role: ${{ steps.check-role.outputs.role }}
-          jwtGithubAudience: https://github.com/dryvist
+          jwtGithubAudience: https://github.com/${{ github.repository_owner }}
           exportEnv: false
           exportToken: false
           secrets: |
