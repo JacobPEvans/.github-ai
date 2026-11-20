@@ -119,8 +119,10 @@ on:
           gateway path fails the job.
         required: false
 
+# One group per pull request and rubric: GitHub keeps one pending run per group and cancels the older pending one,
+# so a group shared by every pull request cancels reviews whenever three or more queue at once.
 concurrency:
-  group: ${{ inputs.rubric == 'policy' && 'policy-gate' || format('{0}-review', inputs.rubric) }}-${{ github.repository }}
+  group: ${{ inputs.rubric == 'policy' && 'policy-gate' || format('{0}-review', inputs.rubric) }}-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
