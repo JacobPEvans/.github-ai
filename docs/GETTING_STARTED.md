@@ -133,6 +133,18 @@ cannot elevate the caller's token, so a caller without it fails at startup.
 
 Inputs: `repo_context` (required), `ci_structure` (required), `extra_tools` (optional)
 
+#### `cc-conflict-fix.yml`
+
+Called with `conflict_pr` for a conflicted pull request. The agent re-applies the pull request's net diff onto the
+current base tip. The publisher opens a v2 pull request from branch `<head>-v2`, with the same title and labels
+(never `human:review`) and the original body plus `Supersedes #N`. It closes the original, with a comment linking
+the v2, once the v2's CI has started.
+
+The run opens nothing for a pull request that is not open or not conflicted, a fork head, a v2, or one whose
+`<head>-v2` branch exists. It also opens nothing when the agent's patch changes a file the original did not change,
+or anything under `.github/`. The commit token comes from OpenBao through OIDC, so the caller grants
+`id-token: write`.
+
 #### `cc-post-merge-docs-review.yml`
 
 Triggered via the dispatch pattern — consumer caller listens on `push: branches: [main]` and re-dispatches as `workflow_dispatch`.
