@@ -435,7 +435,8 @@ jobs:
           name: ci-fix-${{ github.run_id }}
 
       # The publisher never commits a patch that touches any .github/ path; such a
-      # patch stops here, and stays in the run's agent patch artifact.
+      # patch stops here and fails the job, so the failure comment reaches the
+      # pull request; the patch stays in the run's agent patch artifact.
       - name: Stop a patch that edits .github files
         id: workflow-files
         if: steps.pr-open.outputs.open == 'true'

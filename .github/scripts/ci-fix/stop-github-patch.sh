@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Hold back an agent patch that touches any .github/ path (workflows, actions,
 # scripts): write touched=true|false to GITHUB_OUTPUT and, when stopped, put the
-# patch in the step summary. Reads agent.patch from the working directory.
+# patch in the step summary and exit 1, so the publish job fails and the
+# failure comment reaches the pull request. Reads agent.patch from the working
+# directory.
 set -euo pipefail
 
 if [ -s agent.patch ] && grep -qE '^diff --git a/\.github/' agent.patch; then
@@ -21,6 +23,8 @@ if [ -s agent.patch ] && grep -qE '^diff --git a/\.github/' agent.patch; then
     echo
     echo "</details>"
   } >> "$GITHUB_STEP_SUMMARY"
+  echo "::error title=CI fix stopped::The patch edits .github/; nothing was committed to the pull request."
+  exit 1
 else
   echo "touched=false" >> "$GITHUB_OUTPUT"
 fi
