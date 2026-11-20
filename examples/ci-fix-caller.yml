@@ -15,7 +15,8 @@
 #   - var CI_FIX_EXTRA_TOOLS   extra allowed tools, e.g. Bash(ansible-lint:*)
 #
 # Secrets (repository or organization): LLM_ROUTER_BASE_URL, LLM_ROUTER_API_KEY,
-# OPENBAO_ADDR, GH_APP_CLAUDE_BOT_ID, GH_APP_CLAUDE_BOT_PRIVATE_KEY.
+# OPENBAO_ADDR. The publisher reads its commit token from OpenBao through GitHub
+# OIDC, so the caller passes no App key.
 
 name: CI Fix
 
@@ -49,8 +50,6 @@ jobs:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
       OPENBAO_ADDR: ${{ secrets.OPENBAO_ADDR }}
-      GH_APP_CLAUDE_BOT_ID: ${{ secrets.GH_APP_CLAUDE_BOT_ID }}
-      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
     with:
       # Hosted runners cannot reach the model router; the review pool can.
       runner_label: review
