@@ -36,10 +36,19 @@ inputs:
     description: Comma-separated repositories the sweep skips.
     required: false
     default: ""
+  conflict_output:
+    description: "'true' queues eligible conflicted pull requests in the conflict_prs output instead of dispatching a fix (empty = off)."
+    required: false
+    default: ""
+outputs:
+  conflict_prs:
+    description: JSON array of the pull request numbers queued for a conflict fix ('[]' when none).
+    value: ${{ steps.reconcile.outputs.conflict_prs }}
 runs:
   using: composite
   steps:
     - name: Reconcile
+      id: reconcile
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
       env:
         ACTION_PATH: ${{ github.action_path }}
@@ -51,6 +60,7 @@ runs:
         CI_FIX_SKIP_CHECKS: ${{ inputs.ci_fix_skip_checks }}
         MERGE_ENABLED: ${{ inputs.merge }}
         PR_RECONCILE_EXCLUDE_REPOS: ${{ inputs.exclude_repos }}
+        CONFLICT_OUTPUT: ${{ inputs.conflict_output }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
