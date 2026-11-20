@@ -11,7 +11,10 @@
 // workflow_dispatch per head commit to fix them. CI_FIX_SKIP_CHECKS is a
 // case-insensitive regex of check names a coding agent should not touch.
 // When the failed check passes at the tip of the base branch, the base is merged
-// in first (update-branch) and no fix is dispatched for that head.
+// in first (update-branch) and no fix is dispatched for that head; this applies to skipped checks too.
+// Re-run first: an AI review run that crashed or was cancelled, and Uses Resolve (it reads live references), get
+// a re-run of their workflow run instead, at most twice per head (the pr-reconcile-rerun status counts them). An
+// AI review never gets a CI-fix dispatch.
 //
 // Hold: every reconcile sets the `merge-hold` commit status at the head: failure
 // while the PR carries the merge-hold label, success otherwise. A ruleset that
@@ -53,7 +56,11 @@ const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
 // Checks a code edit cannot fix: gate aggregators that mirror another check, review-router outages, review runs
 // that crashed instead of returning a verdict, release freezes and release checks, and eligibility gates. Review
 // verdicts (Policy gate), Workflow Policy, CodeQL and dependency review do start a fix.
-const CI_FIX_SKIP_DEFAULT = 'merge gate|router availability|review the diff|freeze|release|eligibility';
+// Flake Lock Fresh fails on upstream drift of the base's lock file: a lock bump on the base and update-branch clear it.
+const CI_FIX_SKIP_DEFAULT = 'merge gate|router availability|review the diff|freeze|release|eligibility|flake lock fresh';
+const RERUN_CHECKS = /review the diff|uses resolve/i;
+const RERUN_CONTEXT = 'pr-reconcile-rerun';
+const RERUN_MAX = 2;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -205,17 +212,36 @@ async function mergeBaseFirst(github, owner, repo, pr, check) {
   }
 }
 
-async function startCiFix(github, owner, repo, pr, settings) {
+// Re-runs one workflow run behind a re-run check while the head has fewer than RERUN_MAX recorded re-runs.
+async function rerunFirst(github, owner, repo, pr, broken, statuses) {
+  const done = statuses.filter((status) => status.context === RERUN_CONTEXT).length;
+  if (done >= RERUN_MAX) return null;
+  const check = broken.find((run) => RERUN_CHECKS.test(run.name) && ciFixRunId(run));
+  if (!check) return null;
+  await github.rest.actions.reRunWorkflowFailedJobs({ owner, repo, run_id: Number(ciFixRunId(check)) });
+  await github.rest.repos.createCommitStatus({
+    owner, repo, sha: pr.head.sha, state: 'success', context: RERUN_CONTEXT, description: `rerun ${done + 1}: ${check.name}`.slice(0, 140),
+  });
+  return { outcome: 'rerun', check: check.name };
+}
+
+async function startCiFix(github, owner, repo, pr, settings, statuses = []) {
   const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
   if (runs.some((check) => check.status !== 'completed')) return { outcome: 'ci-pending' };
-  const failed = runs
-    .filter((check) => check.conclusion === 'failure'
-      && check.app && check.app.slug === 'github-actions'
-      && !settings.skip.test(check.name))
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const broken = runs
+    .filter((check) => ['failure', 'cancelled', 'timed_out'].includes(check.conclusion)
+      && check.app && check.app.slug === 'github-actions')
+    .sort(byName);
+  const rerun = await rerunFirst(github, owner, repo, pr, broken, statuses);
+  if (rerun) return rerun;
+  const failures = broken.filter((check) => check.conclusion === 'failure');
+  for (const check of failures) {
+    if (await mergeBaseFirst(github, owner, repo, pr, check)) return { outcome: 'base-merged', check: check.name };
+  }
+  const failed = failures.filter((check) => !settings.skip.test(check.name) && !/review the diff/i.test(check.name));
   if (!failed.length) return { outcome: 'noop' };
   const check = failed[0];
-  if (await mergeBaseFirst(github, owner, repo, pr, check)) return { outcome: 'base-merged', check: check.name };
   const runId = ciFixRunId(check);
   if (!runId) return { outcome: 'ci-fix-no-run', check: check.name };
   try {
@@ -321,7 +347,7 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
       outcome = 'already-done';
     } else {
       try {
-        const fix = await startCiFix(github, owner, repo, pr, ciFix);
+        const fix = await startCiFix(github, owner, repo, pr, ciFix, statuses);
         outcome = fix.outcome;
         check = fix.check;
         // A missing caller workflow is final, so it is recorded like a taken action and not retried every sweep.
