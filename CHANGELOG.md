@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.16.0](https://github.com/JacobPEvans/.github-ai/compare/v2.15.0...v2.16.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **oidc:** request the calling owner audience in OpenBao reads ([#177](https://github.com/JacobPEvans/.github-ai/issues/177)) ([c8df5a1](https://github.com/JacobPEvans/.github-ai/commit/c8df5a1ded776fbabac8bc63387ffa60fcc9a0dc))
+* **oidc:** request the calling owner's audience in OpenBao reads ([c8df5a1](https://github.com/JacobPEvans/.github-ai/commit/c8df5a1ded776fbabac8bc63387ffa60fcc9a0dc))
+
 ## [2.15.0](https://github.com/JacobPEvans/.github-ai/compare/v2.14.2...v2.15.0) (2026-11-19)
 
 
