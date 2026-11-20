@@ -112,7 +112,7 @@ describe('reconcile', () => {
     expect(sweep).toContain('      fail-fast: false\n');
     expect(sweep).toContain('          role: pr-reconcile-sweep\n');
     expect(sweep).toContain('"$BAO_ADDR/v1/github/token"');
-    expect(sweep).toContain('{org_name: $o, permissions: {contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}');
+    expect(sweep).toContain('{org_name: $o, permissions: {actions: "write", checks: "read", contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}');
     expect(sweep).toContain('echo "::add-mask::$token"');
     expect(sweep).not.toContain('GH_APP_CLAUDE_BOT_PRIVATE_KEY');
     expect(sweep).not.toContain('pr-reconcile.yml');
