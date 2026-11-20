@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.34.0](https://github.com/JacobPEvans/.github-ai/compare/v2.33.0...v2.34.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** hold stacked pull requests in the sweep merge ([#230](https://github.com/JacobPEvans/.github-ai/issues/230)) ([66f1321](https://github.com/JacobPEvans/.github-ai/commit/66f13219a3321e8fbc955a33437fdf48d5f259ae))
+
 ## [2.33.0](https://github.com/JacobPEvans/.github-ai/compare/v2.32.0...v2.33.0) (2026-11-20)
 
 
