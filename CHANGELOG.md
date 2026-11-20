@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.30.0](https://github.com/JacobPEvans/.github-ai/compare/v2.29.0...v2.30.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** start a CI fix for review verdicts and workflow policy ([#181](https://github.com/JacobPEvans/.github-ai/issues/181)) ([57d539b](https://github.com/JacobPEvans/.github-ai/commit/57d539b36c9e81eab05bff1dfce8e1a51e9d7c4c))
+
 ## [2.29.0](https://github.com/JacobPEvans/.github-ai/compare/v2.28.1...v2.29.0) (2026-11-20)
 
 
