@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.28.0](https://github.com/JacobPEvans/.github-ai/compare/v2.27.0...v2.28.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **ci-fix:** fail the publish job when the .github guard stops a patch ([#215](https://github.com/JacobPEvans/.github-ai/issues/215)) ([ecbc56a](https://github.com/JacobPEvans/.github-ai/commit/ecbc56ab6067a3d74d2a2d154b9fabba217a2de0))
+
 ## [2.27.0](https://github.com/JacobPEvans/.github-ai/compare/v2.26.0...v2.27.0) (2026-11-20)
 
 
