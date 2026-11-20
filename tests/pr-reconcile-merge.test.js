@@ -159,6 +159,29 @@ describe('sweep merge', () => {
     expect(promoted.rest.pulls.merge.mock.calls[0][0].merge_method).toBe('merge');
   });
 
+  it('treats a renovate/ branch from another App as Renovate, but a major update still needs the AI gate', async () => {
+    const repoGate = { checks: [green('lint'), green('CI / Merge Gate')] };
+    const branch = (ref) => ({ ref, sha: 'head1', repo: { full_name: 'test-owner/test-repo' } });
+    const otherApp = github(pr({ user: { login: 'release-app[bot]', type: 'Bot' }, head: branch('renovate/first-party') }), repoGate);
+    expect((await reconcileOne(otherApp)).merge.outcome).toBe('merged');
+    const majors = [
+      pr({ head: branch('renovate/foo-2.x'), labels: [{ name: 'update:major' }] }),
+      pr({ head: branch('renovate/major-all') }),
+      pr({ head: branch('renovate/foo-2.x'), body: '| Package | Type | Update | Change |\n|---|---|---|---|\n| foo | action | major | `v1` -> `v2` |' }),
+    ];
+    for (const major of majors) {
+      expect((await reconcileOne(github(major, repoGate))).merge.reason).toBe('no-gate-success');
+    }
+  });
+
+  it('judges only the newest run of each check name', async () => {
+    const gate = { ...green('AI Merge Gate'), id: 1 };
+    const rerunGreen = github(pr(), { checks: [gate, { ...green('lint'), id: 2, conclusion: 'failure' }, { ...green('lint'), id: 3 }] });
+    expect((await reconcileOne(rerunGreen)).merge.outcome).toBe('merged');
+    const rerunRed = github(pr(), { checks: [gate, { ...green('lint'), id: 3, conclusion: 'failure' }, { ...green('lint'), id: 2 }] });
+    expect((await reconcileOne(rerunRed)).merge.reason).toBe('check:lint');
+  });
+
   it('merges a green labelled promotion with a merge commit and never touches its labels', async () => {
     const gh = github(promotion(), { commits: releaseCommits('2.29.0') });
     const event = await reconcileOne(gh);

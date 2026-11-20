@@ -10,6 +10,7 @@
 
 const GATE_CHECK = /(^|\/ )AI Merge Gate$/;
 const REPO_GATE_CHECK = /(^|\/ )Merge Gate$/;
+const RENOVATE_BRANCH = 'renovate/';
 const BLOCK_LABELS = ['human:review', 'merge-hold', 'needs-lead'];
 const FREEZE_LABEL = 'release:in-progress';
 const BAD_CONCLUSIONS = ['failure', 'cancelled', 'timed_out', 'action_required', 'stale'];
@@ -88,13 +89,37 @@ function staticBlocker(pr, held) {
 }
 
 // A Renovate, release-please or promotion pull request with no AI gate run may pass on the repository's own Merge Gate.
+// A Renovate major update keeps needing the AI gate.
 function repoGateAllowed(pr) {
-  return pr.user.login === 'renovate[bot]' || pr.head.ref.startsWith(RELEASE_PLEASE)
+  return (renovatePr(pr) && !renovateMajor(pr)) || pr.head.ref.startsWith(RELEASE_PLEASE)
     || (pr.base.ref === 'main' && pr.head.ref === 'develop');
 }
 
-function checksBlocker(runs, statuses, pr) {
-  if (!runs.length) return 'no-checks';
+// Some Renovate pull requests are opened by another App, so the branch counts as much as the author.
+function renovatePr(pr) {
+  return pr.user.login === 'renovate[bot]' || pr.head.ref.startsWith(RENOVATE_BRANCH);
+}
+
+// Renovate marks a major update with the org preset's update:major label, a major- branch, or "major" in its Update column.
+function renovateMajor(pr) {
+  const labels = (pr.labels || []).map((label) => label.name);
+  return labels.includes('update:major') || pr.head.ref.startsWith(`${RENOVATE_BRANCH}major-`)
+    || /\|\s*major\s*\|/.test(pr.body || '');
+}
+
+// A re-run leaves the old check run beside the new one at the same head; judge only the newest run of each name.
+function newestRuns(runs) {
+  const newest = new Map();
+  for (const check of runs) {
+    const seen = newest.get(check.name);
+    if (!seen || (check.id ?? 0) >= (seen.id ?? 0)) newest.set(check.name, check);
+  }
+  return [...newest.values()];
+}
+
+function checksBlocker(allRuns, statuses, pr) {
+  if (!allRuns.length) return 'no-checks';
+  const runs = newestRuns(allRuns);
   if (runs.some((check) => check.status !== 'completed')) return 'checks-pending';
   const bad = runs.find((check) => BAD_CONCLUSIONS.includes(check.conclusion));
   if (bad) return `check:${bad.name}`;
