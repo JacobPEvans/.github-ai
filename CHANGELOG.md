@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.25.0](https://github.com/JacobPEvans/.github-ai/compare/v2.24.0...v2.25.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** dispatch a conflict fix for a conflicted pull request idle over a day ([#200](https://github.com/JacobPEvans/.github-ai/issues/200)) ([e49cea6](https://github.com/JacobPEvans/.github-ai/commit/e49cea69f6095419a804e5eb02952ceaf677835e))
+
 ## [2.24.0](https://github.com/JacobPEvans/.github-ai/compare/v2.23.0...v2.24.0) (2026-11-20)
 
 
