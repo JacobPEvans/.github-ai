@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.39.0](https://github.com/JacobPEvans/.github-ai/compare/v2.38.0...v2.39.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **conflict-fix:** read the commit token from the github OpenBao mount ([#246](https://github.com/JacobPEvans/.github-ai/issues/246)) ([f66d834](https://github.com/JacobPEvans/.github-ai/commit/f66d83429ba8dd8b638ca25d6a24209beec1d69c))
+
 ## [2.38.0](https://github.com/JacobPEvans/.github-ai/compare/v2.37.0...v2.38.0) (2026-11-20)
 
 
