@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.32.0](https://github.com/JacobPEvans/.github-ai/compare/v2.31.0...v2.32.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** accept the repository Merge Gate for dependency, release and promotion PRs ([#225](https://github.com/JacobPEvans/.github-ai/issues/225)) ([959a46e](https://github.com/JacobPEvans/.github-ai/commit/959a46ec907f114e56de861330e62c4a440ce75b))
+
 ## [2.31.0](https://github.com/JacobPEvans/.github-ai/compare/v2.30.0...v2.31.0) (2026-11-20)
 
 
