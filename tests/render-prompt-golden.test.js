@@ -15,7 +15,7 @@ const temporaryDirectories = [];
 const prompts = {
   'best-practices': 'f04a9e6b3b33c74fbad4eb06ac9e4d79619f4b0dfd58f0305f69dff73fad7adb',
   'ci-fix': 'a419dcdaaeaa5e11075d16e97a98920a5e1d6e5ce9dedcac1accc5c8ad5a64ee',
-  'conflict-fix': 'c9bf74d661e3802ff921aced9b5a6e54247f90dd698fc0f7a9a0b2bc8c488051',
+  'conflict-fix': '9cb28f2ba8f8421c5879c8e80f96c55ba79f7772852e9bc56d2addbb112a4d28',
   'code-simplifier': 'f1362a8665af9adf1e3d1fbfb9b3a22cfec07f8cd9feba2fb424c11d09505030',
   'dep-review': '8feaf2a58124464049893bbe90d659321c5ce59dc6e0aaafdc3ab823976e7d64',
   'issue-resolver': '7fc9ca6e74d471ccedb710bb3fc2dfe6fcd47d44890e0f962f87441b807dc54c',
