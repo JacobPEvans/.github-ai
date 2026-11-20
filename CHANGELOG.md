@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.24.0](https://github.com/JacobPEvans/.github-ai/compare/v2.23.0...v2.24.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **run-ai-agent:** stop OpenHands at a time limit below the job timeout ([#207](https://github.com/JacobPEvans/.github-ai/issues/207)) ([1bbcf7e](https://github.com/JacobPEvans/.github-ai/commit/1bbcf7e117854c4ed70318349f682c7c8bab03d6))
+
 ## [2.23.0](https://github.com/JacobPEvans/.github-ai/compare/v2.22.0...v2.23.0) (2026-11-20)
 
 
