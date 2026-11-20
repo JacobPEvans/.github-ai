@@ -578,3 +578,108 @@ describe('reconcile', () => {
     await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid CI_FIX_SKIP_CHECKS');
   });
 });
+
+describe('conflict fix', () => {
+  let core;
+  const DAY = 24 * 60 * 60 * 1000;
+  const dirty = (overrides = {}) => pr({
+    mergeable_state: 'dirty',
+    base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } },
+    ...overrides,
+  });
+  function conflictGithub(prData, { statuses = [], files = [{ filename: 'src/a.js' }], ageMs = 2 * DAY, v2 = false } = {}) {
+    const gh = github(prData, { statuses, files });
+    gh.rest.repos.getCommit.mockResolvedValue({ data: { commit: { committer: { date: new Date(Date.now() - ageMs).toISOString() } } } });
+    gh.rest.git = { getRef: v2 ? mock().mockResolvedValue({}) : mock().mockRejectedValue(Object.assign(new Error('nf'), { status: 404 })) };
+    return gh;
+  }
+  const conflictStatuses = (gh) => gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0]).filter((s) => s.context === 'pr-reconcile-conflict');
+
+  beforeEach(() => {
+    core = createMockCore();
+    core.summary = { addRaw: mock(() => core.summary), write: mock(async () => {}) };
+    delete process.env.RESOLVER_REPO;
+    delete process.env.CI_FIX_SKIP_CHECKS;
+    delete process.env.MERGE_ENABLED;
+    process.env.CI_FIX_WORKFLOW = 'ci-fix.yml';
+    process.env.PR_NUMBER = '7';
+  });
+
+  it('dispatches the caller with conflict_pr for a conflict whose head is over a day old, once per head', async () => {
+    const gh = conflictGithub(dirty());
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch.mock.calls[0][0]).toEqual({
+      owner: 'test-owner', repo: 'test-repo', workflow_id: 'ci-fix.yml', ref: 'develop',
+      inputs: { failure_head_branch: 'feat/x', conflict_pr: '7' },
+    });
+    expect(gh.rest.git.getRef.mock.calls[0][0].ref).toBe('heads/feat/x-v2');
+    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched' })]);
+    expect(event.conflict).toEqual({ outcome: 'conflict-dispatched', reason: 'ci-fix.yml' });
+    expect(core.summary.addRaw.mock.calls[0][0]).toContain('| test-owner/test-repo#7 | conflict-dispatched | ci-fix.yml |');
+
+    const again = conflictGithub(dirty(), { statuses: [{ context: 'pr-reconcile-conflict', description: 'conflict-dispatched' }] });
+    const [second] = await run({ github: again, context: createMockContext(), core });
+    expect(again.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(second.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-dispatched' });
+  });
+
+  const skips = [
+    ['a head commit under a day old', {}, { ageMs: DAY - 60000 }, 'head commit under 24h old'],
+    ['a pull request that touches workflow files', {}, { files: [{ filename: '.github/workflows/ci.yml' }] }, 'workflow files'],
+    ['a pull request already sent to the lead', { labels: [{ name: 'needs-lead' }] }, {}, 'needs-lead'],
+    ['an original whose v2 branch exists', {}, { v2: true }, 'v2 branch exists'],
+  ];
+  for (const [name, prOverrides, options, reason] of skips) {
+    it(`skips ${name} and logs the reason`, async () => {
+      const gh = conflictGithub(dirty(prOverrides), options);
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+      expect(event.conflict).toEqual({ outcome: 'conflict-skip', reason });
+      expect(core.summary.addRaw.mock.calls[0][0]).toContain(reason);
+    });
+  }
+
+  it('sends a v2 that conflicts again to the lead and never dispatches a v3', async () => {
+    for (const overrides of [{ head: { ref: 'feat/x-v2', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }, { body: 'Intro\n\nSupersedes #5' }]) {
+      const gh = conflictGithub(dirty(overrides));
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+      expect(gh.rest.issues.addLabels.mock.calls.map((c) => c[0].labels)).toContainEqual(['needs-lead']);
+      expect(event.conflict.outcome).toBe('conflict-lead');
+    }
+  });
+
+  it('records a caller without the conflict input once and does not retry it', async () => {
+    const gh = conflictGithub(dirty());
+    gh.rest.actions.createWorkflowDispatch.mockRejectedValue(Object.assign(new Error('Unexpected inputs'), { status: 422 }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event.conflict).toEqual({ outcome: 'conflict-no-input', reason: 'HTTP 422' });
+    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ description: 'conflict-no-input' })]);
+  });
+
+  it('does nothing for a held, Renovate or promotion conflict or without a CI fix workflow', async () => {
+    const cases = [
+      dirty({ labels: [{ name: 'merge-hold' }] }),
+      dirty({ user: { login: 'renovate[bot]' }, body: 'x\n- [ ] <!-- rebase-check -->' }),
+      dirty({ head: { ref: 'develop', sha: 'h', repo: { full_name: 'test-owner/test-repo' } }, base: { ref: 'main', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } } }),
+    ];
+    for (const prData of cases) {
+      const gh = conflictGithub(prData);
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+      expect(event.conflict).toBeUndefined();
+    }
+    delete process.env.CI_FIX_WORKFLOW;
+    const gh = conflictGithub(dirty());
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event.conflict).toBeUndefined();
+  });
+
+  it('keeps the action record and the conflict record in separate status contexts', async () => {
+    const gh = conflictGithub(dirty());
+    await run({ github: gh, context: createMockContext(), core });
+    const contexts = gh.rest.repos.createCommitStatus.mock.calls.map((c) => [c[0].context, c[0].description]);
+    expect(contexts).toContainEqual(['pr-reconcile', 'label-conflict']);
+    expect(contexts).toContainEqual(['pr-reconcile-conflict', 'conflict-dispatched']);
+  });
+});
