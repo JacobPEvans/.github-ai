@@ -105,6 +105,8 @@ describe('sweep merge', () => {
     ['held', pr({ labels: [{ name: 'merge-hold' }] }), {}],
     ['zcode-branch', pr({ head: { ref: 'agent/zcode/j-1', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
     ['promotion', promotion({ labels: [] }), {}],
+    ['stacked:fix/base', pr({ base: { ref: 'fix/base', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }), {}],
+    ['stacked:fix/base', pr({ base: { ref: 'fix/base', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } } }), {}],
     ['state:blocked', pr({ mergeable_state: 'blocked' }), {}],
     ['head-moved', pr(), { live: { headRefOid: 'head2' } }],
     ['changes-requested', pr(), { live: { reviewDecision: 'CHANGES_REQUESTED' } }],
