@@ -482,9 +482,28 @@ describe('reconcile', () => {
     }
   });
 
+  it('re-runs a check that keeps failing on sweeps 1 and 2, then stops (combined status: one per context)', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const name = 'gate / Code review / Review the diff';
+    const latest = new Map();
+    const sweeps = [];
+    for (let sweep = 0; sweep < 3; sweep += 1) {
+      const gh = github(pr(), { statuses: [...latest.values()] });
+      gh.rest.repos.createCommitStatus.mockImplementation(async (status) => { latest.set(status.context, status); return {}; });
+      gh.paginate.mockResolvedValueOnce([checkRun({ name, conclusion: 'cancelled' })]);
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      sweeps.push([event.outcome, gh.rest.actions.reRunWorkflowFailedJobs.mock.calls.length, latest.get('pr-reconcile-rerun')?.description]);
+    }
+    expect(sweeps).toEqual([
+      ['rerun', 1, `rerun 1: ${name}`],
+      ['rerun', 1, `rerun 2: ${name}`],
+      ['noop', 0, `rerun 2: ${name}`],
+    ]);
+  });
+
   it('after two re-runs leaves an AI review alone and sends Uses Resolve to the CI fix', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
-    const statuses = [1, 2].map((n) => ({ context: 'pr-reconcile-rerun', description: `rerun ${n}: x` }));
+    const statuses = [{ context: 'pr-reconcile-rerun', description: 'rerun 2: x' }];
     for (const [name, outcome] of [['gate / Code review / Review the diff', 'noop'], ['shared-gate / Uses Resolve', 'ci-fix-dispatched']]) {
       const gh = github(pr(), { statuses });
       gh.paginate.mockResolvedValueOnce([checkRun({ name })]);

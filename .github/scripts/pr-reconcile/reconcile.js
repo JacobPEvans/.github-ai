@@ -213,8 +213,10 @@ async function mergeBaseFirst(github, owner, repo, pr, check) {
 }
 
 // Re-runs one workflow run behind a re-run check while the head has fewer than RERUN_MAX recorded re-runs.
+// The combined status holds only the latest status per context, so the count lives in its description: 'rerun N: ...'.
 async function rerunFirst(github, owner, repo, pr, broken, statuses) {
-  const done = statuses.filter((status) => status.context === RERUN_CONTEXT).length;
+  const last = statuses.find((status) => status.context === RERUN_CONTEXT);
+  const done = Number(/^rerun (\d+):/.exec(last?.description || '')?.[1] || 0);
   if (done >= RERUN_MAX) return null;
   const check = broken.find((run) => RERUN_CHECKS.test(run.name) && ciFixRunId(run));
   if (!check) return null;
