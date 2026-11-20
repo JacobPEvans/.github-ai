@@ -20,14 +20,13 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.created_at > '2026-11-19T20:00:00Z'
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: write
     steps:
       - name: Label and enforce pull request size
-        uses: >-
-          codelytv/pr-size-labeler@19c335e7695ba922de938806dd129f0a9b992644
-        # v1.12.0
+        uses: codelytv/pr-size-labeler@19c335e7695ba922de938806dd129f0a9b992644 # v1.12.0
         with:
           xs_max_size: '10'
           s_max_size: '100'
