@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.33.0](https://github.com/JacobPEvans/.github-ai/compare/v2.32.0...v2.33.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** judge the newest check run and hold Renovate majors for the AI gate ([#228](https://github.com/JacobPEvans/.github-ai/issues/228)) ([8f96ced](https://github.com/JacobPEvans/.github-ai/commit/8f96cedd24601db170aa14f265782e6663a76bb1))
+
 ## [2.32.0](https://github.com/JacobPEvans/.github-ai/compare/v2.31.0...v2.32.0) (2026-11-20)
 
 
