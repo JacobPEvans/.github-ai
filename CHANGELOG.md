@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.29.0](https://github.com/JacobPEvans/.github-ai/compare/v2.28.1...v2.29.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** never merge a pull request labelled needs-lead ([#188](https://github.com/JacobPEvans/.github-ai/issues/188)) ([73a93fc](https://github.com/JacobPEvans/.github-ai/commit/73a93fc2d33a4d51acc74dfb05dca3d176526086))
+
 ## [2.28.1](https://github.com/JacobPEvans/.github-ai/compare/v2.28.0...v2.28.1) (2026-11-20)
 
 
