@@ -88,6 +88,11 @@ Call after the CI jobs fail. The reusable workflow reads the originating run and
 failures to repair and default-branch failures to issue creation. Existing `workflow_run` callers remain
 compatible during migration.
 
+A repository in the PR Reconcile sweep uses [`examples/ci-fix-caller.yml`](../examples/ci-fix-caller.yml),
+unchanged, as `.github/workflows/ci-fix.yml`. The sweep dispatches it for a pull request whose checks failed;
+per-repository text comes from the `CI_FIX_REPO_CONTEXT`, `CI_FIX_CI_STRUCTURE` and `CI_FIX_EXTRA_TOOLS`
+repository variables.
+
 ```yaml
 jobs:
   ci-failure-handler:
