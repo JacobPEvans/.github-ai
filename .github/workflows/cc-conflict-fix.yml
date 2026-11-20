@@ -1,0 +1,352 @@
+# Conflict Fix
+#
+# Reusable workflow: called by a consumer repository's CI-fix caller with conflict_pr for a conflicted pull request.
+# The agent re-applies the pull request's net diff onto the current base tip; the publisher opens a v2 pull request
+# (same title and labels, body plus `Supersedes #N`) with a verified commit, and closes the original once the v2's
+# CI has started.
+#
+# Refused, with nothing opened: a pull request that is not open or not conflicted, a fork head, a v2, or one whose
+# `<head>-v2` branch exists (at most one v2 per original). The agent's patch may change only files the original
+# pull request changed, and never `.github/`.
+
+name: cc-Conflict Fix
+
+on:
+  workflow_call:
+    inputs:
+      conflict_pr:
+        description: Number of the conflicted pull request.
+        type: string
+        required: true
+      runner_label:
+        description: >-
+          GitHub Actions runner label to run the job(s) on. Defaults to
+          ubuntu-24.04. Pass a RunsOn label (see runs-on.com job labels
+          docs) to opt the calling repo into self-hosted runners.
+        type: string
+        required: false
+        default: ubuntu-24.04
+      agent:
+        description: Coding agent that re-applies the change.
+        type: string
+        required: false
+        default: openhands
+      local_model:
+        description: Router model role the agent uses.
+        type: string
+        required: false
+        default: ""
+      repo_context:
+        description: Brief description of the repository.
+        type: string
+        required: false
+        default: ""
+      ci_structure:
+        description: Description of the CI jobs and checks.
+        type: string
+        required: false
+        default: ""
+      extra_tools:
+        description: Extra allowed tools for the agent, comma-separated.
+        type: string
+        required: false
+        default: ""
+      dry_run:
+        description: Run the agent without opening or closing any pull request.
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      LLM_ROUTER_BASE_URL:
+        required: true
+      LLM_ROUTER_API_KEY:
+        required: false
+      OPENBAO_ADDR:
+        description: OpenBao service URL for the publisher's commit token.
+        required: false
+
+# Workflow-level permissions set the maximum for all jobs.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: conflict-fix-${{ github.repository }}-${{ inputs.conflict_pr }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    name: AI Conflict Fix
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      base_sha: ${{ steps.base.outputs.sha }}
+      changed_files: ${{ steps.prepare.outputs.changed_files }}
+    steps:
+      - name: Checkout ai-workflows scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+          persist-credentials: false
+
+      # Refusals stop here, before any agent work: not open, not conflicted, a fork, a v2, or an existing v2 branch.
+      - name: Read and check the pull request
+        id: prepare
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ inputs.conflict_pr }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/conflict-fix/prepare.js');
+            await run({ github, context, core });
+
+      # The root checkout empties the workspace, so the ai-workflows actions are checked out again below.
+      - name: Checkout the base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.prepare.outputs.base_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The v2 branch starts at this commit; the agent's patch applies to it.
+      - name: Record the base tip
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The original's net diff, from its merge base with the base branch to its head.
+      - name: Write the pull request diff
+        env:
+          HEAD_REF: ${{ steps.prepare.outputs.head_ref }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${HEAD_REF}:refs/remotes/origin/${HEAD_REF}"
+          git diff "$(git merge-base HEAD "origin/${HEAD_REF}")" "origin/${HEAD_REF}" > "$RUNNER_TEMP/pr.diff"
+          echo "diff bytes: $(wc -c < "$RUNNER_TEMP/pr.diff")"
+
+      # The agent runs the repository's own checks, so its hooks are installed first.
+      - name: Install repository pre-commit hooks
+        if: hashFiles('.pre-commit-config.yaml') != ''
+        continue-on-error: true
+        run: |
+          pipx install pre-commit
+          pre-commit install-hooks
+
+      - name: Checkout ai-workflows actions
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: |
+            .github/scripts
+            .github/actions/run-ai-agent
+            .github/actions/checkout-prompts
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Checkout prompt catalog
+        uses: ./.ai-workflows/.github/actions/checkout-prompts
+        with:
+          sparse-checkout: automation/ai-workflows-conflict-fix.md
+
+      # shortcut: the diff in the prompt stops at 100000 bytes (an environment value has a size limit); a larger
+      # change gets a truncation note, and the agent reads the rest with git.
+      - name: Render prompt
+        id: prompt
+        env:
+          REPO_CONTEXT: ${{ inputs.repo_context || github.event.repository.description }}
+          CI_STRUCTURE: ${{ inputs.ci_structure }}
+          PR_TITLE: ${{ steps.prepare.outputs.title }}
+          PR_BODY: ${{ steps.prepare.outputs.body }}
+          CHANGED_FILES: ${{ steps.prepare.outputs.changed_files }}
+          HEAD_REF: ${{ steps.prepare.outputs.head_ref }}
+        run: |
+          PR_DIFF=$(head -c 100000 "$RUNNER_TEMP/pr.diff")
+          if [ "$(wc -c < "$RUNNER_TEMP/pr.diff")" -gt 100000 ]; then
+            PR_DIFF="${PR_DIFF}
+          [diff truncated; run: git diff \$(git merge-base HEAD origin/${HEAD_REF}) origin/${HEAD_REF}]"
+          fi
+          export PR_DIFF
+          bash .ai-workflows/.github/scripts/render-prompt.sh .ai-llm-prompts/automation/ai-workflows-conflict-fix.md \
+            PR_DIFF PR_TITLE PR_BODY CHANGED_FILES REPO_CONTEXT CI_STRUCTURE
+
+      - name: Run AI agent
+        uses: ./.ai-workflows/.github/actions/run-ai-agent
+        with:
+          agent: ${{ inputs.agent }}
+          openhands_model: ${{ inputs.local_model }}
+          prompt: ${{ steps.prompt.outputs.content }}
+          claude_model: ${{ vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL }}
+          codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}
+          allowed_tools: "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git status:*),Bash(git branch:*)${{ inputs.extra_tools != '' && format(',{0}', inputs.extra_tools) || '' }}"
+          permission_profile: workspace
+          base_url: ${{ secrets.LLM_ROUTER_BASE_URL }}
+          api_key: ${{ secrets.LLM_ROUTER_API_KEY }}
+          openai_effort: ${{ vars.GH_ACTION_AI_CODEX_EFFORT }}
+          codex_version: ${{ vars.GH_ACTION_AI_CODEX_VERSION }}
+          allowed_bots: "github-actions,claude,jacobpevans-claude"
+
+      - name: Collect agent patch
+        run: |
+          git add -N -A
+          git reset -q -- .ai-workflows .ai-llm-prompts
+          git diff --binary HEAD > agent.patch
+
+      - name: Upload agent patch
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conflict-fix-${{ github.run_id }}
+          path: agent.patch
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish the v2 pull request
+    needs: fix
+    if: ${{ !inputs.dry_run }}
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    # id-token: write reads the commit token from OpenBao; the caller must grant it.
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+    steps:
+      - name: Checkout publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Check the pull request is still open
+        id: pr-open
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ inputs.conflict_pr }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/pr-still-open.js');
+            await run({ github, context, core });
+
+      - name: Checkout the base tip the agent worked on
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.fix.outputs.base_sha }}
+          persist-credentials: false
+
+      # The root checkout above empties the workspace, publisher included.
+      - name: Checkout publisher again
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Download agent patch
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: conflict-fix-${{ github.run_id }}
+
+      - name: Refuse a patch that edits .github files
+        if: steps.pr-open.outputs.open == 'true'
+        run: |
+          if grep -qE '^diff --git a/\.github/' agent.patch; then
+            echo "::error::conflict fix refused: the agent patch edits .github/"
+            exit 1
+          fi
+
+      - name: Refuse files the original did not change
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          CHANGED_FILES: ${{ needs.fix.outputs.changed_files }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/conflict-fix/subset.js');
+            await run({ core });
+
+      - name: Apply agent patch
+        if: steps.pr-open.outputs.open == 'true'
+        run: |
+          git apply agent.patch
+          rm agent.patch
+
+      # The commit token comes from OpenBao through GitHub OIDC; no App key is used.
+      - name: Find the OpenBao commit-token role
+        id: commit-role
+        if: steps.pr-open.outputs.open == 'true'
+        env:
+          OWNER: ${{ github.repository_owner }}
+          ADDR: ${{ secrets.OPENBAO_ADDR }}
+        run: |
+          addr="${ADDR:-${OPENBAO_ADDR:-}}"
+          test -n "$addr" || { echo "::error::OPENBAO_ADDR is not set; the publisher reads its commit token from OpenBao" >&2; exit 1; }
+          echo "addr=$addr" >> "$GITHUB_OUTPUT"
+          echo "role=openhands-write-${OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Read the commit token from OpenBao
+        id: commit-token
+        if: steps.pr-open.outputs.open == 'true'
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ steps.commit-role.outputs.addr }}
+          method: jwt
+          path: github-actions
+          role: ${{ steps.commit-role.outputs.role }}
+          jwtGithubAudience: https://github.com/${{ github.repository_owner }}
+          exportEnv: false
+          exportToken: false
+          secrets: |
+            github-openhands/token/${{ steps.commit-role.outputs.role }} token | COMMIT_TOKEN ;
+
+      - name: Open the v2 and close the original
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ inputs.conflict_pr }}
+        with:
+          github-token: ${{ steps.commit-token.outputs.COMMIT_TOKEN }}
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/conflict-fix/publish.js');
+            await run({ github, context, core });
+
+  notify-failure:
+    name: Report conflict fix failure
+    needs: [fix, publish]
+    if: failure() && !inputs.dry_run
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment on failure
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ inputs.conflict_pr }}
+        with:
+          script: |
+            const prNumber = Number(process.env.PR_NUMBER);
+            if (!prNumber) return;
+            const marker = '<!-- conflict-fix-failed -->';
+            const body = `${marker}\n> **Conflict fix failed.** No v2 pull request replaced this one.\n> [View run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+            // One failure comment per PR: a later failed run updates it in place.
+            const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: prNumber, per_page: 100 });
+            const existing = comments.find((c) => c.user?.type === 'Bot' && c.body?.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ ...repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...repo, issue_number: prNumber, body });
+            }

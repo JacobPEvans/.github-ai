@@ -27,6 +27,11 @@
     "contents": "write",
     "pull-requests": "write"
   },
+  "cc-conflict-fix.yml": {
+    "contents": "read",
+    "id-token": "write",
+    "pull-requests": "write"
+  },
   "cc-dep-review.yml": {
     "contents": "read",
     "pull-requests": "write"
