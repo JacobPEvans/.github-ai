@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.20.0](https://github.com/JacobPEvans/.github-ai/compare/v2.19.0...v2.20.0) (2026-11-20)
+
+
+### Features
+
+* **conflict-fix:** add the cc-conflict-fix reusable that replaces a conflicted pull request with a v2 ([#198](https://github.com/JacobPEvans/.github-ai/issues/198)) ([4eba2b6](https://github.com/JacobPEvans/.github-ai/commit/4eba2b6ba99cabbda135c2857b3713b3483ff254))
+
 ## [2.19.0](https://github.com/JacobPEvans/.github-ai/compare/v2.18.0...v2.19.0) (2026-11-20)
 
 
