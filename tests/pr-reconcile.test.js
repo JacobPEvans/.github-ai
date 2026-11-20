@@ -394,6 +394,40 @@ describe('reconcile', () => {
     expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched', check: 'ci-unit' });
   });
 
+  it('merges the base in first when the failed check passes at the base tip', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-render' })]);
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-render', conclusion: 'success' })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.paginate.mock.calls[1][1]).toMatchObject({ ref: 'develop', check_name: 'ci-render' });
+    expect(gh.rest.pulls.updateBranch).toHaveBeenCalledWith({ owner: 'test-owner', repo: 'test-repo', pull_number: 7, expected_head_sha: 'head1' });
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0])).toContainEqual(expect.objectContaining({ sha: 'head1', context: 'pr-reconcile', description: 'ci-fix' }));
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'base-merged', check: 'ci-render' });
+  });
+
+  it('dispatches the CI fix when the base already merged in cannot be updated', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-render' })]);
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-render', conclusion: 'success' })]);
+    gh.rest.pulls.updateBranch.mockRejectedValue(Object.assign(new Error('up to date'), { status: 422 }));
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched', check: 'ci-render' });
+  });
+
+  it('does not merge the base in when the check also fails at the base tip', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-render' })]);
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-render' })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.pulls.updateBranch).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ outcome: 'ci-fix-dispatched' });
+  });
+
   it('waits while a check run is not completed', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const gh = github(pr());
