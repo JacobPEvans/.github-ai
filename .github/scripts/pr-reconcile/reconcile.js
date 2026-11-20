@@ -22,7 +22,8 @@
 // race a hold, and the PR stays ready and mergeable.
 //
 // Conflict fix: when CI_FIX_WORKFLOW is set, a conflicted pull request (not Renovate, not a promotion, not touching
-// workflow files) whose head commit is at least 15 minutes old gets one workflow_dispatch per head with conflict_pr;
+// workflow files) whose head commit is at least 15 minutes old gets a workflow_dispatch with conflict_pr, at most
+// CONFLICT_MAX per head: an attempt that left the original open with no v2 branch is retried after CONFLICT_RETRY_MS;
 // the caller opens a v2 pull request on the current base. A v2 that conflicts again gets needs-lead, never a v3.
 // The commit status context pr-reconcile-conflict records it, apart from the pr-reconcile action record. A
 // repository without a caller that takes conflict_pr records nothing and is retried every sweep.
@@ -47,6 +48,8 @@ const UNKNOWN_RETRIES = 3;
 const CONFLICT_CONTEXT = 'pr-reconcile-conflict';
 // The author's own push gets 15 minutes to settle before a fix starts.
 const CONFLICT_MIN_AGE_MS = 15 * 60 * 1000;
+const CONFLICT_MAX = 2;
+const CONFLICT_RETRY_MS = 45 * 60 * 1000; // longer than one conflict-fix run, so a running attempt is not doubled
 const V2_BODY = /^Supersedes #\d+\b/m;
 // Unknown-state retries stop after the retry budget; no new PR starts after the run budget, so a large sweep
 // ends inside the 5-minute job timeout and the next sweep picks up the rest.
@@ -281,8 +284,15 @@ async function recordConflict(github, owner, repo, sha, outcome) {
 // One conflict-fix decision for a pull request the reconcile labelled as conflicted. Returns { outcome, reason }.
 async function startConflictFix(github, owner, repo, pr, settings, statuses, now = Date.now()) {
   const labels = (pr.labels || []).map((label) => label.name);
-  const done = statuses.find((status) => status.context === CONFLICT_CONTEXT);
-  if (done) return { outcome: 'conflict-skip', reason: `already ${done.description}` };
+  // The combined status holds only the latest status per context, so the attempt count lives in its description:
+  // 'conflict-queued N' or 'conflict-dispatched N' (no N counts as 1). Any other record is final.
+  const last = statuses.find((status) => status.context === CONFLICT_CONTEXT);
+  const attempt = /^conflict-(?:queued|dispatched)(?: (\d+))?$/.exec(last?.description || '');
+  const done = attempt ? Number(attempt[1] || 1) : 0;
+  if (last && (!attempt || done >= CONFLICT_MAX)) return { outcome: 'conflict-skip', reason: `already ${last.description}` };
+  if (done && now - Date.parse(last.updated_at || last.created_at) < CONFLICT_RETRY_MS) {
+    return { outcome: 'conflict-skip', reason: `${last.description} under 45 min ago` };
+  }
   if (labels.includes(LEAD_LABEL)) return { outcome: 'conflict-skip', reason: 'needs-lead' };
   if (pr.head.ref.endsWith('-v2') || V2_BODY.test(pr.body || '')) {
     await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: [LEAD_LABEL] });
@@ -300,7 +310,7 @@ async function startConflictFix(github, owner, repo, pr, settings, statuses, now
     if (error.status !== 404) throw error;
   }
   if (settings.output) {
-    await recordConflict(github, owner, repo, pr.head.sha, 'conflict-queued');
+    await recordConflict(github, owner, repo, pr.head.sha, `conflict-queued ${done + 1}`);
     return { outcome: 'conflict-queued', reason: 'conflict_prs output' };
   }
   try {
@@ -317,7 +327,7 @@ async function startConflictFix(github, owner, repo, pr, settings, statuses, now
     const outcome = error.status === 404 ? 'conflict-no-caller' : 'conflict-no-input';
     return { outcome, reason: `HTTP ${error.status}; retried next sweep` };
   }
-  await recordConflict(github, owner, repo, pr.head.sha, 'conflict-dispatched');
+  await recordConflict(github, owner, repo, pr.head.sha, `conflict-dispatched ${done + 1}`);
   return { outcome: 'conflict-dispatched', reason: settings.workflow };
 }
 

@@ -719,7 +719,7 @@ describe('conflict fix', () => {
     process.env.PR_NUMBER = '7';
   });
 
-  it('dispatches the caller with conflict_pr for a conflict whose head is 15 minutes old, once per head', async () => {
+  it('dispatches the caller with conflict_pr for a conflict whose head is 15 minutes old', async () => {
     const gh = conflictGithub(dirty(), { ageMs: MIN_AGE });
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.actions.createWorkflowDispatch.mock.calls[0][0]).toEqual({
@@ -727,14 +727,34 @@ describe('conflict fix', () => {
       inputs: { failure_head_branch: 'feat/x', conflict_pr: '7' },
     });
     expect(gh.rest.git.getRef.mock.calls[0][0].ref).toBe('heads/feat/x-v2');
-    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched' })]);
+    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched 1' })]);
     expect(event.conflict).toEqual({ outcome: 'conflict-dispatched', reason: 'ci-fix.yml' });
     expect(core.summary.addRaw.mock.calls[0][0]).toContain('| test-owner/test-repo#7 | conflict-dispatched | ci-fix.yml |');
 
-    const again = conflictGithub(dirty(), { statuses: [{ context: 'pr-reconcile-conflict', description: 'conflict-dispatched' }] });
-    const [second] = await run({ github: again, context: createMockContext(), core });
-    expect(again.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
-    expect(second.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-dispatched' });
+  });
+
+  const record = (description, ageMs) => ({ context: 'pr-reconcile-conflict', description, created_at: new Date(Date.now() - ageMs).toISOString() });
+
+  it('retries an attempt that left the original open after 45 minutes, at most twice per head', async () => {
+    const running = conflictGithub(dirty(), { statuses: [record('conflict-dispatched 1', 44 * 60 * 1000)] });
+    const [first] = await run({ github: running, context: createMockContext(), core });
+    expect(running.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(first.conflict).toEqual({ outcome: 'conflict-skip', reason: 'conflict-dispatched 1 under 45 min ago' });
+
+    for (const legacy of ['conflict-dispatched 1', 'conflict-dispatched']) {
+      const failed = conflictGithub(dirty(), { statuses: [record(legacy, 46 * 60 * 1000)] });
+      const [retry] = await run({ github: failed, context: createMockContext(), core });
+      expect(failed.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+      expect(conflictStatuses(failed)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched 2' })]);
+      expect(retry.conflict).toEqual({ outcome: 'conflict-dispatched', reason: 'ci-fix.yml' });
+    }
+
+    for (const final of ['conflict-dispatched 2', 'conflict-lead']) {
+      const spent = conflictGithub(dirty(), { statuses: [record(final, 2 * DAY)] });
+      const [skip] = await run({ github: spent, context: createMockContext(), core });
+      expect(spent.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+      expect(skip.conflict).toEqual({ outcome: 'conflict-skip', reason: `already ${final}` });
+    }
   });
 
   const skips = [
@@ -796,20 +816,26 @@ describe('conflict fix', () => {
     expect(event.conflict).toBeUndefined();
   });
 
-  it('queues instead of dispatching with CONFLICT_OUTPUT, once per head, even without a CI fix workflow', async () => {
+  it('queues instead of dispatching with CONFLICT_OUTPUT, counting attempts per head, even without a CI fix workflow', async () => {
     process.env.CONFLICT_OUTPUT = 'true';
     delete process.env.CI_FIX_WORKFLOW;
     const gh = conflictGithub(dirty());
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
-    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-queued' })]);
+    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-queued 1' })]);
     expect(event.conflict).toEqual({ outcome: 'conflict-queued', reason: 'conflict_prs output' });
     expect(conflictPrs()).toEqual(['["7"]']);
 
-    const again = conflictGithub(dirty(), { statuses: [{ context: 'pr-reconcile-conflict', description: 'conflict-queued' }] });
+    const again = conflictGithub(dirty(), { statuses: [record('conflict-queued', 46 * 60 * 1000)] });
     const [second] = await run({ github: again, context: createMockContext(), core });
-    expect(second.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-queued' });
-    expect(conflictPrs()[1]).toBe('[]');
+    expect(conflictStatuses(again)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-queued 2' })]);
+    expect(conflictPrs()[1]).toBe('["7"]');
+
+    const spent = conflictGithub(dirty(), { statuses: [record('conflict-queued 2', 46 * 60 * 1000)] });
+    const [third] = await run({ github: spent, context: createMockContext(), core });
+    expect(third.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-queued 2' });
+    expect(conflictPrs()[2]).toBe('[]');
+    expect(second.conflict.outcome).toBe('conflict-queued');
   });
 
   it('sets conflict_prs to [] when nothing is queued, including dispatch mode and a skipped head', async () => {
@@ -835,6 +861,6 @@ describe('conflict fix', () => {
     await run({ github: gh, context: createMockContext(), core });
     const contexts = gh.rest.repos.createCommitStatus.mock.calls.map((c) => [c[0].context, c[0].description]);
     expect(contexts).toContainEqual(['pr-reconcile', 'label-conflict']);
-    expect(contexts).toContainEqual(['pr-reconcile-conflict', 'conflict-dispatched']);
+    expect(contexts).toContainEqual(['pr-reconcile-conflict', 'conflict-dispatched 1']);
   });
 });
