@@ -45,7 +45,9 @@ release SHA. Grant the calling job `checks: read`, `contents: read`,
 
 Trigger the caller on `pull_request` types `opened`, `ready_for_review`, `synchronize`, `reopened`, `edited`,
 `labeled` and `unlabeled`. The reviews read the override labels from the event, so a gate without `labeled` never
-sees an override label until the next push.
+sees an override label until the next push. Only a label ending in `-override` on an open pull request re-runs the
+scans and reviews; any other label event reuses the last AI Merge Gate conclusion at that head, with no router call,
+and fails when there is none.
 
 Run the caller on a test PR and verify that both the security and semantic
 review jobs publish their verdict checks before switching other repositories

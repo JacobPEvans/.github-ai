@@ -1,6 +1,7 @@
 const { expect, test } = require('bun:test');
 const { spawnSync } = require('child_process');
-const { readFileSync } = require('fs');
+const { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('fs');
+const { tmpdir } = require('os');
 const { join } = require('path');
 
 const fixture = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'ai-merge-gate.json'), 'utf8'));
@@ -140,4 +141,69 @@ test('the final check waits for every required job and only accepts draft skips'
     });
     expect(result.status, scenario.name).toBe(scenario.exit_code);
   }
+});
+
+const LABEL_EVENTS = [
+  { name: 'push', action: 'synchronize', state: 'open', label: '', mode: 'review' },
+  { name: 'override label', action: 'labeled', state: 'open', label: 'security-review-override', mode: 'review' },
+  { name: 'override removed', action: 'unlabeled', state: 'open', label: 'policy-gate-override', mode: 'review' },
+  { name: 'other label', action: 'labeled', state: 'open', label: 'needs-lead', mode: 'reuse' },
+  { name: 'override on a closed PR', action: 'labeled', state: 'closed', label: 'security-review-override', mode: 'reuse' },
+];
+
+test('a label event reviews only for an override label on an open pull request', () => {
+  const script = gate.jobs.router.steps.find((step) => step.id === 'mode').run;
+  for (const event of LABEL_EVENTS) {
+    const result = spawnSync('/bin/bash', ['-c', script], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, EVENT_ACTION: event.action, LABEL_NAME: event.label, PR_STATE: event.state, GITHUB_OUTPUT: '/dev/stdout' },
+    });
+    expect(result.stdout.trim(), event.name).toBe(`mode=${event.mode}`);
+  }
+  expect(gate.concurrency.group).toContain("endsWith(github.event.label.name, '-override')");
+  expect(gate.concurrency.group).toContain("'-reuse'");
+});
+
+test('a non-override label event makes no router call and keeps the previous AI Merge Gate conclusion', () => {
+  // No router call: in reuse mode the router job reports unavailable, so every review job skips, and so does the scan.
+  const probe = gate.jobs.router.steps.find((step) => step.id === 'probe');
+  expect(probe.if).toBe("steps.mode.outputs.mode == 'review'");
+  expect(gate.jobs.router.outputs.available).toBe("${{ steps.probe.outputs.available || 'false' }}");
+  expect(gate.jobs.gitleaks.if).toBe("needs.router.outputs.mode == 'review'");
+  expect(gate.jobs.gate.env.MODE).toBe('${{ needs.router.outputs.mode }}');
+  for (const job of ['leak', 'security', 'semantic', 'code']) {
+    expect([gate.jobs[job].needs].flat(), job).toContain('router');
+    expect(gate.jobs[job].if, job).toContain("needs.router.outputs.available == 'true'");
+  }
+  const final = gate.jobs.gate;
+  expect(final.steps[0].if).toBe("env.MODE != 'reuse'");
+  expect(final.steps[1].if).toBe("env.MODE != 'reuse'");
+  const reuse = final.steps.find((step) => step.if === "env.MODE == 'reuse'");
+
+  const dir = mkdtempSync(join(tmpdir(), 'gate-reuse-'));
+  const gh = join(dir, 'gh');
+  // The stub answers the check-runs call by applying the step's own --jq filter to $CHECK_RUNS.
+  writeFileSync(gh, '#!/bin/bash\nwhile [ "$1" != --jq ]; do shift; done\nprintf %s "$CHECK_RUNS" | jq -r "$2"\n');
+  chmodSync(gh, 0o755);
+  const run = (conclusion, runId, completed) => ({
+    name: 'gate / AI Merge Gate', status: 'completed', conclusion, completed_at: completed,
+    details_url: `https://github.com/o/r/actions/runs/${runId}/job/1`,
+  });
+  const scenarios = [
+    ['previous success stands', [run('failure', 10, '2026-11-19T01:00:00Z'), run('success', 11, '2026-11-19T02:00:00Z')], 0],
+    ['previous failure stands', [run('success', 10, '2026-11-19T01:00:00Z'), run('failure', 11, '2026-11-19T02:00:00Z')], 1],
+    ['this run is ignored', [run('success', 11, '2026-11-19T01:00:00Z'), run('failure', 99, '2026-11-19T03:00:00Z')], 0],
+    ['no previous verdict fails closed', [run('success', 99, '2026-11-19T01:00:00Z')], 1],
+  ];
+  for (const [name, checkRuns, exitCode] of scenarios) {
+    const result = spawnSync('/bin/bash', ['-c', reuse.run], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`, GITHUB_REPOSITORY: 'o/r', HEAD_SHA: 'abc', RUN_ID: '99',
+        CHECK_RUNS: JSON.stringify({ check_runs: checkRuns }),
+      },
+    });
+    expect(result.status, `${name}: ${result.stdout}${result.stderr}`).toBe(exitCode);
+  }
+  rmSync(dir, { recursive: true, force: true });
 });
