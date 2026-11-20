@@ -1,5 +1,5 @@
 {
-  "pull_request_types": ["opened", "ready_for_review", "synchronize", "reopened", "edited"],
+  "pull_request_types": ["opened", "ready_for_review", "synchronize", "reopened", "edited", "labeled", "unlabeled"],
   "review_jobs": [
     { "job": "leak", "rubric": "leak", "model": "standard" },
     { "job": "security", "rubric": "security", "model": "critical" },

@@ -43,6 +43,10 @@ For OIDC-based check publishing, call `_ai-merge-gate-oidc.yml` with a reviewed
 release SHA. Grant the calling job `checks: read`, `contents: read`,
 `pull-requests: write`, and `id-token: write`.
 
+Trigger the caller on `pull_request` types `opened`, `ready_for_review`, `synchronize`, `reopened`, `edited`,
+`labeled` and `unlabeled`. The reviews read the override labels from the event, so a gate without `labeled` never
+sees an override label until the next push.
+
 Run the caller on a test PR and verify that both the security and semantic
 review jobs publish their verdict checks before switching other repositories
 to that release.
