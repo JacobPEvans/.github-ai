@@ -123,12 +123,14 @@ jobs:
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
+      actions: read
       pull-requests: read
       issues: read
     outputs:
       pr_number: ${{ steps.find-pr.outputs.pr_number }}
       should_run: ${{ steps.check-attempts.outputs.should_run }}
       attempt: ${{ steps.check-attempts.outputs.attempt }}
+      attempt_key: ${{ steps.check-attempts.outputs.attempt_key }}
     steps:
       - name: Checkout ai-workflows scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -154,6 +156,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+          FAILURE_RUN_ID: ${{ inputs.failure_run_id || github.event.workflow_run.id }}
         with:
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/check-attempts.js');
@@ -216,6 +219,7 @@ jobs:
           PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
           ATTEMPT: ${{ needs.should-fix.outputs.attempt }}
           DRY_RUN: ${{ inputs.dry_run }}
+          ATTEMPT_KEY: ${{ needs.should-fix.outputs.attempt_key }}
         with:
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/post-attempt-comment.js');

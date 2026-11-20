@@ -13,6 +13,7 @@ describe('post-attempt-comment', () => {
     process.env.PR_NUMBER = '10';
     process.env.ATTEMPT = '1';
     delete process.env.DRY_RUN;
+    delete process.env.ATTEMPT_KEY;
     github.rest.issues.createComment.mockResolvedValue({});
   });
 
@@ -42,6 +43,20 @@ describe('post-attempt-comment', () => {
     await run({ github, context, core });
     const body = github.rest.issues.createComment.mock.calls[0][0].body;
     expect(body).toContain('?/2');
+  });
+
+  it('posts the keyed marker when ATTEMPT_KEY is set', async () => {
+    process.env.ATTEMPT_KEY = 'a1b2c3d4e5f6-0123456789ab';
+    await run({ github, context, core });
+    const body = github.rest.issues.createComment.mock.calls[0][0].body;
+    expect(body.split('\n')[0]).toBe('<!-- claude-ci-fix-attempt key=a1b2c3d4e5f6-0123456789ab -->');
+  });
+
+  it('uses the legacy marker when ATTEMPT_KEY is empty', async () => {
+    process.env.ATTEMPT_KEY = '';
+    await run({ github, context, core });
+    const body = github.rest.issues.createComment.mock.calls[0][0].body;
+    expect(body.split('\n')[0]).toBe(MARKER);
   });
 
   it('calls setFailed when PR_NUMBER is invalid', async () => {
