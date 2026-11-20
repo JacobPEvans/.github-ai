@@ -7,7 +7,7 @@
 // Auto-merge armed on an agent pull request is disarmed. Every decision returns a reason for the run summary.
 
 const GATE_CHECK = /(^|\/ )AI Merge Gate$/;
-const BLOCK_LABELS = ['human:review', 'merge-hold'];
+const BLOCK_LABELS = ['human:review', 'merge-hold', 'needs-lead'];
 const FREEZE_LABEL = 'release:in-progress';
 const BAD_CONCLUSIONS = ['failure', 'cancelled', 'timed_out', 'action_required', 'stale'];
 const RELEASE_PLEASE = 'release-please--';

@@ -85,6 +85,7 @@ describe('sweep merge', () => {
     ['not-bot', pr({ user: { login: 'someone', type: 'User' } }), {}],
     ['draft', pr({ draft: true }), {}],
     ['label:human:review', pr({ labels: [{ name: 'human:review' }] }), {}],
+    ['label:needs-lead', pr({ labels: [{ name: 'needs-lead' }] }), {}],
     ['held', pr({ labels: [{ name: 'merge-hold' }] }), {}],
     ['zcode-branch', pr({ head: { ref: 'agent/zcode/j-1', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
     ['state:blocked', pr({ mergeable_state: 'blocked' }), {}],
