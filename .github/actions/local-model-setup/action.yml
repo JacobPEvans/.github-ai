@@ -51,7 +51,7 @@ runs:
         method: jwt
         path: github-actions
         role: ${{ inputs.role }}
-        jwtGithubAudience: https://github.com/dryvist
+        jwtGithubAudience: https://github.com/${{ github.repository_owner }}
         exportEnv: false
         exportToken: false
         secrets: |

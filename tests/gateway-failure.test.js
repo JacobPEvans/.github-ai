@@ -354,6 +354,7 @@ describe('gateway wiring in the workflows', () => {
     const oidc = step(job, 'Read the check-run token from OpenBao');
     expect(oidc.uses).toBe('hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc');
     expect(oidc.with.method).toBe('jwt');
+    expect(oidc.with.jwtGithubAudience).toBe('https://github.com/${{ github.repository_owner }}');
     expect(oidc.with.role).toBe('${{ steps.check-role.outputs.role }}');
     expect(oidc.with.secrets).toContain('github/token/${{ steps.check-role.outputs.role }} token | CHECK_TOKEN');
     expect(step(job, 'Find the OpenBao check-token role').run).toContain('role=gate-checks-${OWNER,,}');
