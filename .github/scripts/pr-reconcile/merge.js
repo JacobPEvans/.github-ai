@@ -1,0 +1,114 @@
+// pr-reconcile merge: merge a bot pull request that is green at its exact head.
+//
+// Native auto-merge and merge queues key on required checks only, so they merge past red optional review checks.
+// This path merges only when every check run and commit status at the head is complete and green, the AI Merge Gate
+// check succeeded at that head, no review asks for changes, no review thread is open, and no release freeze holds the
+// base. It merges with the head SHA, so a push after the read makes the merge fail instead of landing unreviewed code.
+// Auto-merge armed on an agent pull request is disarmed. Every decision returns a reason for the run summary.
+
+const GATE_CHECK = /(^|\/ )AI Merge Gate$/;
+const BLOCK_LABELS = ['human:review', 'merge-hold'];
+const FREEZE_LABEL = 'release:in-progress';
+const BAD_CONCLUSIONS = ['failure', 'cancelled', 'timed_out', 'action_required', 'stale'];
+const RELEASE_PLEASE = 'release-please--';
+const MAJOR_RELEASE = /(^|\s|\[)v?[1-9]\d*\.0\.0\b/;
+
+const PR_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      id headRefOid reviewDecision
+      autoMergeRequest { enabledAt }
+      reviewThreads(first: 100) { nodes { isResolved } }
+    }
+  }
+}`;
+
+function mergeEnabled() {
+  return process.env.MERGE_ENABLED === 'true';
+}
+
+// A release-please title or changelog heading naming X.0.0 is a major release, which only a human merges.
+function majorRelease(pr) {
+  if (!pr.head.ref.startsWith(RELEASE_PLEASE)) return false;
+  const headings = (pr.body || '').split('\n').filter((line) => line.startsWith('#'));
+  return [pr.title || '', ...headings].some((line) => MAJOR_RELEASE.test(line));
+}
+
+function staticBlocker(pr, held) {
+  const labels = (pr.labels || []).map((label) => label.name);
+  if (!pr.user || pr.user.type !== 'Bot') return 'not-bot';
+  if (pr.draft) return 'draft';
+  if (held) return 'held';
+  const label = BLOCK_LABELS.find((name) => labels.includes(name));
+  if (label) return `label:${label}`;
+  if (pr.head.ref.startsWith('agent/zcode/')) return 'zcode-branch';
+  if (pr.base.ref === 'main' && pr.head.ref === 'develop') return 'promotion';
+  if (majorRelease(pr)) return 'major-release';
+  if (!['clean', 'unstable'].includes(pr.mergeable_state)) return `state:${pr.mergeable_state}`;
+  return '';
+}
+
+function checksBlocker(runs, statuses) {
+  if (!runs.length) return 'no-checks';
+  if (runs.some((check) => check.status !== 'completed')) return 'checks-pending';
+  const bad = runs.find((check) => BAD_CONCLUSIONS.includes(check.conclusion));
+  if (bad) return `check:${bad.name}`;
+  // merge-hold is decided from the live label (held), not from the status written before this run.
+  const status = statuses.find((item) => item.context !== 'merge-hold' && item.state !== 'success');
+  if (status) return `status:${status.context}`;
+  const gate = runs.find((check) => GATE_CHECK.test(check.name));
+  if (!gate || gate.conclusion !== 'success') return 'no-gate-success';
+  return '';
+}
+
+// Same rule as the org release-freeze check: a pull request into develop waits while the open develop-to-main
+// promotion carries the release label, unless it is a release-please or hotfix branch.
+async function frozen(github, owner, repo, pr) {
+  if (pr.base.ref !== 'develop') return false;
+  if (pr.head.ref.startsWith(RELEASE_PLEASE) || pr.head.ref.startsWith('hotfix/')) return false;
+  const promotions = await github.paginate(github.rest.pulls.list, {
+    owner, repo, state: 'open', base: 'main', head: `${owner}:develop`, per_page: 100,
+  });
+  return promotions.some((item) => (item.labels || []).some((label) => label.name === FREEZE_LABEL));
+}
+
+async function tryMerge({ github, owner, repo, pr, held, statuses }) {
+  const blocker = staticBlocker(pr, held);
+  if (blocker === 'not-bot') return { outcome: 'merge-skip', reason: blocker };
+  const { repository } = await github.graphql(PR_QUERY, { owner, repo, number: pr.number });
+  const live = repository.pullRequest;
+  let disarmed = false;
+  if (live.autoMergeRequest && !pr.head.ref.startsWith(RELEASE_PLEASE)) {
+    await github.graphql('mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }', { id: live.id });
+    disarmed = true;
+  }
+  const skip = (reason) => ({ outcome: 'merge-skip', reason, disarmed });
+  if (blocker) return skip(blocker);
+  if (live.headRefOid !== pr.head.sha) return skip('head-moved');
+  if (live.reviewDecision === 'CHANGES_REQUESTED') return skip('changes-requested');
+  if (live.reviewThreads.nodes.some((thread) => !thread.isResolved)) return skip('unresolved-threads');
+  const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
+  const checks = checksBlocker(runs, statuses);
+  if (checks) return skip(checks);
+  if (await frozen(github, owner, repo, pr)) return skip('release-freeze');
+  const gitFlowMain = pr.base.ref === 'main' && pr.base.repo.default_branch === 'develop';
+  try {
+    await github.rest.pulls.merge({
+      owner, repo, pull_number: pr.number, sha: pr.head.sha, merge_method: gitFlowMain ? 'merge' : 'squash',
+    });
+  } catch (error) {
+    return { outcome: `merge-error:${error.status || 'unknown'}`, reason: 'api', disarmed };
+  }
+  return { outcome: 'merged', reason: '', disarmed };
+}
+
+function mergeSummary(events) {
+  const rows = events.filter((event) => event.merge).map((event) => {
+    const { outcome, reason, disarmed } = event.merge;
+    return `| ${event.repository}#${event.pr} | ${outcome} | ${reason || '-'} | ${disarmed ? 'yes' : 'no'} |`;
+  });
+  if (!rows.length) return '';
+  return ['### Sweep merges', '', '| Pull request | Outcome | Reason | Auto-merge disarmed |', '| --- | --- | --- | --- |', ...rows, ''].join('\n');
+}
+
+module.exports = { mergeEnabled, tryMerge, mergeSummary, majorRelease };
