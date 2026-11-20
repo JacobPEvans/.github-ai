@@ -215,7 +215,7 @@ describe('workflow', () => {
   it('reads the openhands-write commit token through OIDC and never an App key', () => {
     const token = job.steps.find((step) => step.id === 'commit-token');
     expect(job.permissions['id-token']).toBe('write');
-    expect(token.with.secrets).toContain('github-openhands/token/');
+    expect(token.with.secrets).toContain('github/token/');
     expect(job.steps.find((step) => step.id === 'commit-role').run).toContain('openhands-write-');
     expect(JSON.stringify(workflow)).not.toContain('PRIVATE_KEY');
   });
