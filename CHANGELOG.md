@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.19.0](https://github.com/JacobPEvans/.github-ai/compare/v2.18.0...v2.19.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** merge the base in before a CI fix when the check passes on the base ([#194](https://github.com/JacobPEvans/.github-ai/issues/194)) ([96d5813](https://github.com/JacobPEvans/.github-ai/commit/96d5813a6e17d693c09829a2a3f8f77c0356719f))
+
 ## [2.18.0](https://github.com/JacobPEvans/.github-ai/compare/v2.17.0...v2.18.0) (2026-11-20)
 
 
