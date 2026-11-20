@@ -97,8 +97,9 @@ describe('reconcile', () => {
     expect(workflow).toContain('      PR_RECONCILE_EXCLUDE_REPOS:\n        required: false');
     expect(workflow.split(line).length - 1).toBe(1);
     expect(workflow.indexOf(line)).toBeGreaterThan(workflow.indexOf('      - name: Reconcile'));
-    expect(sweep.split(line).length - 1).toBe(1);
-    expect(sweep.indexOf(line)).toBeGreaterThan(sweep.indexOf('      - name: Reconcile'));
+    const sweepLine = '          PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}';
+    expect(sweep.split(sweepLine).length - 1).toBe(1);
+    expect(sweep.indexOf(sweepLine)).toBeGreaterThan(sweep.indexOf('      - name: Reconcile'));
     expect(action.match(/PR_RECONCILE_EXCLUDE_REPOS:/g)).toEqual(['PR_RECONCILE_EXCLUDE_REPOS:']);
   });
 
@@ -112,9 +113,12 @@ describe('reconcile', () => {
     expect(sweep).toContain('    permissions:\n      contents: read\n      id-token: write\n');
     expect(sweep).toContain('      fail-fast: false\n');
     expect(sweep).toContain('          role: pr-reconcile-sweep\n');
-    expect(sweep).toContain('"$BAO_ADDR/v1/github/token"');
-    expect(sweep).toContain('{org_name: $o, permissions: {actions: "write", checks: "read", contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}');
-    expect(sweep).toContain('echo "::add-mask::$token"');
+    expect(sweep).toContain('/v1/github/token`');
+    expect(sweep).toContain("const permissions = { actions: 'write', checks: 'read', contents: 'write', pull_requests: 'write', statuses: 'write' };");
+    expect(sweep).toContain('core.setSecret(token);');
+    expect(sweep).toContain('github: getOctokit(token)');
+    expect(sweep).not.toContain('steps.mint');
+    expect(sweep).not.toContain('token=$token');
     expect(sweep).not.toContain('GH_APP_CLAUDE_BOT_PRIVATE_KEY');
     expect(sweep).not.toContain('pr-reconcile.yml');
     expect(sweep).not.toContain('repository:');
