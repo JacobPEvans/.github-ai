@@ -153,13 +153,17 @@ const LABEL_EVENTS = [
 
 test('a label event reviews only for an override label on an open pull request', () => {
   const script = gate.jobs.router.steps.find((step) => step.id === 'mode').run;
+  const dir = mkdtempSync(join(tmpdir(), 'gate-mode-'));
   for (const event of LABEL_EVENTS) {
+    const output = join(dir, `${event.name}.out`);
     const result = spawnSync('/bin/bash', ['-c', script], {
       encoding: 'utf8',
-      env: { PATH: process.env.PATH, EVENT_ACTION: event.action, LABEL_NAME: event.label, PR_STATE: event.state, GITHUB_OUTPUT: '/dev/stdout' },
+      env: { PATH: process.env.PATH, EVENT_ACTION: event.action, LABEL_NAME: event.label, PR_STATE: event.state, GITHUB_OUTPUT: output },
     });
-    expect(result.stdout.trim(), event.name).toBe(`mode=${event.mode}`);
+    expect(result.status, event.name).toBe(0);
+    expect(readFileSync(output, 'utf8').trim(), event.name).toBe(`mode=${event.mode}`);
   }
+  rmSync(dir, { recursive: true, force: true });
   expect(gate.concurrency.group).toContain("endsWith(github.event.label.name, '-override')");
   expect(gate.concurrency.group).toContain("'-reuse'");
 });
