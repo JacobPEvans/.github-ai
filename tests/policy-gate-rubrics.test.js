@@ -217,18 +217,18 @@ test('semantic: a superseding pull request gets the superseded diff in front, ot
   expect(steps.indexOf(step.name)).toBeGreaterThan(steps.indexOf('Put the pull request title and body in front of the diff'));
   expect(steps.indexOf(step.name)).toBeLessThan(steps.indexOf('Request the rubric verdict'));
 
-  const run = (body) => {
+  const run = (body, extraEnv = {}) => {
     const dir = mkdtempSync(join(tmpdir(), 'superseded-'));
     try {
       const bin = join(dir, 'bin');
       mkdirSync(bin);
       // The stub writes the requested URL as the diff, so the test sees which pull request was read.
-      writeFileSync(join(bin, 'curl'), '#!/bin/sh\nurl=\nout=\nwhile [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; http*) url=$1 ;; esac; shift; done\nprintf "diff for %s\\n" "$url" > "$out"\n');
+      writeFileSync(join(bin, 'curl'), '#!/bin/sh\nurl=\nout=\nwhile [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; http*) url=$1 ;; esac; shift; done\nprintf "diff for %s\\n" "$url" > "$out"\n[ -n "$SUPERSEDED_BYTES" ] && head -c "$SUPERSEDED_BYTES" /dev/zero | tr "\\\\0" x >> "$out"\nexit 0\n');
       chmodSync(join(bin, 'curl'), 0o755);
       writeFileSync(join(dir, 'diff.txt'), 'NEW DIFF\n');
       const result = Bun.spawnSync(['/bin/bash', '-c', step.run], {
         cwd: dir,
-        env: { PATH: `${bin}:${process.env.PATH}`, PR_BODY: body, GH_TOKEN: 't', API_URL: 'https://api.example.test', REPOSITORY: 'o/r' },
+        env: { PATH: `${bin}:${process.env.PATH}`, PR_BODY: body, GH_TOKEN: 't', API_URL: 'https://api.example.test', REPOSITORY: 'o/r', ...extraEnv },
       });
       expect(result.exitCode, result.stderr.toString()).toBe(0);
       return readFileSync(join(dir, 'diff.txt'), 'utf8');
@@ -240,6 +240,9 @@ test('semantic: a superseding pull request gets the superseded diff in front, ot
   expect(superseding).toContain('SUPERSEDED PULL REQUEST DIFF (#42');
   expect(superseding).toContain('diff for https://api.example.test/repos/o/r/pulls/42');
   expect(superseding.indexOf('end of superseded pull request diff')).toBeLessThan(superseding.indexOf('NEW DIFF'));
+  expect(superseding).not.toContain('truncated');
   expect(run('Adds a thing. See also Supersedes #42 in the notes.')).toBe('NEW DIFF\n');
   expect(run('Adds a thing.')).toBe('NEW DIFF\n');
+  const large = run('Supersedes #42', { SUPERSEDED_BYTES: '40000' });
+  expect(large).toMatch(/\[superseded diff truncated at 32 KiB of \d+ bytes\]\n----- end of superseded pull request diff -----/);
 });
