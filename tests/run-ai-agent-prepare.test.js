@@ -78,6 +78,35 @@ describe('run-ai-agent prepare validation', () => {
     expect(ciFix).toContain("agent: ${{ inputs.agent || (inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude') }}");
   });
 
+  it('stops OpenHands at its time limit with a message, and passes its own exit code through', () => {
+    const { mkdtempSync, writeFileSync, chmodSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const action = Bun.YAML.parse(readFileSync(join(import.meta.dir, '../.github/actions/run-ai-agent/openhands/action.yml'), 'utf8'));
+    const step = action.runs.steps.find((s) => s.name === 'Run OpenHands');
+    expect(action.inputs.time_limit_minutes.default).toBe('25');
+    expect(step.env.TIME_LIMIT_MINUTES).toBe('${{ inputs.time_limit_minutes }}');
+    const run = (python) => {
+      const dir = mkdtempSync(join(tmpdir(), 'openhands-limit-'));
+      try {
+        writeFileSync(join(dir, 'python'), `#!/bin/sh\n${python}\n`);
+        chmodSync(join(dir, 'python'), 0o755);
+        return spawnSync('/bin/bash', ['-c', step.run], {
+          encoding: 'utf8',
+          env: { PATH: `${dir}:${process.env.PATH}`, RUNNER_TEMP: dir, PROMPT: 'p', MODEL: 'm', TIME_LIMIT_MINUTES: '0.02' },
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    const stopped = run('sleep 5');
+    expect(stopped.status).toBe(124);
+    expect(stopped.stdout).toContain('OpenHands stopped at its 0.02-minute limit');
+    expect(run('exit 0').status).toBe(0);
+    const failed = run('exit 3');
+    expect(failed.status).toBe(3);
+    expect(failed.stdout).not.toContain('stopped at');
+  });
+
   it('keeps Codex selected when passwordless sudo succeeds', () => {
     const result = runValidate(0);
 
