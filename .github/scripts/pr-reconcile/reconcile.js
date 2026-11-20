@@ -10,6 +10,8 @@
 // otherwise left alone but has failed github-actions checks gets one
 // workflow_dispatch per head commit to fix them. CI_FIX_SKIP_CHECKS is a
 // case-insensitive regex of check names a coding agent should not touch.
+// When the failed check passes at the tip of the base branch, the base is merged
+// in first (update-branch) and no fix is dispatched for that head.
 //
 // Hold: every reconcile sets the `merge-hold` commit status at the head: failure
 // while the PR carries the merge-hold label, success otherwise. A ruleset that
@@ -172,6 +174,22 @@ function ciFixRunId(check) {
   return '';
 }
 
+// A head that predates a base fix fails a check the base passes; merging the base in is the fix.
+async function mergeBaseFirst(github, owner, repo, pr, check) {
+  const base = await github.paginate(github.rest.checks.listForRef, {
+    owner, repo, ref: pr.base.ref, check_name: check.name, per_page: 100,
+  });
+  if (!base.some((run) => run.status === 'completed' && run.conclusion === 'success')) return false;
+  try {
+    await github.rest.pulls.updateBranch({ owner, repo, pull_number: pr.number, expected_head_sha: pr.head.sha });
+    return true;
+  } catch (error) {
+    // 422: the head already contains the base, or the merge conflicts; the agent fix runs instead.
+    if (error.status === 422) return false;
+    throw error;
+  }
+}
+
 async function startCiFix(github, owner, repo, pr, settings) {
   const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
   if (runs.some((check) => check.status !== 'completed')) return { outcome: 'ci-pending' };
@@ -182,6 +200,7 @@ async function startCiFix(github, owner, repo, pr, settings) {
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   if (!failed.length) return { outcome: 'noop' };
   const check = failed[0];
+  if (await mergeBaseFirst(github, owner, repo, pr, check)) return { outcome: 'base-merged', check: check.name };
   const runId = ciFixRunId(check);
   if (!runId) return { outcome: 'ci-fix-no-run', check: check.name };
   try {
@@ -235,7 +254,7 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
         outcome = fix.outcome;
         check = fix.check;
         // A missing caller workflow is final, so it is recorded like a taken action and not retried every sweep.
-        if (['ci-fix-dispatched', 'ci-fix-no-caller'].includes(outcome)) {
+        if (['ci-fix-dispatched', 'ci-fix-no-caller', 'base-merged'].includes(outcome)) {
           await record(github, owner, repo, pr.head.sha, 'ci-fix');
         }
       } catch (error) {
