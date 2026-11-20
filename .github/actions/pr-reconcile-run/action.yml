@@ -2,7 +2,7 @@ name: Run PR Reconcile
 description: Run the PR Reconcile script with a caller-minted token. Exactly one of pr_number, base_ref or sweep_owner is set.
 inputs:
   github-token:
-    description: Token limited to contents, pull requests, issues and statuses.
+    description: Token limited to actions, checks (read), contents, pull requests, issues and statuses.
     required: true
   pr_number:
     description: One pull request in the calling repository.
