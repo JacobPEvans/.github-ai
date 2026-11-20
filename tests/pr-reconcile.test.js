@@ -601,6 +601,8 @@ describe('reconcile', () => {
 describe('conflict fix', () => {
   let core;
   const DAY = 24 * 60 * 60 * 1000;
+  const MIN_AGE = 15 * 60 * 1000;
+  const conflictPrs = () => core.setOutput.mock.calls.filter((c) => c[0] === 'conflict_prs').map((c) => c[1]);
   const dirty = (overrides = {}) => pr({
     mergeable_state: 'dirty',
     base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } },
@@ -620,12 +622,13 @@ describe('conflict fix', () => {
     delete process.env.RESOLVER_REPO;
     delete process.env.CI_FIX_SKIP_CHECKS;
     delete process.env.MERGE_ENABLED;
+    delete process.env.CONFLICT_OUTPUT;
     process.env.CI_FIX_WORKFLOW = 'ci-fix.yml';
     process.env.PR_NUMBER = '7';
   });
 
-  it('dispatches the caller with conflict_pr for a conflict whose head is over a day old, once per head', async () => {
-    const gh = conflictGithub(dirty());
+  it('dispatches the caller with conflict_pr for a conflict whose head is 15 minutes old, once per head', async () => {
+    const gh = conflictGithub(dirty(), { ageMs: MIN_AGE });
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.actions.createWorkflowDispatch.mock.calls[0][0]).toEqual({
       owner: 'test-owner', repo: 'test-repo', workflow_id: 'ci-fix.yml', ref: 'develop',
@@ -643,7 +646,7 @@ describe('conflict fix', () => {
   });
 
   const skips = [
-    ['a head commit under a day old', {}, { ageMs: DAY - 60000 }, 'head commit under 24h old'],
+    ['a head commit its author pushed under 15 minutes ago', {}, { ageMs: MIN_AGE - 60000 }, 'head commit under 15 min old'],
     ['a pull request that touches workflow files', {}, { files: [{ filename: '.github/workflows/ci.yml' }] }, 'workflow files'],
     ['a pull request already sent to the lead', { labels: [{ name: 'needs-lead' }] }, {}, 'needs-lead'],
     ['an original whose v2 branch exists', {}, { v2: true }, 'v2 branch exists'],
@@ -699,6 +702,40 @@ describe('conflict fix', () => {
     const gh = conflictGithub(dirty());
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(event.conflict).toBeUndefined();
+  });
+
+  it('queues instead of dispatching with CONFLICT_OUTPUT, once per head, even without a CI fix workflow', async () => {
+    process.env.CONFLICT_OUTPUT = 'true';
+    delete process.env.CI_FIX_WORKFLOW;
+    const gh = conflictGithub(dirty());
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-queued' })]);
+    expect(event.conflict).toEqual({ outcome: 'conflict-queued', reason: 'conflict_prs output' });
+    expect(conflictPrs()).toEqual(['["7"]']);
+
+    const again = conflictGithub(dirty(), { statuses: [{ context: 'pr-reconcile-conflict', description: 'conflict-queued' }] });
+    const [second] = await run({ github: again, context: createMockContext(), core });
+    expect(second.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-queued' });
+    expect(conflictPrs()[1]).toBe('[]');
+  });
+
+  it('sets conflict_prs to [] when nothing is queued, including dispatch mode and a skipped head', async () => {
+    await run({ github: conflictGithub(dirty()), context: createMockContext(), core });
+    process.env.CONFLICT_OUTPUT = 'true';
+    await run({ github: conflictGithub(dirty(), { ageMs: MIN_AGE - 60000 }), context: createMockContext(), core });
+    await run({ github: conflictGithub(pr()), context: createMockContext(), core });
+    expect(conflictPrs()).toEqual(['[]', '[]', '[]']);
+  });
+
+  it('wires conflict_fix from the reusable workflow to the conflict_prs output', () => {
+    const workflow = readFileSync('.github/workflows/pr-reconcile.yml', 'utf8');
+    const action = readFileSync('.github/actions/pr-reconcile-run/action.yml', 'utf8');
+    expect(workflow).toContain('          conflict_output: ${{ inputs.conflict_fix }}\n');
+    expect(workflow).toContain('        value: ${{ jobs.reconcile.outputs.conflict_prs }}\n');
+    expect(workflow).toContain("      conflict_prs: ${{ steps.reconcile.outputs.conflict_prs || '[]' }}\n");
+    expect(action).toContain('        CONFLICT_OUTPUT: ${{ inputs.conflict_output }}\n');
+    expect(action).toContain('    value: ${{ steps.reconcile.outputs.conflict_prs }}\n');
   });
 
   it('keeps the action record and the conflict record in separate status contexts', async () => {

@@ -19,10 +19,13 @@
 // race a hold, and the PR stays ready and mergeable.
 //
 // Conflict fix: when CI_FIX_WORKFLOW is set, a conflicted pull request (not Renovate, not a promotion, not touching
-// workflow files) whose head commit is over a day old gets one workflow_dispatch per head with conflict_pr; the
-// caller opens a v2 pull request on the current base. A v2 that conflicts again gets needs-lead, never a v3.
+// workflow files) whose head commit is at least 15 minutes old gets one workflow_dispatch per head with conflict_pr;
+// the caller opens a v2 pull request on the current base. A v2 that conflicts again gets needs-lead, never a v3.
 // The commit status context pr-reconcile-conflict records it, apart from the pr-reconcile action record. A
 // repository without a caller that takes conflict_pr records nothing and is retried every sweep.
+// With CONFLICT_OUTPUT=true the same checks queue the pull request instead of dispatching: the run records
+// conflict-queued at the head and returns the numbers in the conflict_prs output, so the calling workflow starts
+// the conflict fix as a reusable-workflow job (no dispatch, no actions permission).
 //
 // Merge: when MERGE_ENABLED is true, a bot pull request left alone otherwise is merged once it is green at its exact
 // head (merge.js); every merge and skip reason goes to the run summary.
@@ -39,7 +42,8 @@ const HOLD_CONTEXT = 'merge-hold';
 const HOLD_LABEL = 'merge-hold';
 const UNKNOWN_RETRIES = 3;
 const CONFLICT_CONTEXT = 'pr-reconcile-conflict';
-const CONFLICT_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+// The author's own push gets 15 minutes to settle before a fix starts.
+const CONFLICT_MIN_AGE_MS = 15 * 60 * 1000;
 const V2_BODY = /^Supersedes #\d+\b/m;
 // Unknown-state retries stop after the retry budget; no new PR starts after the run budget, so a large sweep
 // ends inside the 5-minute job timeout and the next sweep picks up the rest.
@@ -163,7 +167,7 @@ function ciFixSettings() {
   if (workflow && !/^[A-Za-z0-9._-]+\.ya?ml$/.test(workflow)) throw new Error(`invalid CI_FIX_WORKFLOW: ${workflow}`);
   const pattern = process.env.CI_FIX_SKIP_CHECKS || CI_FIX_SKIP_DEFAULT;
   try {
-    return { workflow, skip: new RegExp(pattern, 'i') };
+    return { workflow, skip: new RegExp(pattern, 'i'), output: process.env.CONFLICT_OUTPUT === 'true' };
   } catch {
     throw new Error(`invalid CI_FIX_SKIP_CHECKS: ${pattern}`);
   }
@@ -249,12 +253,16 @@ async function startConflictFix(github, owner, repo, pr, settings, statuses, now
   if (await touchesWorkflows(github, owner, repo, pr.number)) return { outcome: 'conflict-skip', reason: 'workflow files' };
   const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: pr.head.sha });
   const age = now - Date.parse(commit.commit.committer.date);
-  if (!(age >= CONFLICT_MIN_AGE_MS)) return { outcome: 'conflict-skip', reason: 'head commit under 24h old' };
+  if (!(age >= CONFLICT_MIN_AGE_MS)) return { outcome: 'conflict-skip', reason: 'head commit under 15 min old' };
   try {
     await github.rest.git.getRef({ owner, repo, ref: `heads/${pr.head.ref}-v2` });
     return { outcome: 'conflict-skip', reason: 'v2 branch exists' };
   } catch (error) {
     if (error.status !== 404) throw error;
+  }
+  if (settings.output) {
+    await recordConflict(github, owner, repo, pr.head.sha, 'conflict-queued');
+    return { outcome: 'conflict-queued', reason: 'conflict_prs output' };
   }
   try {
     await github.rest.actions.createWorkflowDispatch({
@@ -326,7 +334,7 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
     }
   }
   let conflict;
-  if (ciFix.workflow && decision.action === 'label-conflict' && !held) {
+  if ((ciFix.workflow || ciFix.output) && decision.action === 'label-conflict' && !held) {
     try {
       conflict = await startConflictFix(github, owner, repo, pr, ciFix, statuses);
     } catch (error) {
@@ -404,6 +412,7 @@ module.exports = async function run({ github, context, core }) {
     && isExcludedRepository(exclusions, context.repo.owner, context.repo.repo)) {
     core.info('skipped 1 reconcile target in excluded repositories');
     core.setOutput('events', JSON.stringify(events));
+    core.setOutput('conflict_prs', '[]');
     return events;
   }
   const all = await targets({ github, context, core });
@@ -430,6 +439,8 @@ module.exports = async function run({ github, context, core }) {
   const summary = [mergeSummary(events), conflictSummary(events)].filter(Boolean).join('\n');
   if (summary) await core.summary.addRaw(summary).write();
   core.setOutput('events', JSON.stringify(events));
+  const queued = events.filter((event) => event.conflict && event.conflict.outcome === 'conflict-queued');
+  core.setOutput('conflict_prs', JSON.stringify(queued.map((event) => String(event.pr))));
   return events;
 };
 module.exports.classify = classify;

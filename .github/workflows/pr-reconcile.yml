@@ -8,6 +8,10 @@
 # Modes (exactly one): pr_number (one PR), base_ref (every open PR on a base,
 # for push-to-base), sweep_owner (every open PR of an owner, for the schedule).
 #
+# conflict_fix: true queues each eligible conflicted PR (one per head commit) in
+# the conflict_prs output instead of dispatching; the caller runs cc-conflict-fix.yml
+# as a matrix job over it. Example: examples/pr-reconcile-caller.yml.
+#
 # Token: an App token limited to contents, pull requests, issues and statuses,
 # scoped to the calling repository except in sweep mode. It cannot write
 # workflow files. Runs on GitHub-hosted runners only. The scheduled sweep of
@@ -31,6 +35,14 @@ on:
         description: "owner/repo that receives the pr-conflict repository_dispatch (empty = label only); must have the same owner as the swept or calling repository"
         type: string
         default: ""
+      conflict_fix:
+        description: "Queue eligible conflicted pull requests in the conflict_prs output for a cc-conflict-fix.yml job in the caller"
+        type: boolean
+        default: false
+    outputs:
+      conflict_prs:
+        description: JSON array of the pull request numbers queued for a conflict fix ('[]' when none)
+        value: ${{ jobs.reconcile.outputs.conflict_prs }}
     secrets:
       GH_APP_CLAUDE_BOT_PRIVATE_KEY:
         required: true
@@ -49,6 +61,8 @@ jobs:
     name: Reconcile
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      conflict_prs: ${{ steps.reconcile.outputs.conflict_prs || '[]' }}
     steps:
       - name: Checkout reconcile script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -93,6 +107,7 @@ jobs:
           permission-statuses: write
 
       - name: Reconcile
+        id: reconcile
         uses: ./.ai-workflows/.github/actions/pr-reconcile-run
         with:
           github-token: ${{ steps.app-token.outputs.token }}
@@ -101,3 +116,4 @@ jobs:
           sweep_owner: ${{ inputs.sweep_owner }}
           resolver_repo: ${{ inputs.resolver_repo }}
           exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
+          conflict_output: ${{ inputs.conflict_fix }}
