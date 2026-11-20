@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.38.0](https://github.com/JacobPEvans/.github-ai/compare/v2.37.0...v2.38.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **ci-fix:** void the attempt marker when the commit token could not be minted ([#239](https://github.com/JacobPEvans/.github-ai/issues/239)) ([f04945e](https://github.com/JacobPEvans/.github-ai/commit/f04945eee923ab9afcc7b77ca5d61dbf645c4daa))
+
 ## [2.37.0](https://github.com/JacobPEvans/.github-ai/compare/v2.36.0...v2.37.0) (2026-11-20)
 
 
