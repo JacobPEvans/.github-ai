@@ -10,6 +10,8 @@
 
 const GATE_CHECK = /(^|\/ )AI Merge Gate$/;
 const REPO_GATE_CHECK = /(^|\/ )Merge Gate$/;
+const RENOVATE_BRANCH = 'renovate/';
+const RENOVATE_UPDATE_APPS = ['jacobpevans-release-please[bot]'];
 const BLOCK_LABELS = ['human:review', 'merge-hold', 'needs-lead'];
 const FREEZE_LABEL = 'release:in-progress';
 const BAD_CONCLUSIONS = ['failure', 'cancelled', 'timed_out', 'action_required', 'stale'];
@@ -88,13 +90,40 @@ function staticBlocker(pr, held) {
 }
 
 // A Renovate, release-please or promotion pull request with no AI gate run may pass on the repository's own Merge Gate.
+// A Renovate major update keeps needing the AI gate.
 function repoGateAllowed(pr) {
-  return pr.user.login === 'renovate[bot]' || pr.head.ref.startsWith(RELEASE_PLEASE)
+  return (renovatePr(pr) && !renovateMajor(pr)) || pr.head.ref.startsWith(RELEASE_PLEASE)
     || (pr.base.ref === 'main' && pr.head.ref === 'develop');
 }
 
-function checksBlocker(runs, statuses, pr) {
-  if (!runs.length) return 'no-checks';
+// Renovate itself, or the first-party update App on a renovate/ branch; any other author is not Renovate.
+function renovatePr(pr) {
+  return pr.user.login === 'renovate[bot]'
+    || (RENOVATE_UPDATE_APPS.includes(pr.user.login) && pr.head.ref.startsWith(RENOVATE_BRANCH));
+}
+
+// Renovate marks a major update with the org preset's update:major label, a major- branch, or "major" in its Update column.
+function renovateMajor(pr) {
+  const labels = (pr.labels || []).map((label) => label.name);
+  return labels.includes('update:major') || pr.head.ref.startsWith(`${RENOVATE_BRANCH}major-`)
+    || /\|\s*major\s*\|/.test(pr.body || '');
+}
+
+// A re-run attempt stays in its check suite beside the run it replaced; judge only the newest run per suite and name.
+// A same-named run from another workflow run is a separate key and still counts.
+function newestRuns(runs) {
+  const newest = new Map();
+  for (const check of runs) {
+    const key = check.check_suite?.id ? `${check.check_suite.id}:${check.name}` : check.name;
+    const seen = newest.get(key);
+    if (!seen || (check.id ?? 0) >= (seen.id ?? 0)) newest.set(key, check);
+  }
+  return [...newest.values()];
+}
+
+function checksBlocker(allRuns, statuses, pr) {
+  if (!allRuns.length) return 'no-checks';
+  const runs = newestRuns(allRuns);
   if (runs.some((check) => check.status !== 'completed')) return 'checks-pending';
   const bad = runs.find((check) => BAD_CONCLUSIONS.includes(check.conclusion));
   if (bad) return `check:${bad.name}`;
