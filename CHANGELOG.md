@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.23.0](https://github.com/JacobPEvans/.github-ai/compare/v2.22.0...v2.23.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **policy-gate:** give each pull request its own review concurrency group ([#206](https://github.com/JacobPEvans/.github-ai/issues/206)) ([72a4798](https://github.com/JacobPEvans/.github-ai/commit/72a479843e4d5d31d47565c5c2262a2ab576fc86))
+
 ## [2.22.0](https://github.com/JacobPEvans/.github-ai/compare/v2.21.0...v2.22.0) (2026-11-20)
 
 
