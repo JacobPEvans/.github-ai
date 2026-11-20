@@ -74,6 +74,33 @@ runs:
         printf 'PULL REQUEST TITLE: %s\n\nPULL REQUEST BODY (first 8 KiB):\n%s\n\n----- end of pull request text; the diff follows -----\n' "$PR_TITLE" "${PR_BODY:0:8192}" | cat - diff.txt > diff.with-text.txt
         mv diff.with-text.txt diff.txt
 
+    # A pull request whose body says `Supersedes #N` (a conflict-fix v2) is checked against the superseded pull
+    # request's diff, so the semantic rubric can tell whether it keeps that change. The diff goes in front.
+    - name: Put the superseded pull request's diff in front
+      if: inputs.rubric == 'semantic'
+      shell: bash
+      env:
+        PR_BODY: ${{ inputs.pr-body }}
+        GH_TOKEN: ${{ github.token }}
+        API_URL: ${{ github.api_url }}
+        REPOSITORY: ${{ github.repository }}
+      run: |
+        [[ "$PR_BODY" =~ (^|$'\n')Supersedes\ \#([0-9]+) ]] || exit 0
+        number=${BASH_REMATCH[2]}
+        if ! curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.diff" \
+          "$API_URL/repos/$REPOSITORY/pulls/$number" -o superseded.diff; then
+          echo "::warning::could not read the diff of superseded pull request #$number"
+          exit 0
+        fi
+        {
+          printf 'SUPERSEDED PULL REQUEST DIFF (#%s, first 32 KiB):\n' "$number"
+          head -c 32768 superseded.diff
+          printf '\n----- end of superseded pull request diff -----\n\n'
+          cat diff.txt
+        } > diff.with-superseded.txt
+        mv diff.with-superseded.txt diff.txt
+        rm -f superseded.diff
+
     - name: Request the rubric verdict
       id: request
       continue-on-error: true
