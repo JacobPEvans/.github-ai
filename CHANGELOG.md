@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.37.0](https://github.com/JacobPEvans/.github-ai/compare/v2.36.0...v2.37.0) (2026-11-20)
+
+
+### Features
+
+* **ci-fix:** use AI review gate findings as failure input and re-run gateway outages ([#237](https://github.com/JacobPEvans/.github-ai/issues/237)) ([9f127f6](https://github.com/JacobPEvans/.github-ai/commit/9f127f6b51c5f1aa7080115fc939d1f013d4463f))
+
 ## [2.36.0](https://github.com/JacobPEvans/.github-ai/compare/v2.35.0...v2.36.0) (2026-11-20)
 
 
