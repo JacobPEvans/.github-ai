@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.17.0](https://github.com/JacobPEvans/.github-ai/compare/v2.16.0...v2.17.0) (2026-11-20)
+
+
+### Features
+
+* **ci-fix:** make the example caller the canonical sweep-dispatched ci-fix.yml ([#184](https://github.com/JacobPEvans/.github-ai/issues/184)) ([c136700](https://github.com/JacobPEvans/.github-ai/commit/c13670087afaac7d20697e71dfe0e60a44c89f41))
+* **pr-reconcile:** merge bot pull requests that are green at their head ([#182](https://github.com/JacobPEvans/.github-ai/issues/182)) ([298b1df](https://github.com/JacobPEvans/.github-ai/commit/298b1df91181abebbb17f1c63da6303bd00aec61))
+
 ## [2.16.0](https://github.com/JacobPEvans/.github-ai/compare/v2.15.0...v2.16.0) (2026-11-20)
 
 
