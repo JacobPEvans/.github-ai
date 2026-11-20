@@ -21,7 +21,8 @@
 // Conflict fix: when CI_FIX_WORKFLOW is set, a conflicted pull request (not Renovate, not a promotion, not touching
 // workflow files) whose head commit is over a day old gets one workflow_dispatch per head with conflict_pr; the
 // caller opens a v2 pull request on the current base. A v2 that conflicts again gets needs-lead, never a v3.
-// The commit status context pr-reconcile-conflict records it, apart from the pr-reconcile action record.
+// The commit status context pr-reconcile-conflict records it, apart from the pr-reconcile action record. A
+// repository without a caller that takes conflict_pr records nothing and is retried every sweep.
 //
 // Merge: when MERGE_ENABLED is true, a bot pull request left alone otherwise is merged once it is green at its exact
 // head (merge.js); every merge and skip reason goes to the run summary.
@@ -261,11 +262,11 @@ async function startConflictFix(github, owner, repo, pr, settings, statuses, now
       inputs: { failure_head_branch: pr.head.ref, conflict_pr: String(pr.number) },
     });
   } catch (error) {
-    // 404: no caller; 422: a caller without the conflict_pr input. Both are final for this head.
+    // 404: no caller; 422: a caller without the conflict_pr input. Nothing is recorded, so the next sweep retries
+    // once the caller rollout reaches this repository.
     if (![404, 422].includes(error.status)) throw error;
     const outcome = error.status === 404 ? 'conflict-no-caller' : 'conflict-no-input';
-    await recordConflict(github, owner, repo, pr.head.sha, outcome);
-    return { outcome, reason: `HTTP ${error.status}` };
+    return { outcome, reason: `HTTP ${error.status}; retried next sweep` };
   }
   await recordConflict(github, owner, repo, pr.head.sha, 'conflict-dispatched');
   return { outcome: 'conflict-dispatched', reason: settings.workflow };

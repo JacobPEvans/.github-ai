@@ -649,13 +649,20 @@ describe('conflict fix', () => {
     }
   });
 
-  it('records a caller without the conflict input once and does not retry it', async () => {
-    const gh = conflictGithub(dirty());
-    gh.rest.actions.createWorkflowDispatch.mockRejectedValue(Object.assign(new Error('Unexpected inputs'), { status: 422 }));
-    const [event] = await run({ github: gh, context: createMockContext(), core });
-    expect(event.conflict).toEqual({ outcome: 'conflict-no-input', reason: 'HTTP 422' });
-    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ description: 'conflict-no-input' })]);
-  });
+  for (const [status, outcome] of [[422, 'conflict-no-input'], [404, 'conflict-no-caller']]) {
+    it(`records nothing for an HTTP ${status} dispatch, logs it, and retries on the next sweep`, async () => {
+      const gh = conflictGithub(dirty());
+      gh.rest.actions.createWorkflowDispatch.mockRejectedValue(Object.assign(new Error('refused'), { status }));
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      expect(event.conflict).toEqual({ outcome, reason: `HTTP ${status}; retried next sweep` });
+      expect(conflictStatuses(gh)).toEqual([]);
+      expect(core.summary.addRaw.mock.calls[0][0]).toContain(outcome);
+
+      const next = conflictGithub(dirty());
+      await run({ github: next, context: createMockContext(), core });
+      expect(next.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+    });
+  }
 
   it('does nothing for a held, Renovate or promotion conflict or without a CI fix workflow', async () => {
     const cases = [
