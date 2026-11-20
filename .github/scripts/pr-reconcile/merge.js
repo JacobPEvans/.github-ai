@@ -2,12 +2,14 @@
 //
 // Native auto-merge and merge queues key on required checks only, so they merge past red optional review checks.
 // This path merges only when every check run and commit status at the head is complete and green, the AI Merge Gate
-// check succeeded at that head, no review asks for changes, no review thread is open, and no release freeze holds the
+// check succeeded at that head (a Renovate, release-please or promotion pull request with no AI gate run uses the
+// repository's Merge Gate instead), no review asks for changes, no review thread is open, and no release freeze holds the
 // base. It merges with the head SHA, so a push after the read makes the merge fail instead of landing unreviewed code.
 // On a git-flow repository the labelled develop-to-main promotion also merges through this path, with a merge commit.
 // A promotion that carries any major release commit is held for a human merge and noted once on the pull request. Auto-merge armed on an agent pull request is disarmed. Every decision returns a reason for the run summary.
 
 const GATE_CHECK = /(^|\/ )AI Merge Gate$/;
+const REPO_GATE_CHECK = /(^|\/ )Merge Gate$/;
 const BLOCK_LABELS = ['human:review', 'merge-hold', 'needs-lead'];
 const FREEZE_LABEL = 'release:in-progress';
 const BAD_CONCLUSIONS = ['failure', 'cancelled', 'timed_out', 'action_required', 'stale'];
@@ -85,7 +87,13 @@ function staticBlocker(pr, held) {
   return '';
 }
 
-function checksBlocker(runs, statuses) {
+// A Renovate, release-please or promotion pull request with no AI gate run may pass on the repository's own Merge Gate.
+function repoGateAllowed(pr) {
+  return pr.user.login === 'renovate[bot]' || pr.head.ref.startsWith(RELEASE_PLEASE)
+    || (pr.base.ref === 'main' && pr.head.ref === 'develop');
+}
+
+function checksBlocker(runs, statuses, pr) {
   if (!runs.length) return 'no-checks';
   if (runs.some((check) => check.status !== 'completed')) return 'checks-pending';
   const bad = runs.find((check) => BAD_CONCLUSIONS.includes(check.conclusion));
@@ -93,7 +101,8 @@ function checksBlocker(runs, statuses) {
   // merge-hold is decided from the live label (held), not from the status written before this run.
   const status = statuses.find((item) => item.context !== 'merge-hold' && item.state !== 'success');
   if (status) return `status:${status.context}`;
-  const gate = runs.find((check) => GATE_CHECK.test(check.name));
+  const gate = runs.find((check) => GATE_CHECK.test(check.name))
+    || (repoGateAllowed(pr) ? runs.find((check) => REPO_GATE_CHECK.test(check.name)) : undefined);
   if (!gate || gate.conclusion !== 'success') return 'no-gate-success';
   return '';
 }
@@ -130,7 +139,7 @@ async function tryMerge({ github, owner, repo, pr, held, statuses }) {
   if (live.reviewDecision === 'CHANGES_REQUESTED') return skip('changes-requested');
   if (live.reviewThreads.nodes.some((thread) => !thread.isResolved)) return skip('unresolved-threads');
   const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
-  const checks = checksBlocker(runs, statuses);
+  const checks = checksBlocker(runs, statuses, pr);
   if (checks) return skip(checks);
   if (await frozen(github, owner, repo, pr)) return skip('release-freeze');
   const gitFlowMain = pr.base.ref === 'main' && pr.base.repo.default_branch === 'develop';

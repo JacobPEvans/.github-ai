@@ -114,6 +114,10 @@ describe('sweep merge', () => {
     ['check:lint', pr(), { checks: [green('AI Merge Gate'), { ...green('lint'), conclusion: 'cancelled' }] }],
     ['status:ext-ci', pr(), { statuses: [{ context: 'ext-ci', state: 'pending' }] }],
     ['no-gate-success', pr(), { checks: [green('lint')] }],
+    ['no-gate-success', pr(), { checks: [green('lint'), green('Merge Gate')] }],
+    ['no-gate-success', pr({ user: { login: 'renovate[bot]', type: 'Bot' } }), { checks: [green('lint')] }],
+    ['no-gate-success', pr({ user: { login: 'renovate[bot]', type: 'Bot' } }),
+      { checks: [green('lint'), { ...green('AI Merge Gate'), conclusion: 'neutral' }, green('Merge Gate')] }],
     ['no-checks', pr(), { checks: [] }],
   ];
   for (const [reason, data, options] of skips) {
@@ -141,6 +145,18 @@ describe('sweep merge', () => {
     expect((await reconcileOne(minor)).merge.outcome).toBe('merged');
     const major = github(pr({ head, base, title: 'chore(develop): release 3.0.0' }));
     expect((await reconcileOne(major)).merge.reason).toBe('major-release');
+  });
+
+  it('passes a Renovate, release-please or promotion pull request on the repository Merge Gate when no AI gate ran', async () => {
+    const repoGate = { checks: [green('lint'), green('CI / Merge Gate')], commits: releaseCommits('2.29.0') };
+    const renovate = github(pr({ user: { login: 'renovate[bot]', type: 'Bot' } }), repoGate);
+    expect((await reconcileOne(renovate)).merge.outcome).toBe('merged');
+    const head = { ref: 'release-please--branches--main', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } };
+    const release = github(pr({ head, title: 'chore(main): release 2.17.0' }), repoGate);
+    expect((await reconcileOne(release)).merge.outcome).toBe('merged');
+    const promoted = github(promotion(), repoGate);
+    expect((await reconcileOne(promoted)).merge.outcome).toBe('merged');
+    expect(promoted.rest.pulls.merge.mock.calls[0][0].merge_method).toBe('merge');
   });
 
   it('merges a green labelled promotion with a merge commit and never touches its labels', async () => {
