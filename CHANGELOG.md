@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.35.0](https://github.com/JacobPEvans/.github-ai/compare/v2.34.0...v2.35.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** start the conflict fix from a push to the base ([#232](https://github.com/JacobPEvans/.github-ai/issues/232)) ([3224342](https://github.com/JacobPEvans/.github-ai/commit/32243421e8f0090fc4ae53846ee156877b123a30))
+
 ## [2.34.0](https://github.com/JacobPEvans/.github-ai/compare/v2.33.0...v2.34.0) (2026-11-20)
 
 
