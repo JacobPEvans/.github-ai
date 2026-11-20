@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.18.0](https://github.com/JacobPEvans/.github-ai/compare/v2.17.0...v2.18.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** mint the sweep token with actions write and checks read ([#183](https://github.com/JacobPEvans/.github-ai/issues/183)) ([4a84269](https://github.com/JacobPEvans/.github-ai/commit/4a84269aaafa3ec588695cf62e54127a425c262d))
+
 ## [2.17.0](https://github.com/JacobPEvans/.github-ai/compare/v2.16.0...v2.17.0) (2026-11-20)
 
 
