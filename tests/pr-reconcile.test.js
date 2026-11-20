@@ -43,6 +43,7 @@ function github(prData, { statuses = [], files = [] } = {}) {
   gh.rest.repos.createCommitStatus = mock().mockResolvedValue({});
   gh.rest.repos.createDispatchEvent = mock().mockResolvedValue({});
   gh.rest.actions.createWorkflowDispatch = mock().mockResolvedValue({});
+  gh.rest.actions.reRunWorkflowFailedJobs = mock().mockResolvedValue({});
   gh.paginate.mockResolvedValue(files);
   return gh;
 }
@@ -442,7 +443,7 @@ describe('reconcile', () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     for (const name of [
       'gate / AI Merge Gate', 'Merge Gate', 'gate / Review router availability',
-      'gate / Semantic review / Review the diff', 'release-freeze', 'release-notes / Check eligibility',
+      'release-freeze', 'release-notes / Check eligibility', 'Flake Lock Fresh / Flake inputs at branch head',
     ]) {
       const gh = github(pr());
       gh.paginate.mockResolvedValueOnce([checkRun({ name })]);
@@ -456,7 +457,7 @@ describe('reconcile', () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     for (const name of [
       'gate / Semantic review / Policy gate', 'gate / Security review / Policy gate', 'Workflow Policy',
-      'CodeQL', 'gate / Dependency Review', 'shared-gate / Uses Resolve',
+      'CodeQL', 'gate / Dependency Review',
     ]) {
       const gh = github(pr());
       gh.paginate.mockResolvedValueOnce([checkRun({ name })]);
@@ -464,6 +465,44 @@ describe('reconcile', () => {
       expect(gh.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
       expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched', check: name });
     }
+  });
+
+  it('re-runs a crashed or cancelled AI review and Uses Resolve, never a CI-fix dispatch, twice per head', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    for (const check of [checkRun({ name: 'gate / Code review / Review the diff', conclusion: 'cancelled' }), checkRun({ name: 'shared-gate / Uses Resolve' })]) {
+      const gh = github(pr(), { statuses: [{ context: 'pr-reconcile-rerun', description: 'rerun 1: x' }] });
+      gh.paginate.mockResolvedValueOnce([check]);
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      expect(gh.rest.actions.reRunWorkflowFailedJobs).toHaveBeenCalledWith({ owner: 'test-owner', repo: 'test-repo', run_id: 424242 });
+      expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0])).toContainEqual(expect.objectContaining({
+        sha: 'head1', context: 'pr-reconcile-rerun', description: `rerun 2: ${check.name}`,
+      }));
+      expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+      expect(event).toMatchObject({ action: 'ci-fix', outcome: 'rerun', check: check.name });
+    }
+  });
+
+  it('after two re-runs leaves an AI review alone and sends Uses Resolve to the CI fix', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const statuses = [1, 2].map((n) => ({ context: 'pr-reconcile-rerun', description: `rerun ${n}: x` }));
+    for (const [name, outcome] of [['gate / Code review / Review the diff', 'noop'], ['shared-gate / Uses Resolve', 'ci-fix-dispatched']]) {
+      const gh = github(pr(), { statuses });
+      gh.paginate.mockResolvedValueOnce([checkRun({ name })]);
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      expect(gh.rest.actions.reRunWorkflowFailedJobs).not.toHaveBeenCalled();
+      expect(event).toMatchObject({ action: 'ci-fix', outcome });
+    }
+  });
+
+  it('merges the base in for a skipped check that passes on the base, such as Flake Lock Fresh', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const name = 'Flake Lock Fresh / Flake inputs at branch head';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ name })]).mockResolvedValueOnce([{ status: 'completed', conclusion: 'success' }]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.pulls.updateBranch).toHaveBeenCalledWith({ owner: 'test-owner', repo: 'test-repo', pull_number: 7, expected_head_sha: 'head1' });
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'base-merged', check: name });
   });
 
   it('ignores failing checks that are not github-actions', async () => {
