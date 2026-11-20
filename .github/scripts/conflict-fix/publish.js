@@ -2,7 +2,7 @@
 //
 // The v2 keeps the original's title and labels (never human:review, merge-conflict or needs-lead); its body is the
 // original body plus `Supersedes #N`. The original is closed, with a comment linking the v2, only after the v2's
-// CI has started: a check run or workflow run at the v2 head. If none starts in time, the original stays open and
+// CI has started: a check run or workflow run at the v2 head. The v2 is never armed for auto-merge. If none starts in time, the original stays open and
 // the run fails.
 
 const { openPr } = require('../shared/verified-commit.js');
@@ -44,6 +44,8 @@ async function publish({ github, context, core, number, timeoutMs = 10 * 60 * 10
     body: v2Body(original.body, number),
     baseBranch: original.base.ref,
     labels: v2Labels(original.labels),
+    // The sweep's merge-on-green merges the v2; native auto-merge stays off.
+    autoMerge: false,
   });
   if (!result.opened) {
     core.setFailed('conflict fix: no changes to publish; the original stays open');
