@@ -58,18 +58,23 @@ test('a re-commented permission line with the same grant passes the diff rules',
   expect(diffRefusal(files)).toBe('');
 });
 
-test('the publisher commits a workflow fix only with the OpenBao token after the org checks', () => {
-  const workflow = Bun.YAML.parse(readFileSync('.github/workflows/cc-ci-fix.yml', 'utf8'));
+test('the publisher reads every commit token from OpenBao after the org checks, never an App key', () => {
+  const text = readFileSync('.github/workflows/cc-ci-fix.yml', 'utf8');
+  const workflow = Bun.YAML.parse(text);
   const { steps, permissions } = workflow.jobs.publish;
   const ids = steps.map((step) => step.id || step.name);
   expect(permissions['id-token']).toBe('write');
-  const order = ['workflow-patch', 'workflow-files', 'Apply agent patch', 'Check the workflow fix', 'workflow-token',
+  const order = ['workflow-patch', 'workflow-files', 'Apply agent patch', 'Check the workflow fix', 'commit-role',
     'commit-token', 'Commit fix to PR branch'].map((id) => ids.indexOf(id));
   expect(order.every((index) => index >= 0)).toBe(true);
   expect(order).toEqual([...order].sort((a, b) => a - b));
   const byId = Object.fromEntries(steps.map((step) => [step.id || step.name, step]));
   expect(byId['workflow-files'].if).toContain("steps.workflow-patch.outputs.workflow_fix != 'true'");
-  expect(byId['commit-token'].if).toContain("steps.workflow-patch.outputs.workflow_fix != 'true'");
-  expect(byId['workflow-token'].with.secrets).toContain('github-openhands/token/');
+  expect(byId['commit-role'].run).toContain('route=openhands-workflows');
+  expect(byId['commit-role'].run).toContain('route=openhands-write');
+  expect(byId['commit-token'].uses).toStartWith('hashicorp/vault-action@');
+  expect(byId['commit-token'].with.secrets).toContain('github-openhands/token/');
+  expect(byId['Commit fix to PR branch'].with['github-token']).toBe('${{ steps.commit-token.outputs.COMMIT_TOKEN }}');
   expect(byId['Commit fix to PR branch'].env.EXTRA_EXCLUDES).toBe('.gh-shared');
+  expect(steps.some((step) => (step.uses || '').startsWith('actions/create-github-app-token@'))).toBe(false);
 });
