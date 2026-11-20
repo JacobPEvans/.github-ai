@@ -21,13 +21,29 @@ function pr(overrides = {}) {
 
 const green = (name) => ({ name, status: 'completed', conclusion: 'success', app: { slug: 'github-actions' } });
 
-function github(prData, { checks = [green('lint'), green('AI Merge Gate / AI Merge Gate')], statuses = [], live = {}, promotions = [] } = {}) {
+// A develop-to-main promotion on a git-flow repository, carrying the release label the sweep looks for.
+const promotion = (overrides = {}) => pr({
+  title: 'chore(develop): promotion',
+  head: { ref: 'develop', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } },
+  base: { ref: 'main', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } },
+  labels: [{ name: 'release:in-progress' }],
+  ...overrides,
+});
+
+const releaseCommits = (version) => [{ commit: { message: `chore(develop): release ${version}`, committer: { date: '2026-11-20T00:00:00Z' } } }];
+
+function github(prData, { checks = [green('lint'), green('AI Merge Gate / AI Merge Gate')], statuses = [], live = {}, promotions = [], commits = [], comments = [] } = {}) {
   const gh = createMockGithub();
   gh.rest.pulls.get.mockResolvedValue({ data: prData });
   gh.rest.pulls.merge = mock().mockResolvedValue({});
+  gh.rest.pulls.listCommits = mock();
+  gh.rest.issues.createComment = mock().mockResolvedValue({});
   gh.rest.repos.getCombinedStatusForRef = mock().mockResolvedValue({ data: { statuses } });
   gh.rest.repos.createCommitStatus = mock().mockResolvedValue({});
-  gh.paginate.mockImplementation(async (fn) => (fn === gh.rest.pulls.list ? promotions : checks));
+  gh.paginate.mockImplementation(async (fn) => (fn === gh.rest.pulls.listCommits ? commits
+    : fn === gh.rest.issues.listComments ? comments
+    : fn === gh.rest.pulls.list ? promotions
+    : checks));
   gh.graphql = mock(async (query) => (query.startsWith('mutation') ? {} : {
     repository: {
       pullRequest: {
@@ -87,6 +103,7 @@ describe('sweep merge', () => {
     ['label:human:review', pr({ labels: [{ name: 'human:review' }] }), {}],
     ['held', pr({ labels: [{ name: 'merge-hold' }] }), {}],
     ['zcode-branch', pr({ head: { ref: 'agent/zcode/j-1', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
+    ['promotion', promotion({ labels: [] }), {}],
     ['state:blocked', pr({ mergeable_state: 'blocked' }), {}],
     ['head-moved', pr(), { live: { headRefOid: 'head2' } }],
     ['changes-requested', pr(), { live: { reviewDecision: 'CHANGES_REQUESTED' } }],
@@ -123,6 +140,77 @@ describe('sweep merge', () => {
     expect((await reconcileOne(minor)).merge.outcome).toBe('merged');
     const major = github(pr({ head, base, title: 'chore(develop): release 3.0.0' }));
     expect((await reconcileOne(major)).merge.reason).toBe('major-release');
+  });
+
+  it('merges a green labelled promotion with a merge commit and never touches its labels', async () => {
+    const gh = github(promotion(), { commits: releaseCommits('2.29.0') });
+    const event = await reconcileOne(gh);
+    expect(gh.rest.pulls.merge).toHaveBeenCalledTimes(1);
+    expect(gh.rest.pulls.merge).toHaveBeenCalledWith({ owner: 'test-owner', repo: 'test-repo', pull_number: 7, sha: 'head1', merge_method: 'merge' });
+    expect(event.merge).toEqual({ outcome: 'merged', reason: '', disarmed: false });
+    expect(gh.rest.issues.createComment).not.toHaveBeenCalled();
+    expect(gh.rest.issues.addLabels).not.toHaveBeenCalled();
+  });
+
+  it('holds a labelled promotion while any check is red, pending, or missing', async () => {
+    for (const [reason, options] of [
+      ['check:lint', { checks: [green('AI Merge Gate / AI Merge Gate'), { ...green('lint'), conclusion: 'failure' }] }],
+      ['checks-pending', { checks: [{ ...green('AI Merge Gate / AI Merge Gate'), status: 'in_progress', conclusion: null }] }],
+      ['no-checks', { checks: [] }],
+    ]) {
+      const gh = github(promotion(), { commits: releaseCommits('2.29.0'), ...options });
+      const event = await reconcileOne(gh);
+      expect(gh.rest.pulls.merge).not.toHaveBeenCalled();
+      expect(gh.rest.issues.createComment).not.toHaveBeenCalled();
+      expect(event.merge).toMatchObject({ outcome: 'merge-skip', reason });
+    }
+  });
+
+  it('skips a labelled promotion whose head moved after the read', async () => {
+    const gh = github(promotion(), { commits: releaseCommits('2.29.0'), live: { headRefOid: 'head2' } });
+    const event = await reconcileOne(gh);
+    expect(gh.rest.pulls.merge).not.toHaveBeenCalled();
+    expect(gh.rest.issues.createComment).not.toHaveBeenCalled();
+    expect(event.merge).toMatchObject({ outcome: 'merge-skip', reason: 'head-moved' });
+  });
+
+  it('skips a major promotion with one human-merge note, posted at most once', async () => {
+    const commits = [
+      { commit: { message: 'feat: more work', committer: { date: '2026-11-19T00:00:00Z' } } },
+      { commit: { message: 'chore(develop): release 3.0.0', committer: { date: '2026-11-20T00:00:00Z' } } },
+    ];
+    const gh = github(promotion(), { commits });
+    const event = await reconcileOne(gh);
+    expect(gh.rest.pulls.merge).not.toHaveBeenCalled();
+    expect(event.merge).toMatchObject({ outcome: 'merge-skip', reason: 'major-release' });
+    expect(gh.rest.issues.createComment).toHaveBeenCalledTimes(1);
+    expect(gh.rest.issues.createComment.mock.calls[0][0].body).toContain('<!-- pr-reconcile:major-promotion -->');
+    expect(gh.rest.issues.addLabels).not.toHaveBeenCalled();
+
+    const again = github(promotion(), { commits, comments: [{ body: 'noted\n\n<!-- pr-reconcile:major-promotion -->' }] });
+    await reconcileOne(again);
+    expect(again.rest.issues.createComment).not.toHaveBeenCalled();
+  });
+
+  it('holds a promotion when any release it carries is major, not only the newest', async () => {
+    const commits = [
+      { commit: { message: 'chore(develop): release 3.0.0', committer: { date: '2026-11-19T00:00:00Z' } } },
+      { commit: { message: 'chore(develop): release 3.1.0', committer: { date: '2026-11-20T00:00:00Z' } } },
+    ];
+    const gh = github(promotion(), { commits });
+    const event = await reconcileOne(gh);
+    expect(gh.rest.pulls.merge).not.toHaveBeenCalled();
+    expect(event.merge).toMatchObject({ outcome: 'merge-skip', reason: 'major-release' });
+  });
+
+  it('merges a promotion whose releases are all minor or patch', async () => {
+    const commits = [
+      { commit: { message: 'chore(develop): release 2.28.1', committer: { date: '2026-11-19T00:00:00Z' } } },
+      { commit: { message: 'chore(develop): release 2.29.0', committer: { date: '2026-11-20T00:00:00Z' } } },
+    ];
+    const gh = github(promotion(), { commits });
+    const event = await reconcileOne(gh);
+    expect(event.merge.outcome).toBe('merged');
   });
 
   it('detects a major release in the title or a changelog heading only', () => {
