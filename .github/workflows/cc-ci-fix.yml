@@ -384,6 +384,8 @@ jobs:
     if: ${{ !inputs.dry_run }}
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    outputs:
+      commit_token: ${{ steps.commit-token.outcome }}
     permissions:
       contents: write
       pull-requests: read
@@ -486,6 +488,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+          COMMIT_TOKEN: ${{ needs.publish.outputs.commit_token }}
         with:
           script: |
             const prNumber = Number(process.env.PR_NUMBER);
@@ -500,4 +503,14 @@ jobs:
               await github.rest.issues.updateComment({ ...repo, comment_id: existing.id, body });
             } else {
               await github.rest.issues.createComment({ ...repo, issue_number: prNumber, body });
+            }
+            // A run that could not mint its commit token committed nothing, so its attempt marker is voided and
+            // check-attempts no longer counts it.
+            if (process.env.COMMIT_TOKEN === 'failure') {
+              const attempt = '<!-- claude-ci-fix-attempt -->';
+              const last = comments.filter((c) => c.user?.type === 'Bot' && c.body?.includes(attempt)).pop();
+              if (last) {
+                const voided = `${last.body.replace(attempt, '<!-- claude-ci-fix-attempt-void -->')}\n\nNot counted: the fix could not be committed.`;
+                await github.rest.issues.updateComment({ ...repo, comment_id: last.id, body: voided });
+              }
             }
