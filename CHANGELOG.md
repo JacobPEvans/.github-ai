@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.26.0](https://github.com/JacobPEvans/.github-ai/compare/v2.25.0...v2.26.0) (2026-11-20)
+
+
+### Features
+
+* **conflict-fix:** never arm auto-merge on the v2 pull request ([#202](https://github.com/JacobPEvans/.github-ai/issues/202)) ([f0d4388](https://github.com/JacobPEvans/.github-ai/commit/f0d43880a67603400aea719dcb311dde7be9b53c))
+
 ## [2.25.0](https://github.com/JacobPEvans/.github-ai/compare/v2.24.0...v2.25.0) (2026-11-20)
 
 
