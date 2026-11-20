@@ -159,6 +159,38 @@ describe('sweep merge', () => {
     expect(promoted.rest.pulls.merge.mock.calls[0][0].merge_method).toBe('merge');
   });
 
+  it('treats only declared Renovate Apps as Renovate, and a major update still needs the AI gate', async () => {
+    const repoGate = { checks: [green('lint'), green('CI / Merge Gate')] };
+    const branch = (ref) => ({ ref, sha: 'head1', repo: { full_name: 'test-owner/test-repo' } });
+    const updateApp = { login: 'jacobpevans-release-please[bot]', type: 'Bot' };
+    expect((await reconcileOne(github(pr({ user: updateApp, head: branch('renovate/first-party') }), repoGate))).merge.outcome)
+      .toBe('merged');
+    expect((await reconcileOne(github(pr({ head: branch('renovate/first-party') }), repoGate))).merge.reason)
+      .toBe('no-gate-success');
+    expect((await reconcileOne(github(pr({ user: updateApp, head: branch('fix/x') }), repoGate))).merge.reason)
+      .toBe('no-gate-success');
+    const renovate = { login: 'renovate[bot]', type: 'Bot' };
+    const majors = [
+      pr({ user: renovate, head: branch('renovate/foo-2.x'), labels: [{ name: 'update:major' }] }),
+      pr({ user: renovate, head: branch('renovate/major-all') }),
+      pr({ user: renovate, head: branch('renovate/foo-2.x'), body: '| Package | Type | Update | Change |\n|---|---|---|---|\n| foo | action | major | `v1` -> `v2` |' }),
+    ];
+    for (const major of majors) {
+      expect((await reconcileOne(github(major, repoGate))).merge.reason).toBe('no-gate-success');
+    }
+  });
+
+  it('judges only the newest run of each check name within a check suite', async () => {
+    const gate = { ...green('AI Merge Gate'), id: 1, check_suite: { id: 10 } };
+    const lint = (id, suite, conclusion = 'success') => ({ ...green('lint'), id, conclusion, check_suite: { id: suite } });
+    const rerunGreen = github(pr(), { checks: [gate, lint(2, 20, 'failure'), lint(3, 20)] });
+    expect((await reconcileOne(rerunGreen)).merge.outcome).toBe('merged');
+    const rerunRed = github(pr(), { checks: [gate, lint(3, 20, 'failure'), lint(2, 20)] });
+    expect((await reconcileOne(rerunRed)).merge.reason).toBe('check:lint');
+    const otherSuiteRed = github(pr(), { checks: [gate, lint(2, 20, 'failure'), lint(3, 30)] });
+    expect((await reconcileOne(otherSuiteRed)).merge.reason).toBe('check:lint');
+  });
+
   it('merges a green labelled promotion with a merge commit and never touches its labels', async () => {
     const gh = github(promotion(), { commits: releaseCommits('2.29.0') });
     const event = await reconcileOne(gh);
