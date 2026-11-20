@@ -243,3 +243,8 @@ test('semantic: a superseding pull request gets the superseded diff in front, ot
   expect(run('Adds a thing. See also Supersedes #42 in the notes.')).toBe('NEW DIFF\n');
   expect(run('Adds a thing.')).toBe('NEW DIFF\n');
 });
+
+test('each pull request and rubric has its own review concurrency group, never cancelled', () => {
+  expect(policyGate.concurrency.group).toBe("${{ inputs.rubric == 'policy' && 'policy-gate' || format('{0}-review', inputs.rubric) }}-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}");
+  expect(policyGate.concurrency['cancel-in-progress']).toBe(false);
+});
