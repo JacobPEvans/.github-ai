@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.31.0](https://github.com/JacobPEvans/.github-ai/compare/v2.30.0...v2.31.0) (2026-11-20)
+
+
+### Features
+
+* **pr-reconcile:** merge a green release promotion and skip a major one ([#222](https://github.com/JacobPEvans/.github-ai/issues/222)) ([f6685da](https://github.com/JacobPEvans/.github-ai/commit/f6685da59a36108aae8800dbd0abe2cc3c6d17f6))
+
 ## [2.30.0](https://github.com/JacobPEvans/.github-ai/compare/v2.29.0...v2.30.0) (2026-11-20)
 
 
