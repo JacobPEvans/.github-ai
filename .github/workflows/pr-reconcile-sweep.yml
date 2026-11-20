@@ -8,7 +8,7 @@
 # Each owner's job runs on the org's self-hosted runners and logs in to OpenBao
 # with this workflow's OIDC identity, then mints one installation token for that
 # owner, limited to actions (CI-fix dispatch), checks (read), contents, pull
-# requests, issues and statuses. No stored credential is used.
+# requests and statuses. No stored credential is used.
 
 name: PR Reconcile Sweep
 
@@ -89,7 +89,7 @@ jobs:
           BAO_TOKEN: ${{ steps.login.outputs.vault_token }}
           OWNER: ${{ matrix.owner }}
         run: |
-          body=$(jq -cn --arg o "$OWNER" '{org_name: $o, permissions: {actions: "write", checks: "read", contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}')
+          body=$(jq -cn --arg o "$OWNER" '{org_name: $o, permissions: {actions: "write", checks: "read", contents: "write", pull_requests: "write", statuses: "write"}}')
           token=$(curl -sSf -X POST -H "X-Vault-Token: $BAO_TOKEN" --data-binary "$body" "$BAO_ADDR/v1/github/token" | jq -er '.data.token')
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
