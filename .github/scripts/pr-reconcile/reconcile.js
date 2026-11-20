@@ -18,6 +18,12 @@
 // requires this status blocks the merge itself, so re-armed auto-merge cannot
 // race a hold, and the PR stays ready and mergeable.
 //
+// Conflict fix: when CI_FIX_WORKFLOW is set, a conflicted pull request (not Renovate, not a promotion, not touching
+// workflow files) whose head commit is over a day old gets one workflow_dispatch per head with conflict_pr; the
+// caller opens a v2 pull request on the current base. A v2 that conflicts again gets needs-lead, never a v3.
+// The commit status context pr-reconcile-conflict records it, apart from the pr-reconcile action record. A
+// repository without a caller that takes conflict_pr records nothing and is retried every sweep.
+//
 // Merge: when MERGE_ENABLED is true, a bot pull request left alone otherwise is merged once it is green at its exact
 // head (merge.js); every merge and skip reason goes to the run summary.
 //
@@ -32,6 +38,9 @@ const STATUS_CONTEXT = 'pr-reconcile';
 const HOLD_CONTEXT = 'merge-hold';
 const HOLD_LABEL = 'merge-hold';
 const UNKNOWN_RETRIES = 3;
+const CONFLICT_CONTEXT = 'pr-reconcile-conflict';
+const CONFLICT_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+const V2_BODY = /^Supersedes #\d+\b/m;
 // Unknown-state retries stop after the retry budget; no new PR starts after the run budget, so a large sweep
 // ends inside the 5-minute job timeout and the next sweep picks up the rest.
 let retryDeadline = Infinity;
@@ -218,6 +227,58 @@ async function startCiFix(github, owner, repo, pr, settings) {
   return { outcome: 'ci-fix-dispatched', check: check.name };
 }
 
+async function recordConflict(github, owner, repo, sha, outcome) {
+  await github.rest.repos.createCommitStatus({
+    owner, repo, sha, state: 'success', context: CONFLICT_CONTEXT, description: outcome,
+  });
+}
+
+// One conflict-fix decision for a pull request the reconcile labelled as conflicted. Returns { outcome, reason }.
+async function startConflictFix(github, owner, repo, pr, settings, statuses, now = Date.now()) {
+  const labels = (pr.labels || []).map((label) => label.name);
+  const done = statuses.find((status) => status.context === CONFLICT_CONTEXT);
+  if (done) return { outcome: 'conflict-skip', reason: `already ${done.description}` };
+  if (labels.includes(LEAD_LABEL)) return { outcome: 'conflict-skip', reason: 'needs-lead' };
+  if (pr.head.ref.endsWith('-v2') || V2_BODY.test(pr.body || '')) {
+    await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: [LEAD_LABEL] });
+    await recordConflict(github, owner, repo, pr.head.sha, 'conflict-lead');
+    return { outcome: 'conflict-lead', reason: 'a v2 conflicted again' };
+  }
+  if (await touchesWorkflows(github, owner, repo, pr.number)) return { outcome: 'conflict-skip', reason: 'workflow files' };
+  const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: pr.head.sha });
+  const age = now - Date.parse(commit.commit.committer.date);
+  if (!(age >= CONFLICT_MIN_AGE_MS)) return { outcome: 'conflict-skip', reason: 'head commit under 24h old' };
+  try {
+    await github.rest.git.getRef({ owner, repo, ref: `heads/${pr.head.ref}-v2` });
+    return { outcome: 'conflict-skip', reason: 'v2 branch exists' };
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+  try {
+    await github.rest.actions.createWorkflowDispatch({
+      owner, repo,
+      workflow_id: settings.workflow,
+      ref: pr.base.repo.default_branch,
+      inputs: { failure_head_branch: pr.head.ref, conflict_pr: String(pr.number) },
+    });
+  } catch (error) {
+    // 404: no caller; 422: a caller without the conflict_pr input. Nothing is recorded, so the next sweep retries
+    // once the caller rollout reaches this repository.
+    if (![404, 422].includes(error.status)) throw error;
+    const outcome = error.status === 404 ? 'conflict-no-caller' : 'conflict-no-input';
+    return { outcome, reason: `HTTP ${error.status}; retried next sweep` };
+  }
+  await recordConflict(github, owner, repo, pr.head.sha, 'conflict-dispatched');
+  return { outcome: 'conflict-dispatched', reason: settings.workflow };
+}
+
+function conflictSummary(events) {
+  const rows = events.filter((event) => event.conflict)
+    .map((event) => `| ${event.repository}#${event.pr} | ${event.conflict.outcome} | ${event.conflict.reason || '-'} |`);
+  if (!rows.length) return '';
+  return ['### Conflict fixes', '', '| Pull request | Outcome | Reason |', '| --- | --- | --- |', ...rows, ''].join('\n');
+}
+
 async function reconcile({ github, core, owner, repo, number, ciFix, merge = false }) {
   const pr = await getPr(github, owner, repo, number);
   const decision = classify(pr);
@@ -262,6 +323,14 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
       }
     }
   }
+  let conflict;
+  if (ciFix.workflow && decision.action === 'label-conflict' && !held) {
+    try {
+      conflict = await startConflictFix(github, owner, repo, pr, ciFix, statuses);
+    } catch (error) {
+      conflict = { outcome: `conflict-error:${error.status || 'unknown'}`, reason: 'api' };
+    }
+  }
   // A release-please branch is skipped by classify but still merges on green; a failed check never merges.
   const mergeable = decision.action === 'none' || (decision.action === 'skip' && decision.state !== 'fork');
   let mergeResult;
@@ -278,6 +347,7 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
   };
   if (check) event.check = check;
   if (mergeResult) event.merge = mergeResult;
+  if (conflict) event.conflict = conflict;
   core.info(JSON.stringify(event));
   return event;
 }
@@ -355,13 +425,14 @@ module.exports = async function run({ github, context, core }) {
       events.push(event);
     }
   }
-  const summary = mergeSummary(events);
+  const summary = [mergeSummary(events), conflictSummary(events)].filter(Boolean).join('\n');
   if (summary) await core.summary.addRaw(summary).write();
   core.setOutput('events', JSON.stringify(events));
   return events;
 };
 module.exports.classify = classify;
 module.exports.reconcile = reconcile;
+module.exports.conflictSummary = conflictSummary;
 module.exports.retryDelayMs = 5000;
 module.exports.retryBudgetMs = 3 * 60 * 1000;
 module.exports.runBudgetMs = 4 * 60 * 1000;
