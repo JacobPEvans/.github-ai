@@ -9,7 +9,7 @@ const stop = Object.values(workflow.jobs)
   .find((step) => step.id === 'workflow-files');
 const script = join(process.cwd(), '.github/scripts/ci-fix/stop-github-patch.sh');
 
-function touched(path) {
+function touched(path, exitCode) {
   const directory = mkdtempSync(join(tmpdir(), 'cc-ci-fix-github-stop-'));
   const output = join(directory, 'github-output');
   try {
@@ -19,7 +19,7 @@ function touched(path) {
       cwd: directory,
       env: { ...process.env, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(directory, 'summary'), GITHUB_RUN_ID: '1' },
     });
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(exitCode);
     return readFileSync(output, 'utf8').trim();
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -31,14 +31,14 @@ test('the workflow-files step calls the stop script from the shared checkout', (
   expect(stop.run.trim()).toBe('bash .ai-workflows/.github/scripts/ci-fix/stop-github-patch.sh');
 });
 
-test('a patch under .github/actions is stopped', () => {
-  expect(touched('.github/actions/x/action.yml')).toBe('touched=true');
+test('a patch under .github/actions is stopped and fails the step', () => {
+  expect(touched('.github/actions/x/action.yml', 1)).toBe('touched=true');
 });
 
-test('a patch under .github/workflows is stopped', () => {
-  expect(touched('.github/workflows/ci.yml')).toBe('touched=true');
+test('a patch under .github/workflows is stopped and fails the step', () => {
+  expect(touched('.github/workflows/ci.yml', 1)).toBe('touched=true');
 });
 
 test('a patch outside .github is not stopped', () => {
-  expect(touched('roles/x/tasks/main.yml')).toBe('touched=false');
+  expect(touched('roles/x/tasks/main.yml', 0)).toBe('touched=false');
 });
