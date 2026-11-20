@@ -16,8 +16,13 @@
 // requires this status blocks the merge itself, so re-armed auto-merge cannot
 // race a hold, and the PR stays ready and mergeable.
 //
+// Merge: when MERGE_ENABLED is true, a bot pull request left alone otherwise is merged once it is green at its exact
+// head (merge.js); every merge and skip reason goes to the run summary.
+//
 // Modes: PR_NUMBER (one PR in this repo), BASE_REF (every open PR on that base,
 // for push-to-base), SWEEP_OWNER (every open PR of the owner).
+
+const { mergeEnabled, tryMerge, mergeSummary } = require('./merge.js');
 
 const CONFLICT_LABEL = 'merge-conflict';
 const LEAD_LABEL = 'needs-lead';
@@ -194,7 +199,7 @@ async function startCiFix(github, owner, repo, pr, settings) {
   return { outcome: 'ci-fix-dispatched', check: check.name };
 }
 
-async function reconcile({ github, core, owner, repo, number, ciFix }) {
+async function reconcile({ github, core, owner, repo, number, ciFix, merge = false }) {
   const pr = await getPr(github, owner, repo, number);
   const decision = classify(pr);
   let outcome = 'noop';
@@ -238,11 +243,22 @@ async function reconcile({ github, core, owner, repo, number, ciFix }) {
       }
     }
   }
+  // A release-please branch is skipped by classify but still merges on green; a failed check never merges.
+  const mergeable = decision.action === 'none' || (decision.action === 'skip' && decision.state !== 'fork');
+  let mergeResult;
+  if (merge && mergeable && decision.state !== 'closed' && outcome === 'noop') {
+    try {
+      mergeResult = await tryMerge({ github, owner, repo, pr, held, statuses });
+    } catch (error) {
+      mergeResult = { outcome: `merge-error:${error.status || 'unknown'}`, reason: 'api' };
+    }
+  }
   const event = {
     event: 'pr_reconcile', repository: `${owner}/${repo}`, pr: number, head_sha: pr.head.sha,
     state: decision.state, action, outcome, held,
   };
   if (check) event.check = check;
+  if (mergeResult) event.merge = mergeResult;
   core.info(JSON.stringify(event));
   return event;
 }
@@ -289,6 +305,7 @@ module.exports = async function run({ github, context, core }) {
   const resolver = process.env.RESOLVER_REPO || '';
   if (resolver && !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(resolver)) throw new Error(`invalid RESOLVER_REPO: ${resolver}`);
   const ciFix = ciFixSettings();
+  const merge = mergeEnabled();
   const started = Date.now();
   retryDeadline = started + module.exports.retryBudgetMs;
   const exclusions = excludedRepositories();
@@ -308,7 +325,7 @@ module.exports = async function run({ github, context, core }) {
       break;
     }
     try {
-      events.push(await reconcile({ github, core, ...target, ciFix }));
+      events.push(await reconcile({ github, core, ...target, ciFix, merge }));
     } catch (error) {
       // One PR that vanished or failed to read must not stop the rest of the sweep.
       const event = {
@@ -319,6 +336,8 @@ module.exports = async function run({ github, context, core }) {
       events.push(event);
     }
   }
+  const summary = mergeSummary(events);
+  if (summary) await core.summary.addRaw(summary).write();
   core.setOutput('events', JSON.stringify(events));
   return events;
 };

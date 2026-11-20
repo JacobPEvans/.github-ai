@@ -28,6 +28,10 @@ inputs:
     description: Case-insensitive regex of check-run names that never start a CI fix (empty = built-in default).
     required: false
     default: ""
+  merge:
+    description: "'true' merges a bot pull request that is green at its exact head with a successful AI Merge Gate (empty = off)."
+    required: false
+    default: ""
   exclude_repos:
     description: Comma-separated repositories the sweep skips.
     required: false
@@ -45,6 +49,7 @@ runs:
         RESOLVER_REPO: ${{ inputs.resolver_repo }}
         CI_FIX_WORKFLOW: ${{ inputs.ci_fix_workflow }}
         CI_FIX_SKIP_CHECKS: ${{ inputs.ci_fix_skip_checks }}
+        MERGE_ENABLED: ${{ inputs.merge }}
         PR_RECONCILE_EXCLUDE_REPOS: ${{ inputs.exclude_repos }}
       with:
         github-token: ${{ inputs.github-token }}
