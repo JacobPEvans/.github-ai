@@ -438,13 +438,32 @@ describe('reconcile', () => {
     expect('check' in event).toBe(false);
   });
 
-  it('ignores a failed check whose name matches the skip pattern', async () => {
+  it('ignores failed checks a code edit cannot fix', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
-    const gh = github(pr());
-    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'Semantic Pull Request' })]);
-    const [event] = await run({ github: gh, context: createMockContext(), core });
-    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
-    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'noop' });
+    for (const name of [
+      'gate / AI Merge Gate', 'Merge Gate', 'gate / Review router availability',
+      'gate / Semantic review / Review the diff', 'release-freeze', 'release-notes / Check eligibility',
+    ]) {
+      const gh = github(pr());
+      gh.paginate.mockResolvedValueOnce([checkRun({ name })]);
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+      expect(event).toMatchObject({ action: 'ci-fix', outcome: 'noop' });
+    }
+  });
+
+  it('dispatches a fix for review verdicts, workflow policy and scans', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    for (const name of [
+      'gate / Semantic review / Policy gate', 'gate / Security review / Policy gate', 'Workflow Policy',
+      'CodeQL', 'gate / Dependency Review', 'shared-gate / Uses Resolve',
+    ]) {
+      const gh = github(pr());
+      gh.paginate.mockResolvedValueOnce([checkRun({ name })]);
+      const [event] = await run({ github: gh, context: createMockContext(), core });
+      expect(gh.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+      expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched', check: name });
+    }
   });
 
   it('ignores failing checks that are not github-actions', async () => {

@@ -46,8 +46,10 @@ const V2_BODY = /^Supersedes #\d+\b/m;
 let retryDeadline = Infinity;
 const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
-// Meta gates and scans a coding agent cannot fix by editing code.
-const CI_FIX_SKIP_DEFAULT = 'merge gate|review|freeze|policy|semantic|codeql|dependency|release';
+// Checks a code edit cannot fix: gate aggregators that mirror another check, review-router outages, review runs
+// that crashed instead of returning a verdict, release freezes and release checks, and eligibility gates. Review
+// verdicts (Policy gate), Workflow Policy, CodeQL and dependency review do start a fix.
+const CI_FIX_SKIP_DEFAULT = 'merge gate|router availability|review the diff|freeze|release|eligibility';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
