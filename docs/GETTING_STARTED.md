@@ -91,7 +91,8 @@ compatible during migration.
 A repository in the PR Reconcile sweep uses [`examples/ci-fix-caller.yml`](../examples/ci-fix-caller.yml),
 unchanged, as `.github/workflows/ci-fix.yml`. The sweep dispatches it for a pull request whose checks failed;
 per-repository text comes from the `CI_FIX_REPO_CONTEXT`, `CI_FIX_CI_STRUCTURE` and `CI_FIX_EXTRA_TOOLS`
-repository variables.
+repository variables. That caller uses `cc-ci-fix-oidc.yml`, the same job graph whose publish job reads its commit
+token from OpenBao through GitHub OIDC, so the calling job grants `id-token: write`.
 
 ```yaml
 jobs:
