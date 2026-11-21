@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.41.0](https://github.com/JacobPEvans/.github-ai/compare/v2.40.0...v2.41.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** mint the sweep token inside the reconcile step without issues access ([#251](https://github.com/JacobPEvans/.github-ai/issues/251)) ([3e51904](https://github.com/JacobPEvans/.github-ai/commit/3e519042970f4704b0582b2f8b9493a474d53397))
+
 ## [2.40.0](https://github.com/JacobPEvans/.github-ai/compare/v2.39.0...v2.40.0) (2026-11-21)
 
 
