@@ -165,6 +165,23 @@ describe('agent job token scope', () => {
     }
   });
 
+  // A job that runs an agent holds no App key and no store write identity; publishers and check reporters run in their own jobs.
+  it('keeps App keys, check-token mints and store write roles out of every job that runs the agent action', () => {
+    const forbidden = /GH_APP_CLAUDE_BOT_PRIVATE_KEY|claude_bot_private_key|mint-check-token|create-github-app-token|github\/token|\b(?:openhands-write|claude-write|gate-checks|openhands-workflows|pr-reconcile)/;
+    const dir = join(import.meta.dir, '../.github/workflows');
+    const offenders = [];
+    for (const file of readdirSync(dir).filter((name) => /\.ya?ml$/.test(name))) {
+      const workflow = Bun.YAML.parse(readFileSync(join(dir, file), 'utf8'));
+      for (const [name, job] of Object.entries(workflow.jobs || {})) {
+        const runsAgent = (job.steps || []).some((step) => /\.github\/actions\/run-ai-agent$/.test(step.uses || ''));
+        if (runsAgent && forbidden.test(JSON.stringify(job))) offenders.push(`${file}:${name}`);
+      }
+    }
+    const action = readFileSync(join(import.meta.dir, '../.github/actions/run-ai-agent/action.yml'), 'utf8');
+    if (forbidden.test(action)) offenders.push('actions/run-ai-agent/action.yml');
+    expect(offenders).toEqual([]);
+  });
+
   it('runs the OpenHands sub-action only from the agent action', () => {
     const roots = ['../.github/workflows', '../.github/actions'].map((path) => join(import.meta.dir, path));
     const users = [];

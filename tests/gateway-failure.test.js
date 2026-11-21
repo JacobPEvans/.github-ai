@@ -416,7 +416,6 @@ describe('gateway wiring in the workflows', () => {
       step(load('policy-gate.yml').jobs.gate, 'Mint the check-run token'),
       step(load('docs-drift.yml').jobs.drift, 'Mint the check-run token'),
       step(load('pr-agent.yml').jobs['pr-agent'], 'Mint the check-run token'),
-      step(load('cc-release-notes.yml').jobs.highlights, 'Mint the check-run token'),
     ];
     for (const mint of directMints) {
       expect(mint.uses).toBe(pinned);
@@ -428,10 +427,11 @@ describe('gateway wiring in the workflows', () => {
     expect(sharedMint.uses).toBe(pinned);
     expect(sharedMint.with['permission-checks']).toBe('write');
 
-    const runAiMint = action.runs.steps.find((s) => s.name === 'Mint the check-run token');
-    expect(runAiMint.id).toBe('check-token');
-    expect(runAiMint.uses).toBe('./.ai-workflows/.github/actions/run-ai-agent/mint-check-token');
-    expect(runAiMint['continue-on-error']).toBe(true);
+    // The agent action mints nothing; its gateway report has no token and names why.
+    expect(action.runs.steps.find((s) => s.name === 'Mint the check-run token')).toBeUndefined();
+    const report = action.runs.steps.find((s) => s.name === 'Report gateway unavailability');
+    expect(report.env.GITHUB_TOKEN).toBeUndefined();
+    expect(report.env.CHECK_TOKEN_CAUSE).toBe('agent jobs hold no App key');
   });
 
   it('the App key is named as the cause when it is absent', () => {
@@ -439,14 +439,14 @@ describe('gateway wiring in the workflows', () => {
     expect(step(job, 'Report gateway unavailability').env.CHECK_TOKEN_CAUSE).toContain('GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set');
   });
 
-  it('every run-ai-agent caller in the touched set passes the App ID and key', () => {
+  it('no run-ai-agent caller in the touched set passes an App ID or key', () => {
     for (const file of ['issue-backlog-sweep.yml', 'cc-ci-fix.yml', 'cc-release-notes.yml']) {
       const workflow = load(file);
       const agent = Object.values(workflow.jobs)
         .flatMap((job) => job.steps ?? [])
         .find((s) => s.uses === './.ai-workflows/.github/actions/run-ai-agent');
-      expect(agent.with.claude_bot_app_id).toBe('${{ vars.GH_APP_CLAUDE_BOT_ID }}');
-      expect(agent.with.claude_bot_private_key).toBe('${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}');
+      expect(agent.with.claude_bot_app_id).toBeUndefined();
+      expect(agent.with.claude_bot_private_key).toBeUndefined();
     }
   });
 

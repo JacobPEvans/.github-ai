@@ -162,6 +162,9 @@ jobs:
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: "4096"
     outputs:
       handoff: ${{ steps.agent.outcome == 'success' && steps.agent.outputs.gateway_class == '' && steps.upload.outcome == 'success' }}
+      time_bound: ${{ steps.deadline.outputs.time_bound }}
+      deadline_class: ${{ steps.deadline.outputs.deadline_class }}
+      check_summary: ${{ steps.deadline.outputs.check_summary }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -214,8 +217,6 @@ jobs:
           openai_effort: ${{ vars.GH_ACTION_AI_CODEX_EFFORT }}
           codex_version: ${{ vars.GH_ACTION_AI_CODEX_VERSION }}
           allowed_bots: "github-actions,renovate,dependabot"
-          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
-          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
           claude_args: --max-turns 8
           ntfy_base_url: ${{ secrets.NTFY_BASE_URL }}
 
@@ -243,26 +244,6 @@ jobs:
             echo "time_bound=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Mint the check-run token for the agent deadline
-        id: deadline_token
-        if: always() && steps.deadline.outputs.time_bound == 'true'
-        continue-on-error: true
-        uses: ./.ai-workflows/.github/actions/run-ai-agent/mint-check-token
-        with:
-          client_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
-          private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
-
-      - name: Report agent deadline
-        if: always() && steps.deadline.outputs.time_bound == 'true'
-        env:
-          CONCLUSION: neutral
-          GITHUB_TOKEN: ${{ steps.deadline_token.outputs.token }}
-          CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'claude_bot_private_key input is not set (the caller must pass GH_APP_CLAUDE_BOT_PRIVATE_KEY)' || 'the mint step failed' }}
-          CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          CHECK_SUMMARY: ${{ steps.deadline.outputs.check_summary }}
-          DEADLINE_CLASS: ${{ steps.deadline.outputs.deadline_class }}
-        run: bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "Review dependency update" "$DEADLINE_CLASS"
-
       - name: Fail on non-deadline agent errors
         if: always() && steps.agent.outcome == 'failure' && steps.deadline.outputs.time_bound != 'true'
         run: |
@@ -281,6 +262,45 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+
+  # A job that runs no agent posts the deadline check run, from its own checkout of the shared scripts.
+  report-deadline:
+    name: Report agent deadline
+    needs: [check-eligibility, review]
+    if: always() && needs.review.outputs.time_bound == 'true'
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout ai-workflows
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: |
+            .github/scripts/shared
+            .github/actions/run-ai-agent/mint-check-token
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Mint the check-run token for the agent deadline
+        id: deadline_token
+        continue-on-error: true
+        uses: ./.ai-workflows/.github/actions/run-ai-agent/mint-check-token
+        with:
+          client_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
+      - name: Report agent deadline
+        env:
+          CONCLUSION: neutral
+          GITHUB_TOKEN: ${{ steps.deadline_token.outputs.token }}
+          CHECK_TOKEN_CAUSE: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY == '' && 'GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set' || 'the mint step failed' }}
+          CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHECK_SUMMARY: ${{ needs.review.outputs.check_summary }}
+          DEADLINE_CLASS: ${{ needs.review.outputs.deadline_class }}
+        run: bash .ai-workflows/.github/scripts/shared/gateway-failure.sh report "Review dependency update" "$DEADLINE_CLASS"
 
   publish:
     name: Publish dependency review
