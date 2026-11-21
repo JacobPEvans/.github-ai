@@ -1,5 +1,5 @@
 const { expect, test } = require('bun:test');
-const { mkdtempSync, rmSync, writeFileSync, readFileSync } = require('fs');
+const { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } = require('fs');
 const { join } = require('path');
 const { tmpdir } = require('os');
 const { execFileSync } = require('child_process');
@@ -278,4 +278,59 @@ test('collect.sh preserves literal text and non-assignment additions for leak', 
   withCollectedDiff(content, (diff, raw) => {
     expect(diff.toString()).toBe(raw.toString().replace('${{ secrets.TOKEN }}', '<secret-reference:TOKEN>'));
   }, { RUBRIC: 'leak' });
+});
+
+test('collect.sh appends up to three trusted reusable workflows a changed workflow calls, for the security diff only', () => {
+  const collect = (rubric, uses, ghExit = 0) => withTempDir((dir) => {
+    const git = (args) => execFileSync('git', args, {
+      cwd: dir,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com',
+        GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com',
+      },
+    }).trim();
+    git(['init', '-q']);
+    const base = git(['commit-tree', git(['write-tree']), '-m', 'base']);
+    mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, '.github', 'workflows', 'caller.yml'),
+      ['jobs:', ...uses.flatMap((ref, i) => [`  j${i}:`, `    uses: ${ref}`]), ''].join('\n'));
+    git(['add', '.github']);
+    const head = git(['commit-tree', git(['write-tree']), '-p', base, '-m', 'head']);
+    // The stub logs each request and answers with the requested path, so the test sees what was read.
+    writeFileSync(join(dir, 'bin', 'gh'), `#!/bin/sh\nfor a; do last=$a; done\nprintf '%s\\n' "$last" >> "${dir}/gh.log"\nprintf 'called body for %s' "$last"\nexit ${ghExit}\n`);
+    chmodSync(join(dir, 'bin', 'gh'), 0o755);
+    const result = run(dir, 'collect.sh', {
+      RUBRIC: rubric, BASE_SHA: base, HEAD_SHA: head, MAX_DIFF_KB: '150',
+      GITHUB_REPOSITORY_OWNER: 'Self', PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+    });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    let log = '';
+    try { log = readFileSync(join(dir, 'gh.log'), 'utf8'); } catch {}
+    return { diff: readFileSync(join(dir, 'diff.txt'), 'utf8'), log, stdout: result.stdout.toString() };
+  });
+
+  const shared = 'JacobPEvans/.github-ai/.github/workflows/cc-ci-fix.yml@v2';
+  const { diff, log } = collect('security', [shared, shared, './.github/workflows/local.yml']);
+  expect(diff.startsWith('diff --git')).toBe(true);
+  expect(diff.indexOf('end of the diff; context follows')).toBeGreaterThan(diff.indexOf('diff --git'));
+  expect(diff).toContain(`CALLED REUSABLE WORKFLOW ${shared}, context only and not part of this pull request`);
+  expect(diff).toContain('called body for repos/JacobPEvans/.github-ai/contents/.github/workflows/cc-ci-fix.yml?ref=v2');
+  expect(log.trim().split('\n')).toEqual(['repos/JacobPEvans/.github-ai/contents/.github/workflows/cc-ci-fix.yml?ref=v2']);
+
+  const external = collect('security', ['stranger/tools/.github/workflows/x.yml@main']);
+  expect(external.log).toBe('');
+  expect(external.diff).toContain('External reusable workflow stranger/tools/.github/workflows/x.yml@main is called; it was not read.');
+  expect(external.diff).not.toContain('called body');
+
+  const many = collect('security', ['a', 'b', 'c', 'd'].map((n) => `self/repo/.github/workflows/${n}.yml@v1`));
+  expect(many.log.trim().split('\n')).toHaveLength(3);
+  expect(many.diff).toContain('Reusable workflow self/repo/.github/workflows/d.yml@v1 is called; it was not read (limit 3).');
+
+  expect(collect('policy', [shared]).log).toBe('');
+  const unreadable = collect('security', [shared], 1);
+  expect(unreadable.diff).not.toContain('CALLED REUSABLE WORKFLOW');
+  expect(unreadable.stdout).toContain(`::warning::could not read the called workflow ${shared}`);
 });
