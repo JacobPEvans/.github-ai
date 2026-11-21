@@ -89,6 +89,10 @@ describe('run-ai-agent prepare validation', () => {
     expect(ciFix).toContain("agent: ${{ inputs.agent || (inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'openhands') }}");
     expect(action).toContain('model: ${{ steps.prepare.outputs.openhands-model }}');
     expect(action).toContain('model: ${{ steps.prepare.outputs.codex-model }}');
+    const steps = Bun.YAML.parse(action).runs.steps;
+    for (const name of ['Run OpenHands', 'Run Codex']) {
+      expect(steps.find((s) => s.name === name).env.GH_TOKEN).toBe('${{ github.token }}');
+    }
   });
 
   it('defaults to OpenHands when the caller and the org variable are silent', () => {
