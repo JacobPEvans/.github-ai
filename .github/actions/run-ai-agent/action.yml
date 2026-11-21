@@ -216,6 +216,10 @@ runs:
     - name: Run OpenHands
       if: steps.prepare.outputs.effective-agent == 'openhands'
       uses: ./.ai-workflows/.github/actions/run-ai-agent/openhands
+      env:
+        # Read operations such as `gh issue view` use the job-scoped token, as for Codex.
+        # Agent jobs must keep this token read-only; publishers run separately.
+        GH_TOKEN: ${{ github.token }}
       with:
         prompt: ${{ inputs.prompt }}
         model: ${{ steps.prepare.outputs.openhands-model }}
