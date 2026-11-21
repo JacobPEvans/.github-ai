@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.44.0](https://github.com/JacobPEvans/.github-ai/compare/v2.43.0...v2.44.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **conflict-fix:** pin prompts to v1.127.2 ([#261](https://github.com/JacobPEvans/.github-ai/issues/261)) ([7001dcf](https://github.com/JacobPEvans/.github-ai/commit/7001dcf1518ab71864bd4eab718cb0edd5f01006))
+
 ## [2.43.0](https://github.com/JacobPEvans/.github-ai/compare/v2.42.0...v2.43.0) (2026-11-21)
 
 
