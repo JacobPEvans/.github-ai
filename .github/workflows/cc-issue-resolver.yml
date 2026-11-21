@@ -113,7 +113,7 @@ jobs:
     name: AI Resolve
     needs: eligibility-check
     if: needs.eligibility-check.outputs.should_run == 'true'
-    runs-on: ${{ inputs.runner_label }}
+    runs-on: ${{ startsWith(inputs.runner_label, 'ubuntu-') && inputs.runner_label || 'review' }}
     permissions:
       contents: read
       issues: read

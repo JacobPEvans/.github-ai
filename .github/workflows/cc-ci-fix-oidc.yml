@@ -225,7 +225,7 @@ jobs:
       (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
       needs.should-fix.outputs.should_run == 'true' &&
       needs.should-fix.outputs.daily_should_run == 'true'
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ startsWith(inputs.runner_label || 'ubuntu-24.04', 'ubuntu-') && (inputs.runner_label || 'ubuntu-24.04') || 'review' }}
     # No id-token grant: callers grant only the standard set, and a reusable job
     # that requests more fails at startup for every caller. local_only's OpenBao
     # OIDC step therefore cannot mint a token from this job and fails closed.

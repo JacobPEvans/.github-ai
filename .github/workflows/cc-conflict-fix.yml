@@ -77,7 +77,7 @@ concurrency:
 jobs:
   fix:
     name: AI Conflict Fix
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ startsWith(inputs.runner_label || 'ubuntu-24.04', 'ubuntu-') && (inputs.runner_label || 'ubuntu-24.04') || 'review' }}
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       contents: read
