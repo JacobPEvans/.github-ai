@@ -8,7 +8,7 @@
 # identical apart from that scope.
 #
 # Usage:
-#   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate-oidc.yml@cec4217c7d562e42debd34ccf87a0e1270d2e465 # v2.15.0
+#   uses: JacobPEvans/.github-ai/.github/workflows/_ai-merge-gate-oidc.yml@v2
 name: _ai-merge-gate-oidc
 
 on:
