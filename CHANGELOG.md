@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.43.0](https://github.com/JacobPEvans/.github-ai/compare/v2.42.0...v2.43.0) (2026-11-21)
+
+
+### Features
+
+* **ci-fix:** add the cc-ci-fix-oidc entry that publishes workflow fixes with an OpenBao token ([#258](https://github.com/JacobPEvans/.github-ai/issues/258)) ([f55199f](https://github.com/JacobPEvans/.github-ai/commit/f55199fcc4558606a7fe0cce1cdd50056d542e16))
+
 ## [2.42.0](https://github.com/JacobPEvans/.github-ai/compare/v2.41.0...v2.42.0) (2026-11-21)
 
 
