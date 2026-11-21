@@ -11,8 +11,8 @@
 #   - var CI_FIX_REPO_CONTEXT  what the repository is and how it builds
 #   - var CI_FIX_CI_STRUCTURE  which checks CI runs and how to run them locally
 #
-# Secrets (repository or organization): GH_APP_CLAUDE_BOT_PRIVATE_KEY,
-# LLM_ROUTER_BASE_URL, LLM_ROUTER_API_KEY, OPENBAO_ADDR.
+# Secrets (repository or organization): LLM_ROUTER_BASE_URL, LLM_ROUTER_API_KEY,
+# OPENBAO_ADDR. The reconcile job mints its token through the store's OIDC role.
 
 name: PR Reconcile
 
@@ -26,12 +26,15 @@ jobs:
   reconcile:
     permissions:
       contents: read
-    uses: JacobPEvans/.github-ai/.github/workflows/pr-reconcile.yml@<release-sha> # <release>
+      id-token: write
+    # The store's OIDC role accepts this workflow only at a release tag or main, never a commit SHA.
+    uses: JacobPEvans/.github-ai/.github/workflows/pr-reconcile.yml@v2
     secrets:
-      GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+      OPENBAO_ADDR: ${{ secrets.OPENBAO_ADDR }}
     with:
       base_ref: ${{ github.ref_name }}
       conflict_fix: true
+      runner_label: review
 
   conflict-fix:
     needs: reconcile
