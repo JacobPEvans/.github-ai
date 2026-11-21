@@ -64,9 +64,12 @@ test('the five-minute job retains its bound and the agent has a three-minute ste
   expect(agent['continue-on-error']).toBe(true);
 });
 
-test('deadline reports use the neutral check-run path', () => {
-  const mint = step('Mint the check-run token for the agent deadline');
-  const report = step('Report agent deadline');
+const reportJob = workflow.jobs['report-deadline'];
+const reportStep = (name) => reportJob.steps.find((candidate) => candidate.name === name);
+
+test('deadline reports use the neutral check-run path from a job that runs no agent', () => {
+  const mint = reportStep('Mint the check-run token for the agent deadline');
+  const report = reportStep('Report agent deadline');
   const fail = step('Fail on non-deadline agent errors');
 
   expect(classify.if).toContain("steps.agent.outcome == 'failure'");
@@ -76,15 +79,21 @@ test('deadline reports use the neutral check-run path', () => {
   expect(classify.env.EXECUTION_FILE).toBe('${{ steps.agent.outputs.execution_file }}');
   expect(classify.run).toContain('[ -r "$EXECUTION_FILE" ]');
   expect(classify.run).toContain("select(.type == \"result\")][-1].subtype");
-  expect(mint.if).toContain("steps.deadline.outputs.time_bound == 'true'");
+  expect(step('Mint the check-run token for the agent deadline')).toBeUndefined();
+  expect(step('Report agent deadline')).toBeUndefined();
+  expect(review.outputs.time_bound).toBe('${{ steps.deadline.outputs.time_bound }}');
+  expect(reportJob.needs).toContain('review');
+  expect(reportJob.if).toBe("always() && needs.review.outputs.time_bound == 'true'");
+  expect(reportJob.permissions).toEqual({ contents: 'read' });
+  expect(reportJob.steps.some((s) => /run-ai-agent$/.test(s.uses || ''))).toBe(false);
   expect(mint.uses).toBe('./.ai-workflows/.github/actions/run-ai-agent/mint-check-token');
   expect(mint['continue-on-error']).toBe(true);
   expect(mint.with.client_id).toBe('${{ vars.GH_APP_CLAUDE_BOT_ID }}');
   expect(mint.with.private_key).toBe('${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}');
   expect(report.env.CONCLUSION).toBe('neutral');
   expect(report.env.CHECK_HEAD_SHA).toBe('${{ github.event.pull_request.head.sha }}');
-  expect(report.env.CHECK_SUMMARY).toBe('${{ steps.deadline.outputs.check_summary }}');
-  expect(report.env.DEADLINE_CLASS).toBe('${{ steps.deadline.outputs.deadline_class }}');
+  expect(report.env.CHECK_SUMMARY).toBe('${{ needs.review.outputs.check_summary }}');
+  expect(report.env.DEADLINE_CLASS).toBe('${{ needs.review.outputs.deadline_class }}');
   expect(report.env.NTFY_BASE_URL).toBeUndefined();
   expect(report.env.RUN_URL).toBeUndefined();
   expect(report.run).toContain('gateway-failure.sh report "Review dependency update" "$DEADLINE_CLASS"');
@@ -94,7 +103,7 @@ test('deadline reports use the neutral check-run path', () => {
 
 test('the max-turns subtype reports a neutral check without an alert', () => {
   const deadline = classifyDeadline({ subtype: 'error_max_turns' });
-  const report = step('Report agent deadline');
+  const report = reportStep('Report agent deadline');
 
   expect(deadline).toEqual({
     time_bound: 'true',
@@ -134,23 +143,17 @@ test('the dogfood caller passes both deadline alert secrets', () => {
   expect(dogfoodWorkflow.jobs.review.secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY).toBe('${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}');
 });
 
-test('run-ai-agent and dependency review share the check-token mint action', () => {
+test('only the dependency review deadline job uses the check-token mint action', () => {
   const runAiAgentText = readFileSync('.github/actions/run-ai-agent/action.yml', 'utf8');
   const runAiAgent = Bun.YAML.parse(runAiAgentText);
-  const runAiMint = runAiAgent.runs.steps.find((candidate) => candidate.name === 'Mint the check-run token');
   const report = runAiAgent.runs.steps.find((candidate) => candidate.name === 'Report gateway unavailability');
   const workflowText = readFileSync('.github/workflows/cc-dep-review.yml', 'utf8');
   const mintActionPath = '.github/actions/run-ai-agent/mint-check-token/action.yml';
   const mintAction = Bun.YAML.parse(readFileSync(mintActionPath, 'utf8'));
   const mintActionText = readFileSync(mintActionPath, 'utf8');
 
-  expect(runAiMint.id).toBe('check-token');
-  expect(runAiMint.if).toBe("always() && steps.claude.outcome == 'failure' && steps.report.outputs.gateway_class != ''");
-  expect(runAiMint['continue-on-error']).toBe(true);
-  expect(runAiMint.uses).toBe('./.ai-workflows/.github/actions/run-ai-agent/mint-check-token');
-  expect(runAiMint.with.client_id).toBe('${{ inputs.claude_bot_app_id }}');
-  expect(runAiMint.with.private_key).toBe('${{ inputs.claude_bot_private_key }}');
-  expect(report.env.GITHUB_TOKEN).toBe('${{ steps.check-token.outputs.token }}');
+  expect(runAiAgentText).not.toContain('mint-check-token');
+  expect(report.env.GITHUB_TOKEN).toBeUndefined();
   expect(workflowText).not.toContain('actions/create-github-app-token');
   expect(runAiAgentText).not.toContain('actions/create-github-app-token');
   expect(Object.keys(mintAction.inputs).sort()).toEqual(['client_id', 'private_key']);
