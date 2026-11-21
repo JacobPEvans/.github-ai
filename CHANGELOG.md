@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.42.0](https://github.com/JacobPEvans/.github-ai/compare/v2.41.0...v2.42.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **conflict-fix:** share one CI path rule between reconcile and publish ([#253](https://github.com/JacobPEvans/.github-ai/issues/253)) ([ffb207b](https://github.com/JacobPEvans/.github-ai/commit/ffb207b1a3bde19a5d9a6d912d1aee2451c40183))
+
 ## [2.41.0](https://github.com/JacobPEvans/.github-ai/compare/v2.40.0...v2.41.0) (2026-11-21)
 
 
