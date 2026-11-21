@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.50.0](https://github.com/JacobPEvans/.github-ai/compare/v2.49.0...v2.50.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **workflows:** run agent jobs without the App key ([#281](https://github.com/JacobPEvans/.github-ai/issues/281)) ([075f704](https://github.com/JacobPEvans/.github-ai/commit/075f704452ff3dd57eee6a5666a43bef33870818))
+
 ## [2.49.0](https://github.com/JacobPEvans/.github-ai/compare/v2.48.0...v2.49.0) (2026-11-21)
 
 
