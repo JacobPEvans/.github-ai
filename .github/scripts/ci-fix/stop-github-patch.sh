@@ -1,18 +1,56 @@
 #!/usr/bin/env bash
-# Hold back an agent patch that touches any .github/ path (workflows, actions,
-# scripts): write touched=true|false to GITHUB_OUTPUT. A held patch is not
-# committed; the step summary names the run's patch artifact, never the patch
-# body, and the job hands the fix to a person. Reads agent.patch from the
-# working directory.
+# Hold back an agent patch the publisher must not commit: write touched=true|false
+# and, when held, reason=<sentence> to GITHUB_OUTPUT. A patch is held when it
+# touches any .github/ path, touches more than 25 files, or adds a file under a
+# dependency install path (node_modules/, .venv/, collections/, or
+# roles/<namespace>.<name>/ for a role named in requirements.yml) or under a path
+# the repository's ignore rules exclude. A held patch is not committed; the step
+# summary names the run's patch artifact, never the patch body, and the job hands
+# the fix to a person. Reads agent.patch and the checkout in the working directory.
 set -euo pipefail
 
-if [ -s agent.patch ] && grep -qE '^diff --git a/\.github/' agent.patch; then
+max_files=25
+reason=""
+
+if [ -s agent.patch ]; then
+  paths=$(sed -nE 's#^diff --git a/(.*) b/.*#\1#p' agent.patch)
+  count=$(printf '%s\n' "$paths" | grep -c . || true)
+  added=$(awk '/^diff --git /{p=$3; sub(/^a\//, "", p)} /^new file mode/{print p}' agent.patch)
+  roles=$(cat requirements.yml roles/requirements.yml 2>/dev/null |
+    sed -nE "s/^[[:space:]-]*(name|src):[[:space:]]*[\"']?([A-Za-z0-9_]+\.[A-Za-z0-9_]+)[\"']?[[:space:]]*$/\2/p" | sort -u || true)
+
+  if grep -q '^\.github/' <<<"$paths"; then
+    reason="The patch edits files under \`.github/\`"
+  elif [ "$count" -gt "$max_files" ]; then
+    reason="The patch touches $count files, more than $max_files"
+  else
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      if [[ "$path" =~ (^|/)(node_modules|\.venv)/ || "$path" == collections/* ]]; then
+        reason="The patch adds files under a dependency install path (node_modules/, .venv/ or collections/)"
+        break
+      fi
+      role=$(sed -nE 's#^roles/([^/]+)/.*#\1#p' <<<"$path")
+      if [ -n "$role" ] && grep -qxF -- "$role" <<<"$roles"; then
+        reason="The patch adds files under \`roles/$role/\`, a role installed from requirements.yml"
+        break
+      fi
+      if git check-ignore --no-index -q -- "$path" 2>/dev/null; then
+        reason="The patch adds a file the repository's ignore rules exclude"
+        break
+      fi
+    done <<<"$added"
+  fi
+fi
+
+if [ -n "$reason" ]; then
   echo "touched=true" >> "$GITHUB_OUTPUT"
-  echo "::notice title=CI fix handed off::The patch edits .github/; it was not committed."
+  echo "reason=$reason" >> "$GITHUB_OUTPUT"
+  echo "::notice title=CI fix handed off::$reason; it was not committed."
   {
     echo "### CI fix handed off"
     echo
-    echo "The patch edits \`.github/\`, which the publisher does not commit."
+    echo "$reason, which the publisher does not commit."
     echo "The patch is in the \`ci-fix-$GITHUB_RUN_ID\` artifact of this run."
   } >> "$GITHUB_STEP_SUMMARY"
 else

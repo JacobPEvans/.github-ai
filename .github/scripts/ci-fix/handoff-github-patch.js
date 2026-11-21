@@ -1,6 +1,6 @@
-// Hands a CI fix whose patch edits .github/ to a person: one handoff comment per pull request that links the run's
+// Hands a CI fix the publisher held back (stop-github-patch.sh) to a person: one handoff comment per pull request that links the run's
 // patch artifact (never the patch body), the human:review label, and the attempt marker voided so it is not counted.
-// Env: PR_NUMBER.
+// Env: PR_NUMBER; HANDOFF_REASON, the stop script's reason (defaults to the .github/ reason).
 const MARKER = '<!-- ci-fix-handoff -->';
 const ATTEMPT = '<!-- claude-ci-fix-attempt -->';
 const LABEL = 'human:review';
@@ -11,11 +11,12 @@ module.exports = async ({ github, context, core }) => {
     core.setFailed('PR_NUMBER is not a valid number');
     return;
   }
+  const reason = process.env.HANDOFF_REASON || 'The proposed fix edits files under `.github/`';
   const repo = { owner: context.repo.owner, repo: context.repo.repo };
   const runUrl = `${context.serverUrl}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`;
   const body = [
     MARKER,
-    '> **CI fix handed off.** The proposed fix edits files under `.github/`, which this workflow does not commit.',
+    `> **CI fix handed off.** ${reason}, which this workflow does not commit.`,
     `> The patch is in the \`ci-fix-${context.runId}\` artifact of [this run](${runUrl}). Not counted as an attempt.`,
   ].join('\n');
 

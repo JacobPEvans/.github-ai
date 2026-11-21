@@ -434,19 +434,22 @@ jobs:
         with:
           name: ci-fix-${{ github.run_id }}
 
-      # The publisher never commits a patch that touches any .github/ path; such a
-      # patch is handed off with a comment linking the run's patch artifact and the
-      # human:review label, and the job succeeds.
-      - name: Stop a patch that edits .github files
+      # The publisher never commits a patch that touches a .github/ path, touches more
+      # than 25 files, or adds files under a dependency install path or an ignored
+      # path (stop-github-patch.sh); such a patch is handed off with a comment linking
+      # the run's patch artifact and the human:review label, the attempt is voided,
+      # and the job succeeds.
+      - name: Stop a patch the publisher must not commit
         id: workflow-files
         if: steps.pr-open.outputs.open == 'true'
         run: bash .ai-workflows/.github/scripts/ci-fix/stop-github-patch.sh
 
-      - name: Hand off a patch that edits .github files
+      - name: Hand off a held patch
         if: steps.workflow-files.outputs.touched == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+          HANDOFF_REASON: ${{ steps.workflow-files.outputs.reason }}
         with:
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/handoff-github-patch.js');

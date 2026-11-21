@@ -30,6 +30,20 @@ test('a handoff links the patch artifact, labels the PR and voids the attempt', 
   expect(voided.body).not.toContain('<!-- claude-ci-fix-attempt -->');
 });
 
+test('the handoff states the stop script\'s reason, and defaults to the .github/ reason', async () => {
+  github.paginate.mockResolvedValue([]);
+  process.env.HANDOFF_REASON = 'The patch touches 26 files, more than 25';
+  await run({ github, context, core });
+  expect(github.rest.issues.createComment.mock.calls[0][0].body).toContain(
+    '**CI fix handed off.** The patch touches 26 files, more than 25, which this workflow does not commit.');
+
+  delete process.env.HANDOFF_REASON;
+  github.rest.issues.createComment.mockClear();
+  await run({ github, context, core });
+  expect(github.rest.issues.createComment.mock.calls[0][0].body).toContain(
+    '**CI fix handed off.** The proposed fix edits files under `.github/`, which this workflow does not commit.');
+});
+
 test('a second handoff updates its comment in place, and a label failure only warns', async () => {
   github.paginate.mockResolvedValue([{ id: 9, user: { type: 'Bot' }, body: '<!-- ci-fix-handoff -->\nold' }]);
   github.rest.issues.addLabels.mockRejectedValue(new Error('label refused'));
@@ -46,7 +60,8 @@ test('both fixers hand off a .github patch and commit nothing, and the OIDC fixe
     const text = readFileSync(`.github/workflows/${file}`, 'utf8');
     const { steps, permissions } = Bun.YAML.parse(text).jobs.publish;
     const byId = Object.fromEntries(steps.map((step) => [step.id || step.name, step]));
-    const handoff = byId['Hand off a patch that edits .github files'];
+    const handoff = byId['Hand off a held patch'];
+    expect(handoff.env.HANDOFF_REASON).toBe('${{ steps.workflow-files.outputs.reason }}');
     expect([file, handoff.if]).toEqual([file, "steps.workflow-files.outputs.touched == 'true'"]);
     expect(handoff.with.script).toContain('ci-fix/handoff-github-patch.js');
     expect(permissions['pull-requests']).toBe('write');
