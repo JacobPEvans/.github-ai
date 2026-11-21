@@ -103,10 +103,17 @@ describe('subset rule', () => {
     expect(subsetRefusal(patch, ['src/my-file.js'])).toMatch(/does not: src\/my file\.js/);
   });
 
-  it('refuses a .github path that git quotes in the diff header', () => {
-    const patch = realPatch({ '.github/é.yml': 'a\n' }, ({ write }) => write('.github/é.yml', 'b\n'));
-    expect(patch.paths).toEqual(['.github/é.yml']);
-    expect(subsetRefusal(patch, ['.github/é.yml'])).toMatch(/edits \.github\/: \.github\/é\.yml/);
+  it('refuses a CI path that git quotes in the diff header', () => {
+    const patch = realPatch({ '.github/workflows/é.yml': 'a\n' }, ({ write }) => write('.github/workflows/é.yml', 'b\n'));
+    expect(patch.paths).toEqual(['.github/workflows/é.yml']);
+    expect(subsetRefusal(patch, ['.github/workflows/é.yml'])).toMatch(/edits CI paths .*: \.github\/workflows\/é\.yml/);
+  });
+
+  it('refuses a composite action and publishes a .github data file', () => {
+    const action = realPatch({ '.github/actions/run/action.yml': 'a\n' }, ({ write }) => write('.github/actions/run/action.yml', 'b\n'));
+    expect(subsetRefusal(action, ['.github/actions/run/action.yml'])).toMatch(/edits CI paths/);
+    const data = realPatch({ '.github/router-contracts.yml': 'a\n' }, ({ write }) => write('.github/router-contracts.yml', 'b\n'));
+    expect(subsetRefusal(data, ['.github/router-contracts.yml'])).toBe('');
   });
 
   it('checks both names of a rename collected with --no-renames', () => {
