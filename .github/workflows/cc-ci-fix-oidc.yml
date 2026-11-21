@@ -1,0 +1,585 @@
+# CI Failure Auto-Fix, OIDC entry
+#
+# The same job graph as cc-ci-fix.yml, except the publish job. The publish job
+# grants id-token: write and reads its commit token from OpenBao through the
+# org's openhands-write role, or the openhands-workflows role for a workflow
+# fix: a workflow-class failure whose patch edits only workflow files the pull
+# request already changes, and passes the org workflow policy and actionlint.
+# A caller that uses this file grants id-token: write on the calling job.
+# tests/cc-ci-fix-oidc.test.js keeps the rest of the graph identical.
+#
+# Usage:
+#   uses: JacobPEvans/.github-ai/.github/workflows/cc-ci-fix-oidc.yml@v2
+
+name: cc-CI Fix (OIDC)
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        description: >-
+          GitHub Actions runner label to run the job(s) on. Defaults to
+          ubuntu-24.04. Pass a RunsOn label (see runs-on.com job labels
+          docs) to opt the calling repo into self-hosted runners.
+        type: string
+        required: false
+        default: ubuntu-24.04
+      daily_run_limit:
+        description: "Maximum workflow runs per day. Not applied to OpenHands or local-only runs."
+        type: string
+        default: "5"
+      local_only:
+        description: Route every model request through the local-only router role.
+        type: boolean
+        required: false
+        default: false
+      local_model:
+        description: Existing router role to use when local_only is true.
+        type: string
+        required: false
+        default: ""
+      agent:
+        description: >-
+          Agent that makes the fix. Empty keeps the configured default. Set
+          openhands to run the OpenHands agent on the role named by local_model.
+          Only claude can be combined with local_only.
+        type: string
+        required: false
+        default: ""
+      dry_run:
+        description: Generate an artifact without publishing a patch or failure reply.
+        type: boolean
+        required: false
+        default: false
+      repo_context:
+        description: >-
+          Brief description of the repository. Optional — defaults to the
+          repo's own GitHub description (github.event.repository.description).
+        type: string
+        required: false
+        default: ""
+      ci_structure:
+        description: "Description of CI workflows and what they check"
+        type: string
+        required: true
+      extra_tools:
+        description: "Additional allowed tools beyond defaults (e.g., Bash(tofu:*))"
+        type: string
+        default: ""
+      failure_conclusion:
+        description: "Conclusion of the CI run being handled"
+        type: string
+        default: ""
+      failure_run_id:
+        description: "ID of the CI run being handled"
+        type: string
+        default: ""
+      failure_head_branch:
+        description: "Head branch of the failed CI run"
+        type: string
+        default: ""
+      failure_head_repository:
+        description: "Full name of the repository containing the failed head"
+        type: string
+        default: ""
+      failure_actor:
+        description: "Actor that started the failed CI run"
+        type: string
+        default: ""
+    secrets:
+      LLM_ROUTER_BASE_URL:
+        required: true
+      LLM_ROUTER_API_KEY:
+        required: false
+      OPENBAO_ADDR:
+        description: OpenBao service URL used by the local-only OIDC identity.
+        required: false
+      GH_APP_CLAUDE_BOT_ID:
+        description: App identifier, read when the organization variable of the same name is empty.
+        required: false
+      GH_APP_CLAUDE_BOT_PRIVATE_KEY:
+        required: false
+  workflow_dispatch:
+
+# Workflow-level permissions set the maximum for all jobs.
+# permissions: {} silently skips all jobs in cross-repo calls.
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: ci-fix-${{ github.repository }}-${{ inputs.failure_head_branch || github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: false  # Never cancel — queue instead to avoid wasting AI tokens
+
+jobs:
+  should-fix:
+    name: Check if fix needed
+    # Gate on CI failure so direct importers no-op on green builds. suite-ci
+    # applies the same conclusion gate one level up. Dependency-update pull
+    # requests from Renovate are fixed only by OpenHands or local-only runs.
+    if: >-
+      (inputs.failure_conclusion || github.event.workflow_run.conclusion) == 'failure' &&
+      ((inputs.failure_actor || github.actor) != 'renovate[bot]' ||
+       inputs.local_only || (inputs.agent || vars.GH_ACTION_AI_AGENT) == 'openhands') &&
+      (inputs.failure_actor || github.actor) != 'dependabot[bot]' &&
+      (inputs.failure_actor || github.actor) != 'copilot[bot]'
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    permissions:
+      pull-requests: read
+      issues: read
+    outputs:
+      pr_number: ${{ steps.find-pr.outputs.pr_number }}
+      should_run: ${{ steps.check-attempts.outputs.should_run }}
+      attempt: ${{ steps.check-attempts.outputs.attempt }}
+    steps:
+      - name: Checkout ai-workflows scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+
+      - name: Find associated PR
+        id: find-pr
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          FAILURE_HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/find-pr.js');
+            await run({ github, context, core });
+
+      - name: Check attempt count
+        id: check-attempts
+        if: steps.find-pr.outputs.pr_number != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/check-attempts.js');
+            await run({ github, context, core });
+
+  check-daily-limit:
+    name: Check daily run limit
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    permissions:
+      actions: read
+    outputs:
+      # OpenHands and local-only runs spend the router key's budget, not a daily run count.
+      should_run: ${{ (inputs.local_only || (inputs.agent || vars.GH_ACTION_AI_AGENT) == 'openhands') && 'true' || steps.check.outputs.should_run }}
+    steps:
+      - name: Checkout ai-workflows scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+
+      - name: Check daily run limit
+        id: check
+        if: ${{ !(inputs.local_only || (inputs.agent || vars.GH_ACTION_AI_AGENT) == 'openhands') }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          DAILY_RUN_LIMIT: ${{ inputs.daily_run_limit }}
+          WORKFLOW_FILE: ${{ github.workflow_ref }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/shared/check-daily-limit.js');
+            await run({ github, context, core });
+
+  post-attempt-comment:
+    name: Post attempt marker
+    needs: [should-fix, check-daily-limit]
+    if: >-
+      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
+      needs.should-fix.outputs.should_run == 'true' &&
+      needs.check-daily-limit.outputs.should_run == 'true'
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout ai-workflows scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+
+      - name: Post tracking comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+          ATTEMPT: ${{ needs.should-fix.outputs.attempt }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/post-attempt-comment.js');
+            await run({ github, context, core });
+
+  get-failure-details:
+    name: Get failure logs
+    needs: [should-fix, check-daily-limit]
+    if: >-
+      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
+      needs.should-fix.outputs.should_run == 'true' &&
+      needs.check-daily-limit.outputs.should_run == 'true'
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    permissions:
+      actions: read
+    outputs:
+      failure_logs: ${{ steps.get-logs.outputs.logs }}
+    steps:
+      - name: Checkout ai-workflows scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+
+      - name: Download failure logs
+        id: get-logs
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          FAILURE_RUN_ID: ${{ inputs.failure_run_id || github.event.workflow_run.id }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/get-failure-logs.js');
+            await run({ github, context, core });
+
+  fix:
+    name: AI Fix
+    needs: [should-fix, get-failure-details, post-attempt-comment, check-daily-limit]
+    # Security: fork guard — only checkout branches from the same repository, never forks
+    # Also require upstream gate jobs to have passed (explicit `if` replaces the default
+    # dependency-success check, so all conditions must be listed here).
+    if: >-
+      (github.event.workflow_run.head_repository.full_name || inputs.failure_head_repository) == github.repository &&
+      needs.should-fix.outputs.should_run == 'true' &&
+      needs.check-daily-limit.outputs.should_run == 'true'
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    # No id-token grant: callers grant only the standard set, and a reusable job
+    # that requests more fails at startup for every caller. local_only's OpenBao
+    # OIDC step therefore cannot mint a token from this job and fails closed.
+    permissions:
+      contents: read
+      pull-requests: read
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    outputs:
+      fix_base_sha: ${{ steps.fix-base.outputs.sha }}
+    steps:
+      # The local-only key flow is Claude-specific.
+      - name: Reject another agent with the local-only key flow
+        if: inputs.agent != '' && inputs.agent != 'claude' && inputs.local_only
+        run: |
+          echo "::error::local_only runs Claude only; leave agent empty or set it to claude"
+          exit 1
+
+      - name: Checkout PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The head the agent's fix was made from; publish drops the fix if the
+      # branch has moved past it before the commit lands.
+      - name: Record checked-out head
+        id: fix-base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The agent runs the repository's own checks, so its hooks are installed first.
+      - name: Install repository pre-commit hooks
+        if: hashFiles('.pre-commit-config.yaml') != ''
+        continue-on-error: true
+        run: |
+          pipx install pre-commit
+          pre-commit install-hooks
+
+      - name: Checkout ai-workflows prompts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: |
+            .github/scripts
+            .github/actions/run-ai-agent
+            .github/actions/local-model-setup
+            .github/actions/checkout-prompts
+          path: .ai-workflows
+          persist-credentials: false
+      - name: Checkout prompt catalog
+        uses: ./.ai-workflows/.github/actions/checkout-prompts
+        with:
+          sparse-checkout: automation/ai-workflows-ci-fix.md
+      - name: Render prompt
+        id: prompt
+        env:
+          REPO_CONTEXT: ${{ inputs.repo_context || github.event.repository.description }}
+          CI_STRUCTURE: ${{ inputs.ci_structure }}
+          FAILURE_LOGS: ${{ needs.get-failure-details.outputs.failure_logs }}
+        run: bash .ai-workflows/.github/scripts/render-prompt.sh .ai-llm-prompts/automation/ai-workflows-ci-fix.md FAILURE_LOGS REPO_CONTEXT CI_STRUCTURE
+
+      - name: Set up local-only model flow
+        id: router-key
+        if: inputs.local_only
+        uses: ./.ai-workflows/.github/actions/local-model-setup
+        with:
+          model: ${{ inputs.local_model }}
+          base_url: ${{ secrets.LLM_ROUTER_BASE_URL }}
+          openbao_addr: ${{ secrets.OPENBAO_ADDR }}
+          otel_endpoint: ${{ vars.AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT }}
+          daily_run_limit: ${{ inputs.daily_run_limit }}
+          role: github-agent-ci-fix
+          key_selector: secret/data/apps/github-actions-ci-fix github_actions_ci_fix_llm_router_key
+
+      # Claude only EDITS files (use_commit_signing: false) — claude-code-action's
+      # own commit path can't target a PR branch from a workflow_run trigger (no
+      # PR context in the event payload), so the edits stay in the working tree
+      # and the "Commit fix" step below commits them to the known PR branch.
+      - name: Run AI agent
+        uses: ./.ai-workflows/.github/actions/run-ai-agent
+        with:
+          agent: ${{ inputs.agent || (inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude') }}
+          openhands_model: ${{ inputs.local_model }}
+          prompt: ${{ steps.prompt.outputs.content }}
+          claude_model: ${{ inputs.local_only && inputs.local_model || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL }}
+          codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}
+          allowed_tools: "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git status:*),Bash(git branch:*)${{ inputs.extra_tools != '' && format(',{0}', inputs.extra_tools) || '' }}"
+          permission_profile: workspace
+          base_url: ${{ secrets.LLM_ROUTER_BASE_URL }}
+          api_key: ${{ inputs.local_only && steps.router-key.outputs.LLM_ROUTER_API_KEY || secrets.LLM_ROUTER_API_KEY }}
+          litellm_tags: ${{ inputs.local_only && 'agent-flow:ci-failure-fixer,agent-trigger:workflow_run' || '' }}
+          otel_traces_endpoint: ${{ inputs.local_only && vars.AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || '' }}
+          otel_resource_attributes: ${{ inputs.local_only && 'langfuse.environment=production,service.name=ci-failure-fixer,agent.flow=ci-failure-fixer,agent.trigger=workflow_run' || '' }}
+          openai_effort: ${{ vars.GH_ACTION_AI_CODEX_EFFORT }}
+          codex_version: ${{ vars.GH_ACTION_AI_CODEX_VERSION }}
+          allowed_bots: "github-actions,claude,jacobpevans-claude"
+          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+
+      - name: Collect agent patch
+        run: |
+          git add -N -A
+          git reset -q -- .ai-workflows
+          git diff --binary HEAD > agent.patch
+
+      - name: Upload agent patch
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-fix-${{ github.run_id }}
+          path: agent.patch
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish CI fix
+    needs: [should-fix, fix]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    outputs:
+      commit_token: ${{ steps.commit-token.outcome }}
+    # id-token: write reads the workflow-fix token from OpenBao; the caller must grant it.
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: read
+    steps:
+      - name: Checkout publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+          persist-credentials: false
+
+      # The PR may merge or close while the agent runs, and its branch is then
+      # often deleted; every later step is skipped instead of failing.
+      - name: Check the pull request is still open
+        id: pr-open
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/pr-still-open.js');
+            await run({ github, context, core });
+
+      - name: Checkout PR branch
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The root checkout above empties the workspace, publisher included.
+      - name: Checkout publisher again
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ job.workflow_sha }}
+          sparse-checkout: .github/scripts
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Download agent patch
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ci-fix-${{ github.run_id }}
+
+      # A .github/ patch is published only as a workflow fix: a workflow-class failure, edits to workflow files the
+      # pull request already changes, and no new uses, secrets or permission grants.
+      - name: Classify a .github patch
+        id: workflow-patch
+        if: steps.pr-open.outputs.open == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+          FAILURE_RUN_ID: ${{ inputs.failure_run_id || github.event.workflow_run.id }}
+        with:
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/workflow-patch.js');
+            await run({ github, context, core });
+
+      # Any other patch that touches a .github/ path stops here and fails the job, so
+      # the failure comment reaches the pull request; the patch stays in the run's
+      # agent patch artifact.
+      - name: Stop a patch that edits .github files
+        id: workflow-files
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-patch.outputs.workflow_fix != 'true'
+        run: bash .ai-workflows/.github/scripts/ci-fix/stop-github-patch.sh
+
+      - name: Apply agent patch
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
+        run: |
+          if [ -s agent.patch ]; then
+            git apply agent.patch
+          fi
+          rm agent.patch
+
+      # A workflow fix must pass the org workflow policy and actionlint on the patched tree before it is committed.
+      - name: Check out the org workflow checks
+        if: steps.workflow-patch.outputs.workflow_fix == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github
+          path: .gh-shared
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/pr-policy.py
+            scripts/ci-gate-workflow-lint.sh
+            .github/actionlint.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Check the workflow fix
+        if: steps.workflow-patch.outputs.workflow_fix == 'true'
+        env:
+          BASE_REF: ${{ steps.workflow-patch.outputs.base_ref }}
+          PYTHONPATH: ${{ runner.temp }}/pr-policy-deps
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-warn-script-location --target "$RUNNER_TEMP/pr-policy-deps" 'PyYAML>=6.0.2,<7'
+          git diff "$(git merge-base "origin/$BASE_REF" HEAD)" -- .github/workflows > "$RUNNER_TEMP/pr.diff"
+          python3 .gh-shared/scripts/pr-policy.py "$GITHUB_WORKSPACE" --diff "$RUNNER_TEMP/pr.diff"
+          bash .gh-shared/scripts/ci-gate-workflow-lint.sh
+
+      # Every commit token comes from OpenBao through GitHub OIDC; no App key is used. A workflow fix reads the
+      # openhands-workflows role (contents and workflows write), every other fix the openhands-write role.
+      - name: Find the OpenBao commit-token role
+        id: commit-role
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
+        env:
+          OWNER: ${{ github.repository_owner }}
+          ADDR: ${{ secrets.OPENBAO_ADDR }}
+          WORKFLOW_FIX: ${{ steps.workflow-patch.outputs.workflow_fix }}
+        run: |
+          addr="${ADDR:-${OPENBAO_ADDR:-}}"
+          test -n "$addr" || { echo "::error::OPENBAO_ADDR is not set; the publisher reads its commit token from OpenBao" >&2; exit 1; }
+          route=openhands-write
+          [ "$WORKFLOW_FIX" = true ] && route=openhands-workflows
+          echo "addr=$addr" >> "$GITHUB_OUTPUT"
+          echo "role=${route}-${OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Read the commit token from OpenBao
+        id: commit-token
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ steps.commit-role.outputs.addr }}
+          method: jwt
+          path: github-actions
+          role: ${{ steps.commit-role.outputs.role }}
+          jwtGithubAudience: https://github.com/${{ github.repository_owner }}
+          exportEnv: false
+          exportToken: false
+          secrets: |
+            github-openhands/token/${{ steps.commit-role.outputs.role }} token | COMMIT_TOKEN ;
+
+      - name: Commit fix to PR branch
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          HEAD_BRANCH: ${{ inputs.failure_head_branch || github.event.workflow_run.head_branch }}
+          FIX_BASE_SHA: ${{ needs.fix.outputs.fix_base_sha }}
+          COMMIT_MESSAGE: "fix: resolve CI failure (auto-fix attempt ${{ needs.should-fix.outputs.attempt }})"
+          EXTRA_EXCLUDES: .gh-shared
+        with:
+          github-token: ${{ steps.commit-token.outputs.COMMIT_TOKEN }}
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/commit-fix.js');
+            await run({ github, context, core });
+
+  notify-failure:
+    name: Report CI fix failure
+    needs: [should-fix, fix, publish]
+    if: failure() && !inputs.dry_run
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment on failure
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+          COMMIT_TOKEN: ${{ needs.publish.outputs.commit_token }}
+        with:
+          script: |
+            const prNumber = Number(process.env.PR_NUMBER);
+            if (!prNumber) return;
+            const marker = '<!-- ci-fix-failed -->';
+            const body = `${marker}\n> **CI fix failed.** Workflow timed out or encountered an error.\n> [View run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n> This PR may need manual CI fixes.`;
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+            // One failure comment per PR: a later failed run updates it in place.
+            const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: prNumber, per_page: 100 });
+            const existing = comments.find((c) => c.user?.type === 'Bot' && c.body?.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ ...repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...repo, issue_number: prNumber, body });
+            }
+            // A run that could not mint its commit token committed nothing, so its attempt marker is voided and
+            // check-attempts no longer counts it.
+            if (process.env.COMMIT_TOKEN === 'failure') {
+              const attempt = '<!-- claude-ci-fix-attempt -->';
+              const last = comments.filter((c) => c.user?.type === 'Bot' && c.body?.includes(attempt)).pop();
+              if (last) {
+                const voided = `${last.body.replace(attempt, '<!-- claude-ci-fix-attempt-void -->')}\n\nNot counted: the fix could not be committed.`;
+                await github.rest.issues.updateComment({ ...repo, comment_id: last.id, body: voided });
+              }
+            }

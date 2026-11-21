@@ -1,4 +1,4 @@
-# Canonical CI-fix caller for JacobPEvans/.github-ai cc-ci-fix.yml
+# Canonical CI-fix caller for JacobPEvans/.github-ai cc-ci-fix-oidc.yml
 #
 # Copy this file unchanged to .github/workflows/ci-fix.yml in every repository.
 # The PR Reconcile sweep dispatches it once per head commit of a pull request
@@ -32,17 +32,18 @@ on:
         type: string
 
 # The called workflow's jobs request exactly these scopes (fix commit, pull
-# request comment through the issues API, run logs); a caller that grants less
-# fails at graph validation.
+# request comment through the issues API, run logs, the OpenBao commit token
+# through GitHub OIDC); a caller that grants less fails at graph validation.
 permissions:
   actions: read
   contents: write
+  id-token: write
   issues: write
   pull-requests: write
 
 jobs:
   fix:
-    uses: JacobPEvans/.github-ai/.github/workflows/cc-ci-fix.yml@5743e07e094f6ca410a4b85a0d3681064013f946 # v2.16.0
+    uses: JacobPEvans/.github-ai/.github/workflows/cc-ci-fix-oidc.yml@v2
     secrets:
       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}

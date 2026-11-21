@@ -16,6 +16,13 @@
     "issues": "write",
     "pull-requests": "read"
   },
+  "cc-ci-fix-oidc.yml": {
+    "actions": "read",
+    "contents": "write",
+    "id-token": "write",
+    "issues": "write",
+    "pull-requests": "write"
+  },
   "cc-ci-fix.yml": {
     "actions": "read",
     "contents": "write",
