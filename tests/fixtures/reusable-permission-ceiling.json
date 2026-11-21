@@ -120,6 +120,10 @@
   "pr-reconcile.yml": {
     "contents": "read"
   },
+  "pr-size-gate.yml": {
+    "contents": "read",
+    "pull-requests": "write"
+  },
   "repo-hygiene-digest.yml": {
     "actions": "read",
     "contents": "read",

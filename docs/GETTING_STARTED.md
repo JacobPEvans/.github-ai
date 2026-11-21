@@ -53,6 +53,13 @@ to that release.
 
 ### Event-Triggered Workflows
 
+#### `pr-size-gate.yml`
+
+The AI Merge Gate runs it as the `PR size` job, so every repository that calls the gate gets it with no extra caller.
+The job runs only for pull requests created after `2026-11-19T20:00:00Z`; earlier pull requests skip it. It labels by
+additions and deletions, ignores generated and lock files and files under `dist/` or `vendor/`, and fails at the XL
+threshold of 1,000 changed lines. Stacked PRs are measured against their base branch, so each one counts on its own.
+
 #### `issue-triage.yml`
 
 Triggered by `issues: [opened]`. Categorizes, deduplicates, and labels new issues.

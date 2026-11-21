@@ -1,0 +1,60 @@
+---
+# Reusable: new pull request size gate.
+#
+# Fails a pull request created after the cutoff when it changes more than 1,000
+# lines, not counting generated and lock files. Earlier pull requests skip the
+# job. The AI Merge Gate calls it, so every repository that runs the gate gets it.
+name: New PR size gate
+
+"on":
+  workflow_call:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pr-size:
+    name: Check pull request size
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.created_at > '2026-11-19T20:00:00Z'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Label and enforce pull request size
+        uses: codelytv/pr-size-labeler@19c335e7695ba922de938806dd129f0a9b992644 # v1.12.0
+        with:
+          xs_max_size: '10'
+          s_max_size: '100'
+          m_max_size: '500'
+          l_max_size: '1000'
+          fail_if_xl: 'true'
+          message_if_xl: >-
+            This PR is over 1000 changed lines (additions + deletions). Split it
+            into stacked PRs, with each PR based on the previous one's branch.
+            Generated and lock files are not counted.
+          files_to_ignore: |
+            flake.lock
+            package-lock.json
+            */package-lock.json
+            pnpm-lock.yaml
+            */pnpm-lock.yaml
+            yarn.lock
+            */yarn.lock
+            *.lock
+            Cargo.lock
+            */Cargo.lock
+            go.sum
+            */go.sum
+            poetry.lock
+            */poetry.lock
+            uv.lock
+            */uv.lock
+            dist/*
+            */dist/*
+            vendor/*
+            */vendor/*
