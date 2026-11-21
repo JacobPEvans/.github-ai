@@ -12,14 +12,14 @@ validate() {
     exit 1
   fi
 
-  # An empty model never falls to a provider default: it is the router's local medium role.
-  local default_model=medium
-  local claude_model="${CLAUDE_MODEL:-$default_model}"
-  local openhands_model="${OPENHANDS_MODEL:-$claude_model}"
-  local codex_model="${CODEX_MODEL:-$claude_model}"
-
   case "$AGENT" in
-    claude|openhands) ;;
+    claude) ;;
+    openhands)
+      if [[ -z "${OPENHANDS_MODEL:-}" ]]; then
+        echo "::error::model is required when agent is openhands"
+        exit 1
+      fi
+      ;;
     codex)
       if [[ -z "$permission_profile" ]]; then
         echo "::error::permission_profile is required when agent is codex"
@@ -47,8 +47,6 @@ validate() {
     echo "responses-endpoint=$base/responses"
     echo "permission-profile=$permission_profile"
     echo "effective-agent=$effective_agent"
-    echo "openhands-model=$openhands_model"
-    echo "codex-model=$codex_model"
   } >> "$GITHUB_OUTPUT"
 
   local args="$CLAUDE_ARGS"
@@ -57,8 +55,10 @@ validate() {
     printf -v quoted '%q' "$ALLOWED_TOOLS"
     args="${args:+$args }--allowedTools $quoted"
   fi
-  printf -v quoted '%q' "$claude_model"
-  args="${args:+$args }--model $quoted"
+  if [[ -n "$CLAUDE_MODEL" ]]; then
+    printf -v quoted '%q' "$CLAUDE_MODEL"
+    args="${args:+$args }--model $quoted"
+  fi
   echo "claude-args=$args" >> "$GITHUB_OUTPUT"
 }
 

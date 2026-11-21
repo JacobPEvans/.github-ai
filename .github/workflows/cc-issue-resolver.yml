@@ -164,7 +164,7 @@ jobs:
       - name: Run AI agent
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
-          agent: ${{ vars.GH_ACTION_AI_AGENT || 'openhands' }}
+          agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
           prompt: ${{ steps.prompt.outputs.content }}
           claude_model: ${{ inputs.model || vars.GH_ACTION_AI_MODEL_PLAN || vars.GH_ACTION_AI_MODEL }}
           codex_model: ${{ inputs.model || vars.GH_ACTION_AI_CODEX_MODEL }}
