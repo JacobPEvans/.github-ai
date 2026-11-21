@@ -723,6 +723,13 @@ describe('conflict fix', () => {
     process.env.PR_NUMBER = '7';
   });
 
+  it('dispatches a conflict that changes a .github data file outside the CI paths', async () => {
+    const gh = conflictGithub(dirty(), { files: [{ filename: '.github/router-contracts.yml' }] });
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+    expect(event.conflict.outcome).not.toBe('conflict-skip');
+  });
+
   it('dispatches the caller with conflict_pr for a conflict whose head is 15 minutes old', async () => {
     const gh = conflictGithub(dirty(), { ageMs: MIN_AGE });
     const [event] = await run({ github: gh, context: createMockContext(), core });
@@ -763,7 +770,8 @@ describe('conflict fix', () => {
 
   const skips = [
     ['a head commit its author pushed under 15 minutes ago', {}, { ageMs: MIN_AGE - 60000 }, 'head commit under 15 min old'],
-    ['a pull request that touches workflow files', {}, { files: [{ filename: '.github/workflows/ci.yml' }] }, 'workflow files'],
+    ['a pull request that touches workflow files', {}, { files: [{ filename: '.github/workflows/ci.yml' }] }, 'CI paths'],
+    ['a pull request that touches a composite action', {}, { files: [{ filename: '.github/actions/run/action.yml' }] }, 'CI paths'],
     ['a pull request already sent to the lead', { labels: [{ name: 'needs-lead' }] }, {}, 'needs-lead'],
     ['an original whose v2 branch exists', {}, { v2: true }, 'v2 branch exists'],
   ];

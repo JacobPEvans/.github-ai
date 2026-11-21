@@ -2,7 +2,7 @@
 //
 // One idempotent reconcile(pr) per pull request. The state comes only from
 // GitHub API fields. BEHIND gets the update-branch API. DIRTY gets the
-// merge-conflict label (and needs-lead when workflow files are involved, which
+// merge-conflict label (and needs-lead when CI paths (ci-paths.js) are involved, which
 // this token cannot write); a resolver is started by repository_dispatch when
 // RESOLVER_REPO is set. Each decision is logged as one JSON event line.
 //
@@ -22,7 +22,7 @@
 // race a hold, and the PR stays ready and mergeable.
 //
 // Conflict fix: when CI_FIX_WORKFLOW is set, a conflicted pull request (not Renovate, not a promotion, not touching
-// workflow files) whose head commit is at least 15 minutes old gets a workflow_dispatch with conflict_pr, at most
+// a CI path, ci-paths.js) whose head commit is at least 15 minutes old gets a workflow_dispatch with conflict_pr, at most
 // CONFLICT_MAX per head: an attempt that left the original open with no v2 branch is retried after CONFLICT_RETRY_MS;
 // the caller opens a v2 pull request on the current base. A v2 that conflicts again gets needs-lead, never a v3.
 // The commit status context pr-reconcile-conflict records it, apart from the pr-reconcile action record. A
@@ -38,6 +38,7 @@
 // for push-to-base), SWEEP_OWNER (every open PR of the owner).
 
 const { mergeEnabled, tryMerge, mergeSummary } = require('./merge.js');
+const { isCiPath } = require('./ci-paths.js');
 
 const CONFLICT_LABEL = 'merge-conflict';
 const LEAD_LABEL = 'needs-lead';
@@ -103,7 +104,7 @@ async function getPr(github, owner, repo, number) {
 
 async function touchesWorkflows(github, owner, repo, number) {
   const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: number, per_page: 100 });
-  return files.some((file) => file.filename.startsWith('.github/workflows/'));
+  return files.some((file) => isCiPath(file.filename));
 }
 
 // At most once per (PR, head SHA, action): the commit status at the head records the last action taken.
@@ -299,7 +300,7 @@ async function startConflictFix(github, owner, repo, pr, settings, statuses, now
     await recordConflict(github, owner, repo, pr.head.sha, 'conflict-lead');
     return { outcome: 'conflict-lead', reason: 'a v2 conflicted again' };
   }
-  if (await touchesWorkflows(github, owner, repo, pr.number)) return { outcome: 'conflict-skip', reason: 'workflow files' };
+  if (await touchesWorkflows(github, owner, repo, pr.number)) return { outcome: 'conflict-skip', reason: 'CI paths' };
   const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: pr.head.sha });
   const age = now - Date.parse(commit.commit.committer.date);
   if (!(age >= CONFLICT_MIN_AGE_MS)) return { outcome: 'conflict-skip', reason: 'head commit under 15 min old' };

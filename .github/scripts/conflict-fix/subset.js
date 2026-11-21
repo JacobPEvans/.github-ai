@@ -1,6 +1,6 @@
-// Fail the conflict run unless the agent's patch is publishable: not empty, no rename or copy, nothing under
-// .github/, and every file it changes is one the original pull request changed. Reads agent.patch from the working
-// directory and CHANGED_FILES (one path per line).
+// Fail the conflict run unless the agent's patch is publishable: not empty, no rename or copy, no executable CI path
+// (ci-paths.js), and every file it changes is one the original pull request changed. Reads agent.patch from the
+// working directory and CHANGED_FILES (one path per line).
 //
 // Paths come from `git apply --numstat -z`: NUL-separated and unquoted, so a path with a space or a non-ASCII byte
 // (quoted in a `diff --git` header) is checked as written. `git apply` reports only the new name of a rename, so the
@@ -8,6 +8,7 @@
 
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
+const { isCiPath } = require('../pr-reconcile/ci-paths.js');
 
 // `added<TAB>deleted<TAB>path<NUL>`; an empty path is followed by `old<NUL>new<NUL>` (the git diff rename form).
 function numstatPaths(output) {
@@ -29,8 +30,8 @@ function numstatPaths(output) {
 function subsetRefusal({ paths, summary }, changedFiles) {
   if (!paths.length) return 'the agent patch is empty';
   if (/^ (rename|copy) /m.test(summary)) return 'the agent patch renames or copies a file';
-  const github = paths.filter((path) => path === '.github' || path.startsWith('.github/'));
-  if (github.length) return `the agent patch edits .github/: ${github.join(', ')}`;
+  const ci = paths.filter(isCiPath);
+  if (ci.length) return `the agent patch edits CI paths (.github/workflows/, .github/actions/): ${ci.join(', ')}`;
   const allowed = new Set(changedFiles);
   const extra = paths.filter((path) => !allowed.has(path));
   if (extra.length) return `the agent patch changes files the original pull request does not: ${extra.join(', ')}`;
