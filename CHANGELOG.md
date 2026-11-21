@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.46.0](https://github.com/JacobPEvans/.github-ai/compare/v2.45.0...v2.46.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **cc-dep-review:** default each agent to the review alias its router key serves ([#267](https://github.com/JacobPEvans/.github-ai/issues/267)) ([9960c2f](https://github.com/JacobPEvans/.github-ai/commit/9960c2f3db77df628d9130976452bcd75761b108))
+* **issue-triage:** call the exported issue author check ([#268](https://github.com/JacobPEvans/.github-ai/issues/268)) ([f1a5849](https://github.com/JacobPEvans/.github-ai/commit/f1a58493537e47a7652ba59547f8ce77d6dda2d4))
+
 ## [2.45.0](https://github.com/JacobPEvans/.github-ai/compare/v2.44.0...v2.45.0) (2026-11-21)
 
 
