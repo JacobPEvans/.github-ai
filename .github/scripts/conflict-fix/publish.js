@@ -1,13 +1,19 @@
 // Open the v2 pull request from the checked-out base tip plus the applied agent patch, then close the original.
 //
-// The v2 keeps the original's title and labels (never human:review, merge-conflict or needs-lead); its body is the
-// original body plus `Supersedes #N`. The original is closed, with a comment linking the v2, only after the v2's
+// The v2 keeps the original's title (with a `chore: ` prefix when it is not a conventional subject) and labels
+// (never human:review, merge-conflict or needs-lead); its body is the original body plus `Supersedes #N`. The original is closed, with a comment linking the v2, only after the v2's
 // CI has started: a check run or workflow run at the v2 head. The v2 is never armed for auto-merge. If none starts in time, the original stays open and
 // the run fails.
 
 const { openPr } = require('../shared/verified-commit.js');
 
 const DROPPED_LABELS = new Set(['human:review', 'merge-conflict', 'needs-lead']);
+// The commit subject the conventional-commit rulesets accept; the title is the v2 commit headline and PR title.
+const CONVENTIONAL = /^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9_-]+\))?!?: .+/;
+
+function v2Title(title) {
+  return CONVENTIONAL.test(title) ? title : `chore: ${title}`;
+}
 
 function v2Body(body, number) {
   const original = (body || '').trimEnd();
@@ -40,7 +46,7 @@ async function publish({ github, context, core, number, timeoutMs = 10 * 60 * 10
   const result = await open({
     github, context, core,
     branch: `${original.head.ref}-v2`,
-    title: original.title,
+    title: v2Title(original.title),
     body: v2Body(original.body, number),
     baseBranch: original.base.ref,
     labels: v2Labels(original.labels),
@@ -70,6 +76,7 @@ module.exports = async ({ github, context, core }) => {
   }
   await publish({ github, context, core, number });
 };
+module.exports.v2Title = v2Title;
 module.exports.v2Body = v2Body;
 module.exports.v2Labels = v2Labels;
 module.exports.waitForCi = waitForCi;
