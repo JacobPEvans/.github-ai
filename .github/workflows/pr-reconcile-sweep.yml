@@ -8,7 +8,7 @@
 # Each owner's job runs on the org's self-hosted runners and logs in to OpenBao
 # with this workflow's OIDC identity, then mints one installation token for that
 # owner, limited to actions (CI-fix dispatch), checks (read), contents, pull
-# requests, issues and statuses. No stored credential is used.
+# requests and statuses, inside the Reconcile step. No stored credential is used.
 
 name: PR Reconcile Sweep
 
@@ -82,25 +82,29 @@ jobs:
           exportToken: false
           outputToken: true
 
-      - name: Mint owner token
-        id: mint
+      # Second call site of reconcile.js beside pr-reconcile-run: it mints the owner token here so the token never leaves this step.
+      - name: Reconcile
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           BAO_ADDR: ${{ steps.bao.outputs.addr }}
           BAO_TOKEN: ${{ steps.login.outputs.vault_token }}
-          OWNER: ${{ matrix.owner }}
-        run: |
-          body=$(jq -cn --arg o "$OWNER" '{org_name: $o, permissions: {actions: "write", checks: "read", contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}')
-          token=$(curl -sSf -X POST -H "X-Vault-Token: $BAO_TOKEN" --data-binary "$body" "$BAO_ADDR/v1/github/token" | jq -er '.data.token')
-          echo "::add-mask::$token"
-          echo "token=$token" >> "$GITHUB_OUTPUT"
-
-      - name: Reconcile
-        uses: ./.ai-workflows/.github/actions/pr-reconcile-run
+          SWEEP_OWNER: ${{ matrix.owner }}
+          RESOLVER_REPO: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
+          CI_FIX_WORKFLOW: ${{ vars.PR_RECONCILE_CI_FIX_WORKFLOW }}
+          CI_FIX_SKIP_CHECKS: ${{ vars.PR_RECONCILE_CI_FIX_SKIP_CHECKS }}
+          MERGE_ENABLED: ${{ vars.PR_RECONCILE_MERGE }}
+          PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
         with:
-          github-token: ${{ steps.mint.outputs.token }}
-          sweep_owner: ${{ matrix.owner }}
-          resolver_repo: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
-          ci_fix_workflow: ${{ vars.PR_RECONCILE_CI_FIX_WORKFLOW }}
-          ci_fix_skip_checks: ${{ vars.PR_RECONCILE_CI_FIX_SKIP_CHECKS }}
-          merge: ${{ vars.PR_RECONCILE_MERGE }}
-          exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
+          script: |
+            const permissions = { actions: 'write', checks: 'read', contents: 'write', pull_requests: 'write', statuses: 'write' };
+            const res = await fetch(`${process.env.BAO_ADDR}/v1/github/token`, {
+              method: 'POST',
+              headers: { 'X-Vault-Token': process.env.BAO_TOKEN },
+              body: JSON.stringify({ org_name: process.env.SWEEP_OWNER, permissions }),
+            });
+            if (!res.ok) throw new Error(`Mint owner token: HTTP ${res.status}`);
+            const token = (await res.json()).data?.token;
+            if (!token) throw new Error('Mint owner token: no token in the response');
+            core.setSecret(token);
+            const run = require(`${process.env.GITHUB_WORKSPACE}/.ai-workflows/.github/scripts/pr-reconcile/reconcile.js`);
+            await run({ github: getOctokit(token), context, core });
