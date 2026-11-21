@@ -31,12 +31,12 @@ test('the workflow-files step calls the stop script from the shared checkout', (
   expect(stop.run.trim()).toBe('bash .ai-workflows/.github/scripts/ci-fix/stop-github-patch.sh');
 });
 
-test('a patch under .github/actions is stopped and fails the step', () => {
-  expect(touched('.github/actions/x/action.yml', 1)).toBe('touched=true');
+test('a patch under .github/actions is held without failing the step', () => {
+  expect(touched('.github/actions/x/action.yml', 0)).toBe('touched=true');
 });
 
-test('a patch under .github/workflows is stopped and fails the step', () => {
-  expect(touched('.github/workflows/ci.yml', 1)).toBe('touched=true');
+test('a patch under .github/workflows is held without failing the step', () => {
+  expect(touched('.github/workflows/ci.yml', 0)).toBe('touched=true');
 });
 
 test('a patch outside .github is not stopped', () => {
