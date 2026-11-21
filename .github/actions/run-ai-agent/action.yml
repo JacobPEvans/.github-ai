@@ -185,7 +185,7 @@ runs:
       with:
         repository: dryvist/ai-assistant-instructions
         # renovate: datasource=github-tags depName=dryvist/ai-assistant-instructions
-        ref: a021ead2c50a483afe42fda3b67905507baa649d  # v1.34.6
+        ref: ad42097acc9117db4365ca9b3ef33b12baf26f1f  # v1.34.7
         sparse-checkout: |
           AGENTS.md
           agentsmd/rules
