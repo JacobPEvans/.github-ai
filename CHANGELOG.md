@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.45.0](https://github.com/JacobPEvans/.github-ai/compare/v2.44.0...v2.45.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **run-ai-agent:** default to OpenHands on the local medium role ([#264](https://github.com/JacobPEvans/.github-ai/issues/264)) ([8f9c8ff](https://github.com/JacobPEvans/.github-ai/commit/8f9c8ff6cd609ccd131e9ea804bc88d448d32984))
+
 ## [2.44.0](https://github.com/JacobPEvans/.github-ai/compare/v2.43.0...v2.44.0) (2026-11-21)
 
 
