@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.48.0](https://github.com/JacobPEvans/.github-ai/compare/v2.47.0...v2.48.0) (2026-11-21)
+
+
+### Features
+
+* **pr-reconcile:** mint the calling repository token through the store OIDC role ([#277](https://github.com/JacobPEvans/.github-ai/issues/277)) ([6543b5a](https://github.com/JacobPEvans/.github-ai/commit/6543b5aa01be1e043fc2c6f7c3803bc6204c5dd4))
+* **pr-reconcile:** mint the calling repository's token through the store's OIDC role ([6543b5a](https://github.com/JacobPEvans/.github-ai/commit/6543b5aa01be1e043fc2c6f7c3803bc6204c5dd4))
+
 ## [2.47.0](https://github.com/JacobPEvans/.github-ai/compare/v2.46.0...v2.47.0) (2026-11-21)
 
 
