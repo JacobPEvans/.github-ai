@@ -124,6 +124,31 @@ describe('reconcile', () => {
     expect(sweep).not.toContain('repository:');
   });
 
+  it('mints the calling repository token through the store when the caller grants OIDC, else the App key', () => {
+    const text = readFileSync('.github/workflows/pr-reconcile.yml', 'utf8');
+    const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
+    const workflow = Bun.YAML.parse(text);
+    const call = workflow.on.workflow_call;
+    const steps = workflow.jobs.reconcile.steps;
+    const step = (name) => steps.find((s) => s.name === name);
+    const permissions = "const permissions = { actions: 'write', checks: 'read', contents: 'write', pull_requests: 'write', statuses: 'write' };";
+
+    expect(call.secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY.required).toBe(false);
+    expect(call.secrets.OPENBAO_ADDR.required).toBe(false);
+    expect(call.inputs.runner_label.default).toBe('ubuntu-24.04');
+    expect(workflow.jobs.reconcile['runs-on']).toBe('${{ inputs.runner_label }}');
+    expect(workflow.permissions).toEqual({ contents: 'read' });
+    expect(step('Find the OpenBao address').run).toContain('[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && [ -z "$SWEEP_OWNER" ]');
+    expect(step('Log in to OpenBao').with).toMatchObject({ role: 'pr-reconcile', jwtGithubAudience: 'openbao', outputToken: true });
+    expect(step('Mint repository token').with.script).toContain(permissions);
+    expect(sweep).toContain(permissions);
+    expect(step('Mint repository token').with.script).toContain('org_name: context.repo.owner, repositories, permissions');
+    expect(step('Mint repository token').with.script).toContain('core.setSecret(token);');
+    for (const name of ['Log in to OpenBao', 'Mint repository token']) expect(step(name).if).toBe("steps.bao.outputs.addr != ''");
+    expect(step('Mint App token').if).toBe("steps.bao.outputs.addr == ''");
+    expect(step('Reconcile').with['github-token']).toBe('${{ steps.bao-token.outputs.token || steps.app-token.outputs.token }}');
+  });
+
   it('calls update-branch at the observed head and records the action once', async () => {
     const gh = github(pr({ mergeable_state: 'behind' }));
     const [event] = await run({ github: gh, context: createMockContext(), core });
