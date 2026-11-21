@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.55.0](https://github.com/JacobPEvans/.github-ai/compare/v2.54.0...v2.55.0) (2026-11-21)
+
+
+### Features
+
+* **ci-fix:** hand off a patch that adds dependency or ignored paths, or touches more than 25 files ([#292](https://github.com/JacobPEvans/.github-ai/issues/292)) ([6393adc](https://github.com/JacobPEvans/.github-ai/commit/6393adc27d8120821081070cd8613a4d91728803))
+
 ## [2.54.0](https://github.com/JacobPEvans/.github-ai/compare/v2.53.0...v2.54.0) (2026-11-21)
 
 
