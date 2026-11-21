@@ -48,7 +48,8 @@ function classifyDeadline({ subtype, gatewayClass = '', handoff = false, seconds
 test('dependency reviews use the cheap capability for opted-in non-semver updates', () => {
   expect(agent.with.claude_model).toContain("contains(fromJSON('[\"digest\",\"pin\",\"pinDigest\",\"lockFileMaintenance\"]')");
   expect(agent.with.claude_model).toContain('vars.GH_ACTION_AI_MODEL_CHEAP');
-  expect(agent.with.claude_model).toContain("(github.event.repository.private && (vars.GH_ACTION_AI_MODEL_REVIEW || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL) || 'review-oss')");
+  expect(agent.with.claude_model).toContain("(github.event.repository.private && (vars.GH_ACTION_AI_MODEL_REVIEW || vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL || 'review-private') || 'review-oss')");
+  expect(agent.with.codex_model).toBe("${{ inputs.model || (github.event.repository.private && (vars.GH_ACTION_AI_CODEX_MODEL || 'review-private') || 'review-oss') }}");
 });
 
 test('dependency review agent turn and output budgets are bounded', () => {
