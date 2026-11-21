@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.47.0](https://github.com/JacobPEvans/.github-ai/compare/v2.46.0...v2.47.0) (2026-11-21)
+
+
+### Features
+
+* **policy-gate:** give the security review the reusable workflows a change calls ([#270](https://github.com/JacobPEvans/.github-ai/issues/270)) ([a741b73](https://github.com/JacobPEvans/.github-ai/commit/a741b7332c5e412891ee405662440125614cee65))
+
 ## [2.46.0](https://github.com/JacobPEvans/.github-ai/compare/v2.45.0...v2.46.0) (2026-11-21)
 
 
