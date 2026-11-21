@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.54.0](https://github.com/JacobPEvans/.github-ai/compare/v2.53.0...v2.54.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **ci-fix:** read the OIDC publisher's commit token from the github/token mount ([#290](https://github.com/JacobPEvans/.github-ai/issues/290)) ([31cc446](https://github.com/JacobPEvans/.github-ai/commit/31cc446b7775c87085b535f83ffd75b82e364d6a))
+
 ## [2.53.0](https://github.com/JacobPEvans/.github-ai/compare/v2.52.0...v2.53.0) (2026-11-21)
 
 
