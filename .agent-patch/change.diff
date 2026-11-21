@@ -1,0 +1,603 @@
+diff --git a/.github/actions/pr-reconcile-run/action.yml b/.github/actions/pr-reconcile-run/action.yml
+index ffbae48..c191f50 100644
+--- a/.github/actions/pr-reconcile-run/action.yml
++++ b/.github/actions/pr-reconcile-run/action.yml
+@@ -1,5 +1,5 @@
+ name: Run PR Reconcile
+-description: Run the PR Reconcile script with a caller-minted token. Exactly one of pr_number, base_ref or sweep_owner is set.
++description: Run the PR Reconcile script with a caller-minted token. Exactly one of pr_number or base_ref is set.
+ inputs:
+   github-token:
+     description: Token limited to contents, pull requests, issues and statuses.
+@@ -12,16 +12,12 @@ inputs:
+     description: Every open pull request on this base in the calling repository.
+     required: false
+     default: ""
+-  sweep_owner:
+-    description: Every open pull request of this owner.
+-    required: false
+-    default: ""
+   resolver_repo:
+     description: owner/repo that receives the pr-conflict repository_dispatch (empty = label only).
+     required: false
+     default: ""
+   exclude_repos:
+-    description: Comma-separated repositories the sweep skips.
++    description: Comma-separated repositories reconcile skips.
+     required: false
+     default: ""
+ runs:
+@@ -33,7 +29,6 @@ runs:
+         ACTION_PATH: ${{ github.action_path }}
+         PR_NUMBER: ${{ inputs.pr_number }}
+         BASE_REF: ${{ inputs.base_ref }}
+-        SWEEP_OWNER: ${{ inputs.sweep_owner }}
+         RESOLVER_REPO: ${{ inputs.resolver_repo }}
+         PR_RECONCILE_EXCLUDE_REPOS: ${{ inputs.exclude_repos }}
+       with:
+diff --git a/.github/scripts/pr-reconcile/reconcile.js b/.github/scripts/pr-reconcile/reconcile.js
+index 57f7869..373af5f 100644
+--- a/.github/scripts/pr-reconcile/reconcile.js
++++ b/.github/scripts/pr-reconcile/reconcile.js
+@@ -1,10 +1,10 @@
+ // pr-reconcile: keep open pull requests mergeable without a model.
+ //
+ // One idempotent reconcile(pr) per pull request. The state comes only from
+-// GitHub API fields. BEHIND gets the update-branch API. DIRTY gets the
+-// merge-conflict label (and needs-lead when workflow files are involved, which
+-// this token cannot write); a resolver is started by repository_dispatch when
+-// RESOLVER_REPO is set. Each decision is logged as one JSON event line.
++// GitHub API fields. DIRTY gets the merge-conflict label (and needs-lead when
++// workflow files are involved, which this token cannot write); a resolver is
++// started by repository_dispatch when RESOLVER_REPO is set. BEHIND is left
++// alone. Each decision is logged as one JSON event line.
+ //
+ // Hold: every reconcile sets the `merge-hold` commit status at the head: failure
+ // while the PR carries the merge-hold label, success otherwise. A ruleset that
+@@ -12,7 +12,7 @@
+ // race a hold, and the PR stays ready and mergeable.
+ //
+ // Modes: PR_NUMBER (one PR in this repo), BASE_REF (every open PR on that base,
+-// for push-to-base), SWEEP_OWNER (every open PR of the owner).
++// for push-to-base).
+ 
+ const CONFLICT_LABEL = 'merge-conflict';
+ const LEAD_LABEL = 'needs-lead';
+@@ -20,8 +20,8 @@ const STATUS_CONTEXT = 'pr-reconcile';
+ const HOLD_CONTEXT = 'merge-hold';
+ const HOLD_LABEL = 'merge-hold';
+ const UNKNOWN_RETRIES = 3;
+-// Unknown-state retries stop after the retry budget; no new PR starts after the run budget, so a large sweep
+-// ends inside the 5-minute job timeout and the next sweep picks up the rest.
++// Unknown-state retries stop after the retry budget; no new PR starts after the run budget, so a long base
++// ends inside the job timeout and the next run picks up the rest.
+ let retryDeadline = Infinity;
+ const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
+ const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
+@@ -39,8 +39,8 @@ function classify(pr) {
+     case 'unknown':
+       return { state: 'unknown', action: 'retry' };
+     case 'behind':
+-      if (promotion) return { state: 'behind', action: 'none' };
+-      return { state: 'behind', action: renovate ? 'renovate-rebase' : 'update-branch' };
++      if (promotion || !renovate) return { state: 'behind', action: 'none' };
++      return { state: 'behind', action: 'renovate-rebase' };
+     case 'dirty':
+       if (renovate) return { state: 'dirty', action: 'renovate-rebase' };
+       if (promotion) return { state: 'dirty', action: 'label-lead' };
+@@ -97,9 +97,6 @@ async function setHold(github, owner, repo, pr, statuses) {
+ async function act(github, owner, repo, pr, decision) {
+   const number = pr.number;
+   switch (decision.action) {
+-    case 'update-branch':
+-      await github.rest.pulls.updateBranch({ owner, repo, pull_number: number, expected_head_sha: pr.head.sha });
+-      return 'updated';
+     case 'renovate-rebase':
+       if (!(pr.body || '').includes(RENOVATE_UNCHECKED)) return 'no-rebase-box';
+       await github.rest.pulls.update({ owner, repo, pull_number: number, body: pr.body.replace(RENOVATE_UNCHECKED, RENOVATE_CHECKED) });
+@@ -166,8 +163,6 @@ async function reconcile({ github, core, owner, repo, number }) {
+   return event;
+ }
+ 
+-const SEARCH_CAP = 1000;
+-
+ function excludedRepositories() {
+   return new Set((process.env.PR_RECONCILE_EXCLUDE_REPOS || '')
+     .split(',')
+@@ -179,27 +174,13 @@ function isExcludedRepository(exclusions, owner, repo) {
+   return exclusions.has(`${owner}/${repo}`.toLowerCase());
+ }
+ 
+-async function targets({ github, context, core }) {
++async function targets({ github, context }) {
+   const { owner, repo } = context.repo;
+   if (process.env.PR_NUMBER) return [{ owner, repo, number: Number(process.env.PR_NUMBER) }];
+   if (process.env.BASE_REF) {
+     const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', base: process.env.BASE_REF, per_page: 100 });
+     return prs.map((pr) => ({ owner, repo, number: pr.number }));
+   }
+-  if (process.env.SWEEP_OWNER) {
+-    const sweepOwner = process.env.SWEEP_OWNER;
+-    if (!/^[A-Za-z0-9-]+$/.test(sweepOwner)) throw new Error(`invalid SWEEP_OWNER: ${sweepOwner}`);
+-    // user: matches repositories of both user accounts and organizations; org: matches organizations only.
+-    const items = await github.paginate(github.rest.search.issuesAndPullRequests, {
+-      q: `is:pr is:open archived:false user:${sweepOwner}`, per_page: 100,
+-    });
+-    // Search returns at most 1000 results; the rest wait for a later sweep.
+-    if (items.length >= SEARCH_CAP) core.warning(`sweep of ${sweepOwner} truncated at ${SEARCH_CAP} pull requests`);
+-    return items.map((item) => {
+-      const [itemOwner, itemRepo] = item.repository_url.split('/').slice(-2);
+-      return { owner: itemOwner, repo: itemRepo, number: item.number };
+-    });
+-  }
+   return [];
+ }
+ 
+@@ -216,19 +197,16 @@ module.exports = async function run({ github, context, core }) {
+     core.setOutput('events', JSON.stringify(events));
+     return events;
+   }
+-  const all = await targets({ github, context, core });
+-  const selected = all.filter((target) => !isExcludedRepository(exclusions, target.owner, target.repo));
+-  const skipped = all.length - selected.length;
+-  if (skipped > 0) core.info(`skipped ${skipped} pull requests in excluded repositories`);
+-  for (const [index, target] of selected.entries()) {
++  const all = await targets({ github, context });
++  for (const [index, target] of all.entries()) {
+     if (Date.now() - started > module.exports.runBudgetMs) {
+-      core.warning(`run budget reached; ${selected.length - index} pull requests deferred to the next sweep`);
++      core.warning(`run budget reached; ${all.length - index} pull requests deferred to the next run`);
+       break;
+     }
+     try {
+       events.push(await reconcile({ github, core, ...target }));
+     } catch (error) {
+-      // One PR that vanished or failed to read must not stop the rest of the sweep.
++      // One PR that vanished or failed to read must not stop the rest of the run.
+       const event = {
+         event: 'pr_reconcile', repository: `${target.owner}/${target.repo}`, pr: target.number,
+         action: 'none', outcome: `error:${error.status || 'unknown'}`,
+diff --git a/.github/workflows/pr-reconcile-sweep.yml b/.github/workflows/pr-reconcile-sweep.yml
+deleted file mode 100644
+index 19315a8..0000000
+--- a/.github/workflows/pr-reconcile-sweep.yml
++++ /dev/null
+@@ -1,104 +0,0 @@
+-# PR Reconcile Sweep
+-#
+-# Level-triggered guarantee for PR Reconcile: every five minutes at minutes
+-# 3, 8, 13 and so on, every open pull request of each listed owner is
+-# reconciled. Owners come from the PR_RECONCILE_OWNERS repository variable
+-# (comma-separated); nothing runs while it is empty.
+-#
+-# Each owner's job runs in the pr-reconcile runner group and logs in to OpenBao
+-# with this workflow's OIDC identity, then mints one installation token for that
+-# owner, limited to contents, pull requests, issues and statuses. No stored
+-# credential is used.
+-
+-name: PR Reconcile Sweep
+-
+-on:
+-  schedule:
+-    - cron: "3-58/5 * * * *"
+-  workflow_dispatch:
+-
+-permissions:
+-  contents: read
+-  id-token: write
+-
+-jobs:
+-  owners:
+-    name: List owners
+-    runs-on: ubuntu-24.04
+-    permissions: {}
+-    timeout-minutes: 2
+-    outputs:
+-      owners: ${{ steps.list.outputs.owners }}
+-    steps:
+-      - name: List owners
+-        id: list
+-        env:
+-          OWNERS: ${{ vars.PR_RECONCILE_OWNERS }}
+-        run: echo "owners=$(jq -cn --arg o "$OWNERS" '$o | split(",") | map(gsub("\\s"; "")) | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+-
+-  sweep:
+-    name: Sweep ${{ matrix.owner }}
+-    needs: owners
+-    if: needs.owners.outputs.owners != '[]'
+-    runs-on:
+-      group: pr-reconcile
+-    permissions:
+-      contents: read
+-      id-token: write
+-    timeout-minutes: 5
+-    concurrency:
+-      group: pr-reconcile-sweep-${{ matrix.owner }}
+-      cancel-in-progress: false
+-    strategy:
+-      fail-fast: false
+-      matrix:
+-        owner: ${{ fromJSON(needs.owners.outputs.owners) }}
+-    steps:
+-      - name: Checkout reconcile action and script
+-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+-        with:
+-          sparse-checkout: |
+-            .github/actions/pr-reconcile-run
+-            .github/scripts/pr-reconcile
+-          sparse-checkout-cone-mode: false
+-          path: .ai-workflows
+-          persist-credentials: false
+-
+-      - name: Resolve OpenBao address
+-        id: bao
+-        run: |
+-          test -n "${OPENBAO_ADDR:-}" || { echo "::error::OPENBAO_ADDR is not set on this runner" >&2; exit 1; }
+-          echo "addr=$OPENBAO_ADDR" >> "$GITHUB_OUTPUT"
+-
+-      - name: Log in to OpenBao
+-        id: login
+-        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+-        with:
+-          url: ${{ steps.bao.outputs.addr }}
+-          method: jwt
+-          path: github-actions
+-          role: pr-reconcile-sweep
+-          jwtGithubAudience: openbao
+-          exportEnv: false
+-          exportToken: false
+-          outputToken: true
+-
+-      - name: Mint owner token
+-        id: mint
+-        env:
+-          BAO_ADDR: ${{ steps.bao.outputs.addr }}
+-          BAO_TOKEN: ${{ steps.login.outputs.vault_token }}
+-          OWNER: ${{ matrix.owner }}
+-        run: |
+-          body=$(jq -cn --arg o "$OWNER" '{org_name: $o, permissions: {contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}')
+-          token=$(curl -sSf -X POST -H "X-Vault-Token: $BAO_TOKEN" --data-binary "$body" "$BAO_ADDR/v1/github/token" | jq -er '.data.token')
+-          echo "::add-mask::$token"
+-          echo "token=$token" >> "$GITHUB_OUTPUT"
+-
+-      - name: Reconcile
+-        uses: ./.ai-workflows/.github/actions/pr-reconcile-run
+-        with:
+-          github-token: ${{ steps.mint.outputs.token }}
+-          sweep_owner: ${{ matrix.owner }}
+-          resolver_repo: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
+-          exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
+diff --git a/.github/workflows/pr-reconcile.yml b/.github/workflows/pr-reconcile.yml
+index 14017ba..14424fe 100644
+--- a/.github/workflows/pr-reconcile.yml
++++ b/.github/workflows/pr-reconcile.yml
+@@ -1,17 +1,18 @@
+ # PR Reconcile
+ #
+ # Reusable workflow that keeps open pull requests mergeable without a model.
+-# BEHIND: update-branch. DIRTY: merge-conflict label, needs-lead when workflow
+-# files are involved, and a repository_dispatch to resolver_repo when set.
+-# Every reconcile also sets the merge-hold commit status at the head.
++# DIRTY: merge-conflict label, needs-lead when workflow files are involved,
++# and a repository_dispatch to resolver_repo when set. BEHIND is left alone:
++# branches are not updated automatically. Every reconcile also sets the
++# merge-hold commit status at the head.
+ #
+ # Modes (exactly one): pr_number (one PR), base_ref (every open PR on a base,
+-# for push-to-base), sweep_owner (every open PR of an owner, for the schedule).
++# for push-to-base), sweep_owner (accepted so v1 callers still validate; it
++# does nothing).
+ #
+ # Token: an App token limited to contents, pull requests, issues and statuses,
+-# scoped to the calling repository except in sweep mode. It cannot write
+-# workflow files. Runs on GitHub-hosted runners only. The scheduled sweep of
+-# this repository runs in pr-reconcile-sweep.yml instead.
++# scoped to the calling repository. It cannot write workflow files. Runs on
++# GitHub-hosted runners only.
+ 
+ name: PR Reconcile
+ 
+@@ -28,7 +29,7 @@ on:
+         type: string
+         default: ""
+       resolver_repo:
+-        description: "owner/repo that receives the pr-conflict repository_dispatch (empty = label only); must have the same owner as the swept or calling repository"
++        description: "owner/repo that receives the pr-conflict repository_dispatch (empty = label only); must have the same owner as the calling repository"
+         type: string
+         default: ""
+     secrets:
+@@ -62,20 +63,16 @@ jobs:
+           path: .ai-workflows
+           persist-credentials: false
+ 
+-      # Single-PR and base modes get a token for the calling repository (plus the resolver
+-      # repository when it has the same owner); a sweep covers the whole owner.
++      # The token covers the calling repository (plus the resolver repository
++      # when it has the same owner).
+       - name: Token scope
+         id: scope
+         env:
+-          SWEEP_OWNER: ${{ inputs.sweep_owner }}
+           RESOLVER_REPO: ${{ inputs.resolver_repo }}
+         run: |
+-          repos=""
+-          if [ -z "$SWEEP_OWNER" ]; then
+-            repos="${GITHUB_REPOSITORY#*/}"
+-            if [ "${RESOLVER_REPO%%/*}" = "$GITHUB_REPOSITORY_OWNER" ] && [ "${RESOLVER_REPO#*/}" != "$repos" ]; then
+-              repos="$repos,${RESOLVER_REPO#*/}"
+-            fi
++          repos="${GITHUB_REPOSITORY#*/}"
++          if [ "${RESOLVER_REPO%%/*}" = "$GITHUB_REPOSITORY_OWNER" ] && [ "${RESOLVER_REPO#*/}" != "$repos" ]; then
++            repos="$repos,${RESOLVER_REPO#*/}"
+           fi
+           echo "repositories=$repos" >> "$GITHUB_OUTPUT"
+ 
+@@ -85,7 +82,7 @@ jobs:
+         with:
+           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
+           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
+-          owner: ${{ inputs.sweep_owner || github.repository_owner }}
++          owner: ${{ github.repository_owner }}
+           repositories: ${{ steps.scope.outputs.repositories }}
+           permission-contents: write
+           permission-pull-requests: write
+@@ -98,6 +95,5 @@ jobs:
+           github-token: ${{ steps.app-token.outputs.token }}
+           pr_number: ${{ inputs.pr_number }}
+           base_ref: ${{ inputs.base_ref }}
+-          sweep_owner: ${{ inputs.sweep_owner }}
+           resolver_repo: ${{ inputs.resolver_repo }}
+           exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
+diff --git a/tests/pr-reconcile.test.js b/tests/pr-reconcile.test.js
+index 3735b82..7f1ced2 100644
+--- a/tests/pr-reconcile.test.js
++++ b/tests/pr-reconcile.test.js
+@@ -22,7 +22,6 @@ function pr(overrides = {}) {
+ function github(prData, { statuses = [], files = [] } = {}) {
+   const gh = createMockGithub();
+   gh.rest.pulls.get.mockResolvedValue({ data: prData });
+-  gh.rest.pulls.updateBranch = mock().mockResolvedValue({});
+   gh.rest.pulls.update = mock().mockResolvedValue({});
+   gh.rest.pulls.listFiles = mock();
+   gh.rest.issues.removeLabel = mock().mockResolvedValue({});
+@@ -35,8 +34,11 @@ function github(prData, { statuses = [], files = [] } = {}) {
+ }
+ 
+ describe('classify', () => {
+-  it('updates a branch that is behind', () => {
+-    expect(classify(pr({ mergeable_state: 'behind' }))).toEqual({ state: 'behind', action: 'update-branch' });
++  it('leaves a branch that is behind alone', () => {
++    expect(classify(pr({ mergeable_state: 'behind' }))).toEqual({ state: 'behind', action: 'none' });
++  });
++  it('asks a behind Renovate PR to rebase', () => {
++    expect(classify(pr({ mergeable_state: 'behind', user: { login: 'renovate[bot]' } })).action).toBe('renovate-rebase');
+   });
+   it('labels a conflicted branch', () => {
+     expect(classify(pr({ mergeable_state: 'dirty' })).action).toBe('label-conflict');
+@@ -68,53 +70,43 @@ describe('reconcile', () => {
+     delete process.env.RESOLVER_REPO;
+     delete process.env.PR_RECONCILE_EXCLUDE_REPOS;
+     delete process.env.BASE_REF;
+-    delete process.env.SWEEP_OWNER;
+     process.env.PR_NUMBER = '7';
+   });
+ 
++  it('keeps branch updates and the sweep out of the reconcile files', () => {
++    const workflow = readFileSync('.github/workflows/pr-reconcile.yml', 'utf8');
++    const action = readFileSync('.github/actions/pr-reconcile-run/action.yml', 'utf8');
++    const script = readFileSync('.github/scripts/pr-reconcile/reconcile.js', 'utf8');
++
++    expect(workflow).not.toContain('update-branch');
++    expect(action).not.toContain('sweep_owner');
++    expect(script).not.toContain('update-branch');
++    expect(script).not.toContain('updateBranch');
++    expect(script).not.toContain('SWEEP_OWNER');
++  });
++
+   it('passes the exclusion secret only to the reconcile step', () => {
+     const workflow = readFileSync('.github/workflows/pr-reconcile.yml', 'utf8');
+-    const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
+     const action = readFileSync('.github/actions/pr-reconcile-run/action.yml', 'utf8');
+     const line = '          exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}';
+ 
+     expect(workflow).toContain('      PR_RECONCILE_EXCLUDE_REPOS:\n        required: false');
+     expect(workflow.split(line).length - 1).toBe(1);
+     expect(workflow.indexOf(line)).toBeGreaterThan(workflow.indexOf('      - name: Reconcile'));
+-    expect(sweep.split(line).length - 1).toBe(1);
+-    expect(sweep.indexOf(line)).toBeGreaterThan(sweep.indexOf('      - name: Reconcile'));
+     expect(action.match(/PR_RECONCILE_EXCLUDE_REPOS:/g)).toEqual(['PR_RECONCILE_EXCLUDE_REPOS:']);
+   });
+ 
+-  it('runs the sweep on its runner group with an OIDC-minted owner token and no stored App key', () => {
+-    const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
+-
+-    expect(sweep).toContain('\npermissions:\n  contents: read\n  id-token: write\n\njobs:');
+-    expect(sweep).toContain('    runs-on: ubuntu-24.04\n    permissions: {}\n');
+-    expect(sweep).toContain('    runs-on:\n      group: pr-reconcile\n');
+-    expect(sweep).toContain('    permissions:\n      contents: read\n      id-token: write\n');
+-    expect(sweep).toContain('      fail-fast: false\n');
+-    expect(sweep).toContain('          role: pr-reconcile-sweep\n');
+-    expect(sweep).toContain('"$BAO_ADDR/v1/github/token"');
+-    expect(sweep).toContain('{org_name: $o, permissions: {contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}');
+-    expect(sweep).toContain('echo "::add-mask::$token"');
+-    expect(sweep).not.toContain('GH_APP_CLAUDE_BOT_PRIVATE_KEY');
+-    expect(sweep).not.toContain('pr-reconcile.yml');
+-    expect(sweep).not.toContain('repository:');
+-  });
+-
+-  it('calls update-branch at the observed head and records the action once', async () => {
++  it('leaves a behind pull request unupdated and records no action', async () => {
+     const gh = github(pr({ mergeable_state: 'behind' }));
+     const [event] = await run({ github: gh, context: createMockContext(), core });
+-    expect(gh.rest.pulls.updateBranch).toHaveBeenCalledWith({ owner: 'test-owner', repo: 'test-repo', pull_number: 7, expected_head_sha: 'head1' });
+-    expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0])).toContainEqual(expect.objectContaining({ sha: 'head1', context: 'pr-reconcile', description: 'update-branch' }));
+-    expect(event).toMatchObject({ pr: 7, state: 'behind', action: 'update-branch', outcome: 'updated' });
++    expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0].context)).toEqual(['merge-hold']);
++    expect(event).toMatchObject({ pr: 7, state: 'behind', action: 'none', outcome: 'noop' });
+   });
+ 
+   it('does not repeat an action already recorded at the same head', async () => {
+-    const gh = github(pr({ mergeable_state: 'behind' }), { statuses: [{ context: 'pr-reconcile', description: 'update-branch' }] });
++    const gh = github(pr({ mergeable_state: 'dirty' }), { statuses: [{ context: 'pr-reconcile', description: 'label-conflict' }] });
+     const [event] = await run({ github: gh, context: createMockContext(), core });
+-    expect(gh.rest.pulls.updateBranch).not.toHaveBeenCalled();
++    expect(gh.rest.issues.addLabels).not.toHaveBeenCalled();
+     expect(event.outcome).toBe('already-done');
+   });
+ 
+@@ -140,9 +132,9 @@ describe('reconcile', () => {
+     const gh = github(pr());
+     gh.rest.pulls.get
+       .mockResolvedValueOnce({ data: pr({ mergeable_state: 'unknown' }) })
+-      .mockResolvedValueOnce({ data: pr({ mergeable_state: 'behind' }) });
++      .mockResolvedValueOnce({ data: pr({ mergeable_state: 'dirty' }) });
+     const [event] = await run({ github: gh, context: createMockContext(), core });
+-    expect(event.action).toBe('update-branch');
++    expect(event.action).toBe('label-conflict');
+   });
+ 
+   it('logs one JSON event per pull request', async () => {
+@@ -160,39 +152,6 @@ describe('reconcile', () => {
+     expect(events.length).toBe(2);
+   });
+ 
+-  it('skips excluded repositories during a sweep without logging their names', async () => {
+-    delete process.env.PR_NUMBER;
+-    process.env.SWEEP_OWNER = 'example-org';
+-    process.env.PR_RECONCILE_EXCLUDE_REPOS = ' EXAMPLE-ORG / HIDDEN-REPO ,  ';
+-    const gh = github(pr({ mergeable_state: 'behind' }));
+-    gh.paginate.mockResolvedValueOnce([
+-      { number: 7, repository_url: 'https://api.github.com/repos/example-org/hidden-repo' },
+-      { number: 8, repository_url: 'https://api.github.com/repos/example-org/public-repo' },
+-    ]);
+-
+-    const events = await run({ github: gh, context: createMockContext(), core });
+-    const apiCalls = [
+-      ...gh.rest.pulls.get.mock.calls,
+-      ...gh.rest.pulls.updateBranch.mock.calls,
+-      ...gh.rest.pulls.update.mock.calls,
+-      ...gh.rest.pulls.listFiles.mock.calls,
+-      ...gh.rest.issues.addLabels.mock.calls,
+-      ...gh.rest.issues.removeLabel.mock.calls,
+-      ...gh.rest.repos.getCombinedStatusForRef.mock.calls,
+-      ...gh.rest.repos.createCommitStatus.mock.calls,
+-      ...gh.rest.repos.createDispatchEvent.mock.calls,
+-    ];
+-    const logs = JSON.stringify({ infos: core.infos, warnings: core.warnings, events, output: core.getOutput('events') });
+-
+-    expect(gh.rest.pulls.get).toHaveBeenCalledTimes(1);
+-    expect(gh.rest.pulls.get.mock.calls[0][0]).toMatchObject({ owner: 'example-org', repo: 'public-repo', pull_number: 8 });
+-    expect(apiCalls.every(([args]) => args.owner !== 'example-org' || args.repo !== 'hidden-repo')).toBe(true);
+-    expect(gh.paginate.mock.calls.map(([method]) => method)).toEqual([gh.rest.search.issuesAndPullRequests]);
+-    expect(events).toHaveLength(1);
+-    expect(logs).not.toContain('example-org/hidden-repo');
+-    expect(core.infos).toContain('skipped 1 pull requests in excluded repositories');
+-  });
+-
+   it('skips excluded repositories in base mode before reading individual PRs', async () => {
+     delete process.env.PR_NUMBER;
+     process.env.BASE_REF = 'develop';
+@@ -219,7 +178,6 @@ describe('reconcile', () => {
+ 
+     expect(events).toEqual([]);
+     expect(gh.rest.pulls.get).not.toHaveBeenCalled();
+-    expect(gh.rest.pulls.updateBranch).not.toHaveBeenCalled();
+     expect(gh.rest.repos.getCombinedStatusForRef).not.toHaveBeenCalled();
+     expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
+     expect(JSON.stringify({ infos: core.infos, warnings: core.warnings, output: core.getOutput('events') })).not.toContain('test-owner/test-repo');
+@@ -228,30 +186,30 @@ describe('reconcile', () => {
+ 
+   it('keeps the existing behavior when the exclusion list is empty', async () => {
+     process.env.PR_RECONCILE_EXCLUDE_REPOS = ' ,  ';
+-    const gh = github(pr({ mergeable_state: 'behind' }));
++    const gh = github(pr({ mergeable_state: 'dirty' }));
+ 
+     const [event] = await run({ github: gh, context: createMockContext(), core });
+ 
+     expect(gh.rest.pulls.get).toHaveBeenCalledTimes(1);
+-    expect(gh.rest.pulls.updateBranch).toHaveBeenCalledTimes(1);
+-    expect(event).toMatchObject({ pr: 7, action: 'update-branch', outcome: 'updated' });
++    expect(gh.rest.issues.addLabels).toHaveBeenCalledTimes(1);
++    expect(event).toMatchObject({ pr: 7, action: 'label-conflict', outcome: 'labelled' });
+     expect(core.infos.some((message) => message.includes('skipped'))).toBe(false);
+   });
+ 
+   it('records an API error as the outcome instead of throwing', async () => {
+-    const gh = github(pr({ mergeable_state: 'behind' }));
+-    gh.rest.pulls.updateBranch.mockRejectedValue(Object.assign(new Error('x'), { status: 422 }));
++    const gh = github(pr({ mergeable_state: 'dirty' }));
++    gh.rest.issues.addLabels.mockRejectedValue(Object.assign(new Error('x'), { status: 422 }));
+     const [event] = await run({ github: gh, context: createMockContext(), core });
+     expect(event.outcome).toBe('error:422');
+     expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0].context)).not.toContain('pr-reconcile');
+   });
+ 
+   it('sets merge-hold to failure on a held PR and keeps reconciling it', async () => {
+-    const gh = github(pr({ mergeable_state: 'behind', labels: [{ name: 'merge-hold' }] }));
++    const gh = github(pr({ mergeable_state: 'dirty', labels: [{ name: 'merge-hold' }] }));
+     const [event] = await run({ github: gh, context: createMockContext(), core });
+     expect(gh.rest.repos.createCommitStatus.mock.calls[0][0]).toMatchObject({ context: 'merge-hold', state: 'failure', sha: 'head1' });
+-    expect(gh.rest.pulls.updateBranch).toHaveBeenCalled();
+-    expect(event).toMatchObject({ held: true, outcome: 'updated' });
++    expect(gh.rest.issues.addLabels).toHaveBeenCalled();
++    expect(event).toMatchObject({ held: true, outcome: 'labelled' });
+   });
+ 
+   it('sets merge-hold to success once, then leaves an unchanged status alone', async () => {
+@@ -283,33 +241,15 @@ describe('reconcile', () => {
+     expect(gh.rest.issues.removeLabel.mock.calls.map((c) => c[0].name)).toEqual(['merge-conflict', 'needs-lead']);
+   });
+ 
+-  it('keeps sweeping when one PR fails to read', async () => {
++  it('keeps reconciling when one PR fails to read', async () => {
+     delete process.env.PR_NUMBER;
+-    process.env.SWEEP_OWNER = 'test-owner';
++    process.env.BASE_REF = 'develop';
+     const gh = github(pr());
+-    gh.paginate.mockResolvedValueOnce([
+-      { number: 7, repository_url: 'https://api.github.com/repos/test-owner/a' },
+-      { number: 8, repository_url: 'https://api.github.com/repos/test-owner/b' },
+-    ]);
++    gh.paginate.mockResolvedValueOnce([{ number: 7 }, { number: 8 }]);
+     gh.rest.pulls.get.mockRejectedValueOnce(Object.assign(new Error('gone'), { status: 404 }));
+     const events = await run({ github: gh, context: createMockContext(), core });
+     expect(events.map((e) => e.outcome)).toEqual(['error:404', 'noop']);
+-    expect(gh.paginate.mock.calls[0][1].q).toBe('is:pr is:open archived:false user:test-owner');
+-  });
+-
+-  it('refuses a sweep owner that is not a plain login', async () => {
+-    delete process.env.PR_NUMBER;
+-    process.env.SWEEP_OWNER = 'test-owner is:closed';
+-    await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid SWEEP_OWNER');
+-  });
+-
+-  it('warns when a sweep reaches the search cap', async () => {
+-    delete process.env.PR_NUMBER;
+-    process.env.SWEEP_OWNER = 'test-owner';
+-    const gh = github(pr());
+-    gh.paginate.mockResolvedValueOnce(Array.from({ length: 1000 }, () => ({ number: 7, repository_url: 'https://api.github.com/repos/test-owner/a' })));
+-    await run({ github: gh, context: createMockContext(), core });
+-    expect(core.warnings.some((w) => w.includes('truncated at 1000'))).toBe(true);
++    expect(gh.paginate.mock.calls[0][1].base).toBe('develop');
+   });
+ 
+   it('stops unknown-state retries once the retry budget is spent', async () => {
+@@ -320,15 +260,12 @@ describe('reconcile', () => {
+     expect(event.outcome).toBe('still-unknown');
+   });
+ 
+-  it('defers the rest of a sweep once the run budget is spent', async () => {
++  it('defers the rest of the run once the run budget is spent', async () => {
+     run.runBudgetMs = -1;
+     delete process.env.PR_NUMBER;
+-    process.env.SWEEP_OWNER = 'test-owner';
++    process.env.BASE_REF = 'develop';
+     const gh = github(pr());
+-    gh.paginate.mockResolvedValueOnce([
+-      { number: 7, repository_url: 'https://api.github.com/repos/test-owner/a' },
+-      { number: 8, repository_url: 'https://api.github.com/repos/test-owner/b' },
+-    ]);
++    gh.paginate.mockResolvedValueOnce([{ number: 7 }, { number: 8 }]);
+     const events = await run({ github: gh, context: createMockContext(), core });
+     expect(events).toEqual([]);
+     expect(core.warnings.some((w) => w.includes('2 pull requests deferred'))).toBe(true);
