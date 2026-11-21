@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.40.0](https://github.com/JacobPEvans/.github-ai/compare/v2.39.0...v2.40.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** retry an unpublished conflict fix once per head after 45 minutes ([#248](https://github.com/JacobPEvans/.github-ai/issues/248)) ([6dac9c2](https://github.com/JacobPEvans/.github-ai/commit/6dac9c2d3b8dd8445882fe9b76cfa609ccff61bb))
+
 ## [2.39.0](https://github.com/JacobPEvans/.github-ai/compare/v2.38.0...v2.39.0) (2026-11-20)
 
 
