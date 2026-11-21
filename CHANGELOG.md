@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.56.0](https://github.com/JacobPEvans/.github-ai/compare/v2.55.0...v2.56.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **dogfood:** grant actions: read to the review responder caller ([#294](https://github.com/JacobPEvans/.github-ai/issues/294)) ([4f00913](https://github.com/JacobPEvans/.github-ai/commit/4f009133c469d02dcbb8302706a01b3d6b733c18))
+
 ## [2.55.0](https://github.com/JacobPEvans/.github-ai/compare/v2.54.0...v2.55.0) (2026-11-21)
 
 
