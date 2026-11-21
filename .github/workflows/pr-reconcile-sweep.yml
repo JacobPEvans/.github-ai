@@ -24,7 +24,7 @@ permissions:
 jobs:
   owners:
     name: List owners
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions: {}
     timeout-minutes: 2
     outputs:
