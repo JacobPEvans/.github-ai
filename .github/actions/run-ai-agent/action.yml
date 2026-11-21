@@ -7,21 +7,25 @@ description: >-
 
 inputs:
   agent:
-    description: AI agent to run. Supported values are claude, codex and openhands.
+    description: >-
+      AI agent to run. Supported values are claude, codex and openhands. The
+      default, openhands, runs on the router's local medium role.
     required: false
-    default: claude
+    default: openhands
   prompt:
     description: Rendered prompt content sent to the selected agent.
     required: true
   claude_model:
-    description: Optional Claude model override. An empty value uses the provider default.
+    description: >-
+      Optional Claude model override. An empty value uses the router's local
+      medium role, never a provider default.
     required: false
     default: ""
   codex_model:
     description: >-
-      Optional Codex role override. An empty value uses claude_model: a
-      router role is provider-neutral, and the provider default would be a
-      vendor id the router does not serve.
+      Optional Codex role override. An empty value uses claude_model, then the
+      local medium role: a router role is provider-neutral, and the provider
+      default would be a vendor id the router does not serve.
     required: false
     default: ""
   model:
@@ -63,7 +67,9 @@ inputs:
     required: false
     default: ""
   openhands_model:
-    description: Router role alias OpenHands requests. Required when agent is openhands.
+    description: >-
+      Router role alias OpenHands requests. An empty value uses claude_model,
+      then the local medium role.
     required: false
     default: ""
   openhands_version:
@@ -174,6 +180,7 @@ runs:
         BASE_URL: ${{ inputs.base_url }}
         CLAUDE_ARGS: ${{ inputs.claude_args }}
         CLAUDE_MODEL: ${{ inputs.claude_model || inputs.model }}
+        CODEX_MODEL: ${{ inputs.codex_model }}
         OPENHANDS_MODEL: ${{ inputs.openhands_model }}
         PERMISSION_PROFILE: ${{ inputs.permission_profile }}
       run: '"$GITHUB_ACTION_PATH/prepare.sh" validate'
@@ -211,7 +218,7 @@ runs:
       uses: ./.ai-workflows/.github/actions/run-ai-agent/openhands
       with:
         prompt: ${{ inputs.prompt }}
-        model: ${{ inputs.openhands_model }}
+        model: ${{ steps.prepare.outputs.openhands-model }}
         base_url: ${{ inputs.base_url }}
         api_key: ${{ inputs.api_key }}
         version: ${{ inputs.openhands_version }}
@@ -249,7 +256,7 @@ runs:
         responses-api-endpoint: ${{ steps.prepare.outputs.responses-endpoint }}
         working-directory: ${{ inputs.working_directory }}
         permission-profile: ${{ steps.prepare.outputs.permission-profile }}
-        model: ${{ inputs.codex_model || inputs.claude_model || inputs.model }}
+        model: ${{ steps.prepare.outputs.codex-model }}
         effort: ${{ inputs.openai_effort || inputs.effort }}
         codex-version: ${{ inputs.codex_version }}
         codex-args: ${{ inputs.codex_args }}

@@ -55,8 +55,19 @@ describe('run-ai-agent prepare validation', () => {
     expect(result.output).toContain('effective-agent=openhands');
   });
 
-  it('rejects OpenHands without a model, and an unknown agent', () => {
-    expect(runValidate(0, { AGENT: 'openhands', OPENHANDS_MODEL: '' }).status).toBe(1);
+  it('gives every agent the local medium role when no model is set, and rejects an unknown agent', () => {
+    const openhands = runValidate(0, { AGENT: 'openhands', OPENHANDS_MODEL: '' });
+    expect(openhands.status).toBe(0);
+    expect(openhands.output).toContain('openhands-model=medium\n');
+    expect(openhands.output).toContain('codex-model=medium\n');
+    expect(openhands.output).toContain('claude-args=--model medium\n');
+
+    const role = runValidate(0, { AGENT: 'openhands', OPENHANDS_MODEL: '', CLAUDE_MODEL: 'large' });
+    expect(role.output).toContain('openhands-model=large\n');
+    expect(role.output).toContain('codex-model=large\n');
+    expect(runValidate(0, { AGENT: 'openhands', OPENHANDS_MODEL: 'small' }).output).toContain('openhands-model=small\n');
+    expect(runValidate(0, { CODEX_MODEL: 'review' }).output).toContain('codex-model=review\n');
+
     const unknown = runValidate(0, { AGENT: 'other' });
     expect(unknown.status).toBe(1);
     expect(unknown.stdout).toContain('agent must be claude, codex or openhands');
@@ -75,7 +86,20 @@ describe('run-ai-agent prepare validation', () => {
       expect(block.split(/\n    - name:/)[0]).not.toContain('${{');
     }
     expect(ciFix).toContain("if: inputs.agent != '' && inputs.agent != 'claude' && inputs.local_only");
-    expect(ciFix).toContain("agent: ${{ inputs.agent || (inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude') }}");
+    expect(ciFix).toContain("agent: ${{ inputs.agent || (inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'openhands') }}");
+    expect(action).toContain('model: ${{ steps.prepare.outputs.openhands-model }}');
+    expect(action).toContain('model: ${{ steps.prepare.outputs.codex-model }}');
+  });
+
+  it('defaults to OpenHands when the caller and the org variable are silent', () => {
+    const workflows = join(import.meta.dir, '../.github/workflows');
+    const action = Bun.YAML.parse(readFileSync(join(import.meta.dir, '../.github/actions/run-ai-agent/action.yml'), 'utf8'));
+    expect(action.inputs.agent.default).toBe('openhands');
+    for (const name of ['cc-ci-fix', 'cc-ci-fix-oidc', 'cc-issue-resolver', 'cc-pr-review-responder']) {
+      const text = readFileSync(join(workflows, `${name}.yml`), 'utf8');
+      expect(text).toContain("vars.GH_ACTION_AI_AGENT || 'openhands'");
+      expect(text).not.toContain("vars.GH_ACTION_AI_AGENT || 'claude'");
+    }
   });
 
   it('stops OpenHands at its time limit with a message, and passes its own exit code through', () => {
