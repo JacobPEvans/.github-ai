@@ -71,7 +71,7 @@ jobs:
   triage:
     needs: gate
     if: needs.gate.outputs.trusted == 'true'
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ startsWith(inputs.runner_label || 'ubuntu-24.04', 'ubuntu-') && (inputs.runner_label || 'ubuntu-24.04') || 'review' }}
     permissions:
       contents: read
       issues: read

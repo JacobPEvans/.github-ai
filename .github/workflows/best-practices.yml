@@ -92,7 +92,7 @@ jobs:
     name: Audit and recommend
     needs: [check-recent-activity, check-daily-limit]
     if: needs.check-recent-activity.outputs.should_run == 'true' && needs.check-daily-limit.outputs.should_run == 'true'
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ startsWith(inputs.runner_label || 'ubuntu-24.04', 'ubuntu-') && (inputs.runner_label || 'ubuntu-24.04') || 'review' }}
     permissions:
       contents: read
       issues: read
