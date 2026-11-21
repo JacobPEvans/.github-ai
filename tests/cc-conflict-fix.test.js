@@ -171,7 +171,7 @@ describe('publish', () => {
   }
   const opener = () => mock().mockResolvedValue({ opened: true, pr: { number: 9, head: { sha: 'v2sha' } } });
 
-  it('opens the v2 with the same title, then closes the original only after the v2 CI started', async () => {
+  it('opens the v2 with a conventional title unchanged, then closes the original only after the v2 CI started', async () => {
     const gh = publishGithub({ ciStarts: true });
     const core = createMockCore();
     const open = opener();
@@ -187,6 +187,14 @@ describe('publish', () => {
     const created = open.mock.invocationCallOrder[0];
     expect(gh.rest.checks.listForRef.mock.invocationCallOrder[0]).toBeGreaterThan(created);
     expect(gh.rest.pulls.update.mock.invocationCallOrder[0]).toBeGreaterThan(gh.rest.checks.listForRef.mock.invocationCallOrder[0]);
+  });
+
+  it('prefixes chore: to a title that is not a conventional subject for the v2 headline and title', async () => {
+    const gh = publishGithub({ ciStarts: true });
+    gh.rest.pulls.get.mockResolvedValue({ data: pr({ title: 'Add the UniFi role and play' }) });
+    const open = opener();
+    await publish({ github: gh, context: createMockContext(), core: createMockCore(), number: 7, timeoutMs: 0, intervalMs: 0, open });
+    expect(open.mock.calls[0][0].title).toBe('chore: Add the UniFi role and play');
   });
 
   it('leaves the original open and fails when the v2 CI never starts', async () => {
