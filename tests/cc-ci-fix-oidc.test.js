@@ -1,5 +1,5 @@
 const { expect, test } = require('bun:test');
-const { readFileSync } = require('fs');
+const { readFileSync, readdirSync, statSync } = require('fs');
 const { join } = require('path');
 
 const workflow = (name) => Bun.YAML.parse(readFileSync(join('.github', 'workflows', name), 'utf8'));
@@ -48,6 +48,15 @@ test('only the publish job grants id-token: write and reads its token from OpenB
   expect(uses(oidc.jobs.publish)).toContain('hashicorp/vault-action@');
   expect(uses(oidc.jobs.publish)).not.toContain('create-github-app-token');
   expect(uses(oidc.jobs['should-fix']) + uses(oidc.jobs.fix)).not.toContain('hashicorp/vault-action@');
+});
+
+test('the publisher reads its commit token from the github/token mount, and no workflow or action names github-openhands', () => {
+  const vault = oidc.jobs.publish.steps.find((step) => (step.uses || '').startsWith('hashicorp/vault-action@'));
+  expect(vault.with.secrets.trim()).toBe('github/token/${{ steps.commit-role.outputs.role }} token | COMMIT_TOKEN ;');
+  const files = ['workflows', 'actions'].flatMap((dir) =>
+    readdirSync(join('.github', dir), { recursive: true }).map((f) => join('.github', dir, String(f))));
+  const named = files.filter((f) => statSync(f).isFile() && readFileSync(f, 'utf8').includes('github-openhands'));
+  expect(named).toEqual([]);
 });
 
 test('failures report with cc-ci-fix.yml\'s reporter; only publish can void the attempt', () => {

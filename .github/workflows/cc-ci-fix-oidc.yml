@@ -447,7 +447,7 @@ jobs:
           exportEnv: false
           exportToken: false
           secrets: |
-            github-openhands/token/${{ steps.commit-role.outputs.role }} token | COMMIT_TOKEN ;
+            github/token/${{ steps.commit-role.outputs.role }} token | COMMIT_TOKEN ;
 
       - name: Commit fix to PR branch
         if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
