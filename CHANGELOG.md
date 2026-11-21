@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.52.0](https://github.com/JacobPEvans/.github-ai/compare/v2.51.0...v2.52.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **workflows:** run agent jobs only on review or GitHub-hosted runners ([#285](https://github.com/JacobPEvans/.github-ai/issues/285)) ([c2ca1c7](https://github.com/JacobPEvans/.github-ai/commit/c2ca1c729ea810824fb3589783aad5a71a08a058))
+
 ## [2.51.0](https://github.com/JacobPEvans/.github-ai/compare/v2.50.0...v2.51.0) (2026-11-21)
 
 
