@@ -60,6 +60,9 @@ runs:
         BASE_SHA: ${{ inputs.base-sha }}
         HEAD_SHA: ${{ inputs.head-sha }}
         MAX_DIFF_KB: ${{ inputs.max-diff-kb }}
+        # Reads the reusable workflows a changed workflow calls (security rubric only).
+        GH_TOKEN: ${{ github.token }}
+        API_URL: ${{ github.api_url }}
       run: bash .ai-workflows/.github/scripts/policy-gate/collect.sh
 
     # The semantic rubric judges the title and body against the diff, so they
