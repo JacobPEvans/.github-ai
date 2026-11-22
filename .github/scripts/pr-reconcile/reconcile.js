@@ -425,7 +425,9 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
   // A release-please branch is skipped by classify but still merges on green; a failed check never merges.
   const mergeable = decision.action === 'none' || (decision.action === 'skip' && decision.state !== 'fork');
   let mergeResult;
-  if (merge && mergeable && decision.state !== 'closed' && outcome === 'noop') {
+  // A head with a recorded CI fix may be green by now (a fixed description, a re-run); the merge reads its checks itself.
+  const settled = outcome === 'noop' || (action === 'ci-fix' && outcome === 'already-done');
+  if (merge && mergeable && decision.state !== 'closed' && settled) {
     try {
       mergeResult = await tryMerge({ github, owner, repo, pr, held, statuses });
       if (mergeResult.gateAbsent) mergeResult.refresh = await gateRefresh(github, owner, repo, pr);
