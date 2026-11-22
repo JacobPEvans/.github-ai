@@ -39,7 +39,7 @@
 // Modes: PR_NUMBER (one PR in this repo), BASE_REF (every open PR on that base,
 // for push-to-base), SWEEP_OWNER (every open PR of the owner).
 
-const { mergeEnabled, tryMerge, mergeSummary } = require('./merge.js');
+const { mergeEnabled, tryMerge, mergeSummary, GATE_CHECK } = require('./merge.js');
 const { isCiPath } = require('./ci-paths.js');
 
 const CONFLICT_LABEL = 'merge-conflict';
@@ -355,6 +355,21 @@ function conflictSummary(events) {
   return ['### Conflict fixes', '', '| Pull request | Outcome | Reason |', '| --- | --- | --- |', ...rows, ''].join('\n');
 }
 
+// The AI gate runs on pull request events only, so a head with no gate run (opened while the gate was off) waits forever.
+// Where the repository runs the gate, bring the base in: the new head is the event. Renovate rebases its own branch.
+async function gateRefresh(github, owner, repo, pr) {
+  const workflows = await github.paginate(github.rest.actions.listRepoWorkflows, { owner, repo, per_page: 100 });
+  if (!workflows.some((workflow) => workflow.state === 'active' && GATE_CHECK.test(workflow.name))) return 'no-gate-workflow';
+  const renovate = (pr.user && pr.user.login || '').startsWith('renovate');
+  try {
+    return await act(github, owner, repo, pr, { action: renovate ? 'renovate-rebase' : 'update-branch' });
+  } catch (error) {
+    // 422: the head already contains the base, so the next base move refreshes it.
+    if (error.status === 422) return 'up-to-date';
+    throw error;
+  }
+}
+
 async function reconcile({ github, core, owner, repo, number, ciFix, merge = false }) {
   const pr = await getPr(github, owner, repo, number);
   const decision = classify(pr);
@@ -413,6 +428,7 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
   if (merge && mergeable && decision.state !== 'closed' && outcome === 'noop') {
     try {
       mergeResult = await tryMerge({ github, owner, repo, pr, held, statuses });
+      if (mergeResult.gateAbsent) mergeResult.refresh = await gateRefresh(github, owner, repo, pr);
     } catch (error) {
       mergeResult = { outcome: `merge-error:${error.status || 'unknown'}`, reason: 'api' };
     }

@@ -172,6 +172,8 @@ async function tryMerge({ github, owner, repo, pr, held, statuses }) {
   if (live.reviewThreads.nodes.some((thread) => !thread.isResolved)) return skip('unresolved-threads');
   const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
   const checks = checksBlocker(runs, statuses, pr);
+  // gateAbsent: no AI gate run exists at this head, so the caller may refresh the head to start one.
+  if (checks === 'no-gate-success' && !runs.some((check) => GATE_CHECK.test(check.name))) return { ...skip(checks), gateAbsent: true };
   if (checks) return skip(checks);
   if (await frozen(github, owner, repo, pr)) return skip('release-freeze');
   const gitFlowMain = pr.base.ref === 'main' && pr.base.repo.default_branch === 'develop';
@@ -194,4 +196,4 @@ function mergeSummary(events) {
   return ['### Sweep merges', '', '| Pull request | Outcome | Reason | Auto-merge disarmed |', '| --- | --- | --- | --- |', ...rows, ''].join('\n');
 }
 
-module.exports = { mergeEnabled, tryMerge, mergeSummary, majorRelease };
+module.exports = { mergeEnabled, tryMerge, mergeSummary, majorRelease, GATE_CHECK };
