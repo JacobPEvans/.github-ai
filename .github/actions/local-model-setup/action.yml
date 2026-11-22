@@ -38,11 +38,14 @@ runs:
         OTEL_ENDPOINT: ${{ inputs.otel_endpoint }}
         DAILY_RUN_LIMIT: ${{ inputs.daily_run_limit }}
       run: |
-        test -n "$LOCAL_MODEL" || { echo "local_model is required when local_only is true" >&2; exit 1; }
-        test -n "$LLM_ROUTER_BASE_URL" || { echo "LLM_ROUTER_BASE_URL is required when local_only is true" >&2; exit 1; }
-        test -n "$OPENBAO_ADDR" || { echo "OPENBAO_ADDR is required when local_only is true" >&2; exit 1; }
-        test -n "$OTEL_ENDPOINT" || { echo "AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required when local_only is true" >&2; exit 1; }
-        case "$DAILY_RUN_LIMIT" in ''|*[!0-9]*|0) echo "daily_run_limit must be positive" >&2; exit 1 ;; esac
+        fail=0
+        need() { test -n "$2" || { echo "$1 is required when local_only is true" >&2; fail=1; }; }
+        need local_model "$LOCAL_MODEL"
+        need LLM_ROUTER_BASE_URL "$LLM_ROUTER_BASE_URL"
+        need OPENBAO_ADDR "$OPENBAO_ADDR"
+        need AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "$OTEL_ENDPOINT"
+        case "$DAILY_RUN_LIMIT" in ''|*[!0-9]*|0) echo "daily_run_limit must be positive" >&2; fail=1 ;; esac
+        exit "$fail"
     - name: Read router key through OIDC
       id: key
       uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
