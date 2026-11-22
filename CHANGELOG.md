@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.57.0](https://github.com/JacobPEvans/.github-ai/compare/v2.56.0...v2.57.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **local-model-setup:** report every missing input in one run ([#298](https://github.com/JacobPEvans/.github-ai/issues/298)) ([76a01de](https://github.com/JacobPEvans/.github-ai/commit/76a01de712d63b51bf4c37c71b6cf57299ba4361))
+
 ## [2.56.0](https://github.com/JacobPEvans/.github-ai/compare/v2.55.0...v2.56.0) (2026-11-21)
 
 
