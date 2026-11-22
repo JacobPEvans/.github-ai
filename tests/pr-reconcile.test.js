@@ -711,6 +711,21 @@ describe('reconcile', () => {
     expect(event).toMatchObject({ action: 'ci-fix', outcome: 'already-done' });
   });
 
+  it('dispatches again at the same head once the recorded CI fix is six hours old', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const at = (ms) => new Date(Date.now() - ms).toISOString();
+    const recent = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix', updated_at: at(5 * 60 * 60 * 1000) }] });
+    const [skip] = await run({ github: recent, context: createMockContext(), core });
+    expect(recent.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(skip.outcome).toBe('already-done');
+
+    const stale = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix', updated_at: at(7 * 60 * 60 * 1000) }] });
+    stale.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
+    const [event] = await run({ github: stale, context: createMockContext(), core });
+    expect(stale.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
+  });
+
   it('refuses a CI fix workflow name that is not a plain file name', async () => {
     process.env.CI_FIX_WORKFLOW = 'ci fix.yml';
     await expect(run({ github: github(pr()), context: createMockContext(), core })).rejects.toThrow('invalid CI_FIX_WORKFLOW');
@@ -775,7 +790,7 @@ describe('conflict fix', () => {
 
   const record = (description, ageMs) => ({ context: 'pr-reconcile-conflict', description, created_at: new Date(Date.now() - ageMs).toISOString() });
 
-  it('retries an attempt that left the original open after 45 minutes, at most twice per head', async () => {
+  it('retries an attempt that left the original open after 45 minutes, at most twice per head per day', async () => {
     const running = conflictGithub(dirty(), { statuses: [record('conflict-dispatched 1', 44 * 60 * 1000)] });
     const [first] = await run({ github: running, context: createMockContext(), core });
     expect(running.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
@@ -790,11 +805,23 @@ describe('conflict fix', () => {
     }
 
     for (const final of ['conflict-dispatched 2', 'conflict-lead']) {
-      const spent = conflictGithub(dirty(), { statuses: [record(final, 2 * DAY)] });
+      const spent = conflictGithub(dirty(), { statuses: [record(final, DAY - 60 * 1000)] });
       const [skip] = await run({ github: spent, context: createMockContext(), core });
       expect(spent.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
       expect(skip.conflict).toEqual({ outcome: 'conflict-skip', reason: `already ${final}` });
     }
+  });
+
+  it('starts the count over at a head whose last attempt is a day old, and never after conflict-lead', async () => {
+    const stale = conflictGithub(dirty(), { statuses: [record('conflict-dispatched 2', DAY + 60 * 1000)] });
+    const [again] = await run({ github: stale, context: createMockContext(), core });
+    expect(conflictStatuses(stale)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched 1' })]);
+    expect(again.conflict).toEqual({ outcome: 'conflict-dispatched', reason: 'ci-fix.yml' });
+
+    const lead = conflictGithub(dirty(), { statuses: [record('conflict-lead', 2 * DAY)] });
+    const [skip] = await run({ github: lead, context: createMockContext(), core });
+    expect(lead.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(skip.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-lead' });
   });
 
   const skips = [
