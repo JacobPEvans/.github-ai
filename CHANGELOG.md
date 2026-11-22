@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.62.0](https://github.com/JacobPEvans/.github-ai/compare/v2.61.0...v2.62.0) (2026-11-22)
+
+
+### Features
+
+* **conflict-fix:** land the resolution on the pull request own branch ([#309](https://github.com/JacobPEvans/.github-ai/issues/309)) ([d973240](https://github.com/JacobPEvans/.github-ai/commit/d973240b67903301937b841c66b66aa028acfeb2))
+* **conflict-fix:** land the resolution on the pull request's own branch ([d973240](https://github.com/JacobPEvans/.github-ai/commit/d973240b67903301937b841c66b66aa028acfeb2))
+
+
+### Bug Fixes
+
+* **pr-reconcile:** refresh a head that has no AI gate run ([#308](https://github.com/JacobPEvans/.github-ai/issues/308)) ([85f1718](https://github.com/JacobPEvans/.github-ai/commit/85f1718bfbf65b57a7d8cd0c4bf66c95d8498bdd))
+
 ## [2.61.0](https://github.com/JacobPEvans/.github-ai/compare/v2.60.0...v2.61.0) (2026-11-22)
 
 
