@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.68.0](https://github.com/JacobPEvans/.github-ai/compare/v2.67.0...v2.68.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** let a later run replace a cancelled workflow run ([#322](https://github.com/JacobPEvans/.github-ai/issues/322)) ([10a6ed5](https://github.com/JacobPEvans/.github-ai/commit/10a6ed551ac80a3450b6e5b0b90e93c636cf66ec))
+
 ## [2.67.0](https://github.com/JacobPEvans/.github-ai/compare/v2.66.0...v2.67.0) (2026-11-22)
 
 
