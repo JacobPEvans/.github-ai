@@ -235,6 +235,8 @@ describe('sweep merge', () => {
     expect((await reconcileOne(rerunRed)).merge.reason).toBe('check:lint');
     const otherSuiteRed = github(pr(), { checks: [gate, lint(2, 20, 'failure'), lint(3, 30)] });
     expect((await reconcileOne(otherSuiteRed)).merge.reason).toBe('check:lint');
+    const stuckStatus = github(pr(), { checks: [gate, { ...lint(2, 20), status: 'in_progress' }] });
+    expect((await reconcileOne(stuckStatus)).merge.outcome).toBe('merged');
   });
 
   it('lets a later run replace the runs of a cancelled workflow run, and nothing else', async () => {

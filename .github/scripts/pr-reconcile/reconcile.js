@@ -258,7 +258,8 @@ async function gatewayDown(github, owner, repo, check) {
 
 async function startCiFix(github, owner, repo, pr, settings, statuses = []) {
   const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
-  if (runs.some((check) => check.status !== 'completed')) return { outcome: 'ci-pending' };
+  // A run with a conclusion is finished even when its status never left in_progress.
+  if (runs.some((check) => check.status !== 'completed' && !check.conclusion)) return { outcome: 'ci-pending' };
   const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   const broken = runs
     .filter((check) => ['failure', 'cancelled', 'timed_out'].includes(check.conclusion)

@@ -133,7 +133,8 @@ function newestRuns(runs) {
 function checksBlocker(allRuns, statuses, pr) {
   if (!allRuns.length) return 'no-checks';
   const runs = newestRuns(allRuns);
-  if (runs.some((check) => check.status !== 'completed')) return 'checks-pending';
+  // A run with a conclusion is finished even when its status never left in_progress.
+  if (runs.some((check) => check.status !== 'completed' && !check.conclusion)) return 'checks-pending';
   const bad = runs.find((check) => BAD_CONCLUSIONS.includes(check.conclusion));
   if (bad) return `check:${bad.name}`;
   // merge-hold is decided from the live label (held), not from the status written before this run.
