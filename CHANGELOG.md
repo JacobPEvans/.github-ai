@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.63.0](https://github.com/JacobPEvans/.github-ai/compare/v2.62.0...v2.63.0) (2026-11-22)
+
+
+### Features
+
+* **ci-fix:** let the agent correct the pull request description ([#311](https://github.com/JacobPEvans/.github-ai/issues/311)) ([d898704](https://github.com/JacobPEvans/.github-ai/commit/d898704d991bc7ae80259daf7b119e8cb62486e7))
+
 ## [2.62.0](https://github.com/JacobPEvans/.github-ai/compare/v2.61.0...v2.62.0) (2026-11-22)
 
 
