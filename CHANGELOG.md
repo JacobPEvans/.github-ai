@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.65.0](https://github.com/JacobPEvans/.github-ai/compare/v2.64.0...v2.65.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **agent-jobs:** give the agent job more time than the agent ([#314](https://github.com/JacobPEvans/.github-ai/issues/314)) ([44f19a2](https://github.com/JacobPEvans/.github-ai/commit/44f19a2366fa017da1443458d9418db578ddc7f7))
+
 ## [2.64.0](https://github.com/JacobPEvans/.github-ai/compare/v2.63.0...v2.64.0) (2026-11-22)
 
 
