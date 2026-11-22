@@ -44,7 +44,8 @@ runs:
         need LLM_ROUTER_BASE_URL "$LLM_ROUTER_BASE_URL"
         need OPENBAO_ADDR "$OPENBAO_ADDR"
         need AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "$OTEL_ENDPOINT"
-        case "$DAILY_RUN_LIMIT" in ''|*[!0-9]*|0) echo "daily_run_limit must be positive" >&2; fail=1 ;; esac
+        limit="${DAILY_RUN_LIMIT#"${DAILY_RUN_LIMIT%%[!0]*}"}"
+        case "$limit" in ''|*[!0-9]*) echo "daily_run_limit must be positive" >&2; fail=1 ;; esac
         exit "$fail"
     - name: Read router key through OIDC
       id: key

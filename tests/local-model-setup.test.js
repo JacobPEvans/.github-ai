@@ -30,13 +30,19 @@ test('local-only validation reports every missing setting in one run', () => {
   expect(run.stderr).toContain('AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required');
 });
 
-for (const limit of ['0', '-1', 'abc']) {
+for (const limit of ['0', '-1', 'abc', '00', '000']) {
   test(`local-only validation rejects limit ${limit}`, () => {
     expect(spawnSync('bash', ['-e', '-c', validate.run], {
       env: { ...valid, DAILY_RUN_LIMIT: limit },
     }).status).toBe(1);
   });
 }
+
+test('local-only validation accepts limit 05', () => {
+  expect(spawnSync('bash', ['-e', '-c', validate.run], {
+    env: { ...valid, DAILY_RUN_LIMIT: '05' },
+  }).status).toBe(0);
+});
 
 test('both existing flows use the shared setup only in local-only mode', () => {
   for (const name of ['cc-ci-fix', 'cc-pr-review-responder']) {
