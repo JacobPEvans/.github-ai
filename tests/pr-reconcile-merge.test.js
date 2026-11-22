@@ -74,6 +74,18 @@ describe('sweep merge', () => {
 
   const reconcileOne = async (gh) => (await run({ github: gh, context: createMockContext(), core }))[0];
 
+  it('merges a green head that has a recorded CI fix, and leaves a red one alone', async () => {
+    process.env.CI_FIX_WORKFLOW = 'ci-fix.yml';
+    const now = new Date().toISOString();
+    const statuses = [{ context: 'pr-reconcile', state: 'success', description: 'ci-fix', created_at: now, updated_at: now }];
+    const greenHead = github(pr(), { statuses });
+    expect(await reconcileOne(greenHead)).toMatchObject({ action: 'ci-fix', outcome: 'already-done', merge: { outcome: 'merged' } });
+    const red = { name: 'lint', status: 'completed', conclusion: 'failure', app: { slug: 'github-actions' } };
+    const redHead = github(pr(), { statuses, checks: [red, green('AI Merge Gate / AI Merge Gate')] });
+    expect((await reconcileOne(redHead)).merge.outcome).not.toBe('merged');
+    expect(redHead.rest.pulls.merge).not.toHaveBeenCalled();
+  });
+
   it('squash-merges a green bot pull request at its exact head and writes the summary', async () => {
     const gh = github(pr());
     const event = await reconcileOne(gh);
