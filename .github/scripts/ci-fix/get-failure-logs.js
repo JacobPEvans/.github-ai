@@ -4,6 +4,7 @@
 const GATE_JOB = /\b(\w+) review \/ Policy gate$/i;
 const GATE_AUTHOR = 'github-actions[bot]';
 const FINDINGS_MAX = 8000;
+const DESCRIPTION_MAX = 20000;
 
 async function gateFindings(github, context, runId, rubric) {
   const { owner, repo } = context.repo;
@@ -17,7 +18,11 @@ async function gateFindings(github, context, runId, rubric) {
   const body = comment.body.length > FINDINGS_MAX
     ? `${comment.body.slice(0, FINDINGS_MAX)}\n(findings truncated at ${FINDINGS_MAX} characters)`
     : comment.body;
-  return `\n=== FINDINGS: ${rubric} review (pull request comment) ===\n${body}\n`;
+  // The review reads the description, so the agent gets it too: a finding may be about the description alone.
+  const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+  const description = (pr.body || '').slice(0, DESCRIPTION_MAX);
+  return `\n=== FINDINGS: ${rubric} review (pull request comment) ===\n${body}\n`
+    + `\n=== PULL REQUEST DESCRIPTION (base branch ${pr.base.ref}) ===\n${description}\n`;
 }
 
 module.exports = async ({ github, context, core }) => {
