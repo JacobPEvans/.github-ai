@@ -468,11 +468,19 @@ describe('reconcile', () => {
   it('waits while a check run is not completed', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const gh = github(pr());
-    gh.paginate.mockResolvedValueOnce([checkRun({ status: 'in_progress' })]);
+    gh.paginate.mockResolvedValueOnce([checkRun({ status: 'in_progress', conclusion: null })]);
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
     expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-pending' });
     expect('check' in event).toBe(false);
+  });
+
+  it('treats a run with a conclusion as finished whatever its status', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun(), checkRun({ name: 'export', status: 'in_progress', conclusion: 'success' })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event.outcome).not.toBe('ci-pending');
   });
 
   it('ignores failed checks a code edit cannot fix', async () => {
