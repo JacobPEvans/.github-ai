@@ -45,7 +45,8 @@ runs:
         need OPENBAO_ADDR "$OPENBAO_ADDR"
         need AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "$OTEL_ENDPOINT"
         limit="${DAILY_RUN_LIMIT#"${DAILY_RUN_LIMIT%%[!0]*}"}"
-        case "$limit" in ''|*[!0-9]*) echo "daily_run_limit must be positive" >&2; fail=1 ;; esac
+        case "$limit" in ''|*[!0-9]*) echo "daily_run_limit must be a positive integer no larger than 9007199254740991" >&2; fail=1 ;; esac
+        if [[ ${#limit} -gt 16 || ( ${#limit} -eq 16 && "$limit" > 9007199254740991 ) ]]; then echo "daily_run_limit must be a positive integer no larger than 9007199254740991" >&2; fail=1; fi
         exit "$fail"
     - name: Read router key through OIDC
       id: key
