@@ -232,7 +232,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
+    # Longer than the agent's 25-minute limit plus its install, so a long run ends with the agent's own message.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 45 }}
     outputs:
       fix_base_sha: ${{ steps.fix-base.outputs.sha }}
     steps:
