@@ -237,6 +237,17 @@ describe('sweep merge', () => {
     expect((await reconcileOne(otherSuiteRed)).merge.reason).toBe('check:lint');
   });
 
+  it('lets a later run replace the runs of a cancelled workflow run, and nothing else', async () => {
+    const run = (name, id, suite, conclusion = 'success') => ({ ...green(name), id, conclusion, check_suite: { id: suite } });
+    const superseded = [run('scan', 1, 10, 'cancelled'), run('AI Merge Gate', 2, 10, 'failure')];
+    const replaced = github(pr(), { checks: [...superseded, run('scan', 3, 20), run('AI Merge Gate', 4, 20)] });
+    expect((await reconcileOne(replaced)).merge.outcome).toBe('merged');
+    const partly = github(pr(), { checks: [...superseded, run('AI Merge Gate', 4, 20)] });
+    expect((await reconcileOne(partly)).merge.reason).toBe('check:scan');
+    const older = github(pr(), { checks: [run('scan', 5, 10, 'cancelled'), run('AI Merge Gate', 6, 10, 'failure'), run('scan', 3, 20), run('AI Merge Gate', 4, 20)] });
+    expect((await reconcileOne(older)).merge.reason).toMatch(/^check:/);
+  });
+
   it('merges a green labelled promotion with a merge commit and never touches its labels', async () => {
     const gh = github(promotion(), { commits: releaseCommits('2.29.0') });
     const event = await reconcileOne(gh);

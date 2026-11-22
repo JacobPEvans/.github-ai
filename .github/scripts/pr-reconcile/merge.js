@@ -121,7 +121,13 @@ function newestRuns(runs) {
     const seen = newest.get(key);
     if (!seen || (check.id ?? 0) >= (seen.id ?? 0)) newest.set(key, check);
   }
-  return [...newest.values()];
+  // A workflow run that concurrency cancelled leaves cancelled and failed runs in its suite; a later same-named
+  // run in another suite replaces each of them. A suite with no cancelled run is never replaced.
+  const cancelled = new Set(runs.filter((check) => check.conclusion === 'cancelled' && check.check_suite?.id)
+    .map((check) => check.check_suite.id));
+  return [...newest.values()].filter((check) => !cancelled.has(check.check_suite?.id)
+    || !runs.some((other) => other.name === check.name && other.check_suite?.id !== check.check_suite.id
+      && (other.id ?? 0) > (check.id ?? 0)));
 }
 
 function checksBlocker(allRuns, statuses, pr) {
