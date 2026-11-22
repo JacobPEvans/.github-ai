@@ -103,12 +103,12 @@ describe('reconcile', () => {
     expect(action.match(/PR_RECONCILE_EXCLUDE_REPOS:/g)).toEqual(['PR_RECONCILE_EXCLUDE_REPOS:']);
   });
 
-  it('runs the sweep on self-hosted runners with an OIDC-minted owner token and no stored App key', () => {
+  it('runs the sweep on review runners with an OIDC-minted owner token and no stored App key', () => {
     const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
 
     expect(sweep).toContain('\npermissions:\n  contents: read\n  id-token: write\n\njobs:');
     expect(sweep).toContain('    runs-on: ubuntu-24.04\n    permissions: {}\n');
-    expect(sweep).toContain('    runs-on: self-hosted\n');
+    expect(sweep).toContain('    runs-on: review\n');
     expect(sweep).not.toContain('group: pr-reconcile\n');
     expect(sweep).toContain('    permissions:\n      contents: read\n      id-token: write\n');
     expect(sweep).toContain('      fail-fast: false\n');
