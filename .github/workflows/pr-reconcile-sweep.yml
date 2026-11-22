@@ -5,7 +5,7 @@
 # reconciled. Owners come from the PR_RECONCILE_OWNERS repository variable
 # (comma-separated); nothing runs while it is empty.
 #
-# Each owner's job runs on the org's self-hosted runners and logs in to OpenBao
+# Each owner's job runs on the org's review runners and logs in to OpenBao
 # with this workflow's OIDC identity, then mints one installation token for that
 # owner, limited to actions (CI-fix dispatch), checks (read), contents, pull
 # requests and statuses, inside the Reconcile step. No stored credential is used.
@@ -40,7 +40,7 @@ jobs:
     name: Sweep ${{ matrix.owner }}
     needs: owners
     if: needs.owners.outputs.owners != '[]'
-    runs-on: self-hosted
+    runs-on: review
     permissions:
       contents: read
       id-token: write

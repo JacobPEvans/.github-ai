@@ -34,6 +34,15 @@ describe('check-attempts', () => {
     expect(core.getOutput('attempt')).toBe('2');
   });
 
+  it('does not count an attempt marker older than 24 hours', async () => {
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    const recent = new Date(Date.now() - 60 * 1000).toISOString();
+    github.paginate.mockResolvedValue([{ body: MARKER, created_at: old }, { body: MARKER, created_at: old }, { body: MARKER, created_at: recent }]);
+    await run({ github, context, core });
+    expect(core.getOutput('should_run')).toBe('true');
+    expect(core.getOutput('attempt')).toBe('2');
+  });
+
   it('null body comment does not throw (bug fix)', async () => {
     github.paginate.mockResolvedValue([{ body: null }, { body: MARKER }]);
     await run({ github, context, core });

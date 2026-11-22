@@ -8,7 +8,8 @@
 //
 // CI fix: when CI_FIX_WORKFLOW names a workflow file, a pull request that is
 // otherwise left alone but has failed github-actions checks gets one
-// workflow_dispatch per head commit to fix them. CI_FIX_SKIP_CHECKS is a
+// workflow_dispatch per head commit to fix them, and another every CI_FIX_RETRY_MS
+// while that head stays red; the fixer's own attempt cap bounds the total. CI_FIX_SKIP_CHECKS is a
 // case-insensitive regex of check names a coding agent should not touch.
 // When the failed check passes at the tip of the base branch, the base is merged
 // in first (update-branch) and no fix is dispatched for that head; this applies to skipped checks too.
@@ -23,7 +24,8 @@
 //
 // Conflict fix: when CI_FIX_WORKFLOW is set, a conflicted pull request (not Renovate, not a promotion, not touching
 // a CI path, ci-paths.js) whose head commit is at least 15 minutes old gets a workflow_dispatch with conflict_pr, at most
-// CONFLICT_MAX per head: an attempt that left the original open with no v2 branch is retried after CONFLICT_RETRY_MS;
+// CONFLICT_MAX per head per day: an attempt that left the original open with no v2 branch is retried after
+// CONFLICT_RETRY_MS, and a count older than CONFLICT_RESET_MS starts over, since a conflicted head does not move;
 // the caller opens a v2 pull request on the current base. A v2 that conflicts again gets needs-lead, never a v3.
 // The commit status context pr-reconcile-conflict records it, apart from the pr-reconcile action record. A
 // repository without a caller that takes conflict_pr records nothing and is retried every sweep.
@@ -51,6 +53,9 @@ const CONFLICT_CONTEXT = 'pr-reconcile-conflict';
 const CONFLICT_MIN_AGE_MS = 15 * 60 * 1000;
 const CONFLICT_MAX = 2;
 const CONFLICT_RETRY_MS = 45 * 60 * 1000; // longer than one conflict-fix run, so a running attempt is not doubled
+const CONFLICT_RESET_MS = 24 * 60 * 60 * 1000;
+// A fix that committed nothing leaves the head where it was, so the same head is looked at again after this long.
+const CI_FIX_RETRY_MS = 6 * 60 * 60 * 1000;
 const V2_BODY = /^Supersedes #\d+\b/m;
 // Unknown-state retries stop after the retry budget; no new PR starts after the run budget, so a large sweep
 // ends inside the 5-minute job timeout and the next sweep picks up the rest.
@@ -115,6 +120,17 @@ async function headStatuses(github, owner, repo, sha) {
 
 function alreadyDone(statuses, action) {
   return statuses.some((status) => status.context === STATUS_CONTEXT && status.description === action);
+}
+
+// A record with no timestamp counts as fresh.
+function olderThan(status, ms, now = Date.now()) {
+  const at = Date.parse(status.updated_at || status.created_at || '');
+  return Number.isFinite(at) && now - at >= ms;
+}
+
+function ciFixDone(statuses) {
+  return statuses.some((status) => status.context === STATUS_CONTEXT && status.description === 'ci-fix'
+    && !olderThan(status, CI_FIX_RETRY_MS));
 }
 
 async function record(github, owner, repo, sha, action) {
@@ -289,7 +305,7 @@ async function startConflictFix(github, owner, repo, pr, settings, statuses, now
   // 'conflict-queued N' or 'conflict-dispatched N' (no N counts as 1). Any other record is final.
   const last = statuses.find((status) => status.context === CONFLICT_CONTEXT);
   const attempt = /^conflict-(?:queued|dispatched)(?: (\d+))?$/.exec(last?.description || '');
-  const done = attempt ? Number(attempt[1] || 1) : 0;
+  const done = attempt && !olderThan(last, CONFLICT_RESET_MS, now) ? Number(attempt[1] || 1) : 0;
   if (last && (!attempt || done >= CONFLICT_MAX)) return { outcome: 'conflict-skip', reason: `already ${last.description}` };
   if (done && now - Date.parse(last.updated_at || last.created_at) < CONFLICT_RETRY_MS) {
     return { outcome: 'conflict-skip', reason: `${last.description} under 45 min ago` };
@@ -367,7 +383,7 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
     }
   } else if (ciFix.workflow && decision.action === 'none' && decision.state !== 'closed' && ciFixEligible(pr, held)) {
     action = 'ci-fix';
-    if (alreadyDone(statuses, 'ci-fix')) {
+    if (ciFixDone(statuses)) {
       outcome = 'already-done';
     } else {
       try {

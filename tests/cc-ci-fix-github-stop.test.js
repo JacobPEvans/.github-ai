@@ -54,6 +54,16 @@ test('a patch that touches more than 25 files is held; 25 files pass', () => {
   expect(stopped(patch(26))).toEqual(['touched=true', 'reason=The patch touches 26 files, more than 25']);
 });
 
+test('removing files from a dependency install path does not count toward the 25; other removals do', () => {
+  const removedFile = (path) =>
+    `diff --git a/${path} b/${path}\ndeleted file mode 100644\n--- a/${path}\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n`;
+  const many = (prefix) => Array.from({ length: 40 }, (_, i) => removedFile(`${prefix}/f${i}.yml`)).join('');
+  const requirements = { 'requirements.yml': 'roles:\n  - name: acme.widget\n' };
+  expect(stopped(many('roles/acme.widget/tasks') + edited('roles/x/tasks/main.yml'), requirements)).toEqual(['touched=false']);
+  expect(stopped(many('collections/ns/x'))).toEqual(['touched=false']);
+  expect(stopped(many('roles/x/tasks'), requirements)).toEqual(['touched=true', 'reason=The patch touches 40 files, more than 25']);
+});
+
 test('a patch that adds files under node_modules/, .venv/ or collections/ is held', () => {
   for (const path of ['node_modules/x/index.js', 'web/node_modules/x/index.js', '.venv/bin/x', 'collections/ns/x/galaxy.yml']) {
     expect(stopped(created(path))[1]).toBe(

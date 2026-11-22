@@ -11,8 +11,11 @@ module.exports = async ({ github, context, core }) => {
     per_page: 100
   });
   const marker = '<!-- claude-ci-fix-attempt -->';
-  const attempts = comments.filter(c => c.body && c.body.includes(marker)).length;
-  core.info(`Found ${attempts} previous fix attempts`);
+  // Two attempts per pull request per day: a marker with no timestamp counts as recent.
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const attempts = comments.filter(c => c.body && c.body.includes(marker)
+    && !(Date.parse(c.created_at || '') < dayAgo)).length;
+  core.info(`Found ${attempts} fix attempts in the last 24 hours`);
   if (attempts >= 2) {
     core.info('Max attempts reached, skipping');
     core.setOutput('should_run', 'false');
