@@ -182,6 +182,38 @@ describe('sweep merge', () => {
     }
   });
 
+  it('refreshes a head that has no AI gate run, only where the repository runs the gate', async () => {
+    const gateWorkflow = [{ name: 'AI Merge Gate', state: 'active' }];
+    const build = (data, workflows) => {
+      const gh = github(data, { checks: [green('lint')] });
+      gh.rest.actions.listRepoWorkflows = mock();
+      gh.rest.pulls.updateBranch = mock().mockResolvedValue({});
+      gh.rest.pulls.update = mock().mockResolvedValue({});
+      const paginate = gh.paginate.getMockImplementation();
+      gh.paginate.mockImplementation(async (fn, ...rest) => (fn === gh.rest.actions.listRepoWorkflows ? workflows : paginate(fn, ...rest)));
+      return gh;
+    };
+    const agent = build(pr(), gateWorkflow);
+    expect((await reconcileOne(agent)).merge).toMatchObject({ outcome: 'merge-skip', reason: 'no-gate-success', refresh: 'updated' });
+    expect(agent.rest.pulls.updateBranch).toHaveBeenCalledTimes(1);
+
+    const noWorkflow = build(pr(), [{ name: 'AI Merge Gate', state: 'disabled_manually' }]);
+    expect((await reconcileOne(noWorkflow)).merge.refresh).toBe('no-gate-workflow');
+    expect(noWorkflow.rest.pulls.updateBranch).not.toHaveBeenCalled();
+
+    const current = build(pr(), gateWorkflow);
+    current.rest.pulls.updateBranch.mockRejectedValue(Object.assign(new Error('x'), { status: 422 }));
+    expect((await reconcileOne(current)).merge.refresh).toBe('up-to-date');
+
+    const box = '- [ ] <!-- rebase-check -->If you want to rebase/retry this PR, check this box';
+    const renovate = build(pr({ user: { login: 'renovate[bot]', type: 'Bot' }, labels: [{ name: 'update:major' }], body: box }), gateWorkflow);
+    expect((await reconcileOne(renovate)).merge.refresh).toBe('rebase-requested');
+    expect(renovate.rest.pulls.updateBranch).not.toHaveBeenCalled();
+
+    const ran = github(pr(), { checks: [green('lint'), { ...green('AI Merge Gate'), conclusion: 'neutral' }] });
+    expect((await reconcileOne(ran)).merge.refresh).toBeUndefined();
+  });
+
   it('judges only the newest run of each check name within a check suite', async () => {
     const gate = { ...green('AI Merge Gate'), id: 1, check_suite: { id: 10 } };
     const lint = (id, suite, conclusion = 'success') => ({ ...green('lint'), id, conclusion, check_suite: { id: suite } });
