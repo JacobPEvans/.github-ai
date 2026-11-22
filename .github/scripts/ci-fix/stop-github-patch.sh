@@ -4,7 +4,9 @@
 # touches any .github/ path, touches more than 25 files, or adds a file under a
 # dependency install path (node_modules/, .venv/, collections/, or
 # roles/<namespace>.<name>/ for a role named in requirements.yml) or under a path
-# the repository's ignore rules exclude. A held patch is not committed; the step
+# the repository's ignore rules exclude. Removing files from a dependency install
+# path undoes an earlier bad commit, so those removals do not count toward the 25.
+# A held patch is not committed; the step
 # summary names the run's patch artifact, never the patch body, and the job hands
 # the fix to a person. Reads agent.patch and the checkout in the working directory.
 set -euo pipefail
@@ -14,10 +16,24 @@ reason=""
 
 if [ -s agent.patch ]; then
   paths=$(sed -nE 's#^diff --git a/(.*) b/.*#\1#p' agent.patch)
-  count=$(printf '%s\n' "$paths" | grep -c . || true)
   added=$(awk '/^diff --git /{p=$3; sub(/^a\//, "", p)} /^new file mode/{print p}' agent.patch)
+  removed=$(awk '/^diff --git /{p=$3; sub(/^a\//, "", p)} /^deleted file mode/{print p}' agent.patch)
   roles=$(cat requirements.yml roles/requirements.yml 2>/dev/null |
     sed -nE "s/^[[:space:]-]*(name|src):[[:space:]]*[\"']?([A-Za-z0-9_]+\.[A-Za-z0-9_]+)[\"']?[[:space:]]*$/\2/p" | sort -u || true)
+
+  # Prints the kind of dependency install path a file is under, or nothing.
+  dependency_path() {
+    local role
+    if [[ "$1" =~ (^|/)(node_modules|\.venv)/ || "$1" == collections/* ]]; then echo install; return; fi
+    role=$(sed -nE 's#^roles/([^/]+)/.*#\1#p' <<<"$1")
+    if [ -n "$role" ] && grep -qxF -- "$role" <<<"$roles"; then echo "role:$role"; fi
+  }
+
+  repairs=0
+  while IFS= read -r path; do
+    if [ -n "$path" ] && [ -n "$(dependency_path "$path")" ]; then repairs=$((repairs + 1)); fi
+  done <<<"$removed"
+  count=$(( $(printf '%s\n' "$paths" | grep -c . || true) - repairs ))
 
   if grep -q '^\.github/' <<<"$paths"; then
     reason="The patch edits files under \`.github/\`"
@@ -26,13 +42,13 @@ if [ -s agent.patch ]; then
   else
     while IFS= read -r path; do
       [ -n "$path" ] || continue
-      if [[ "$path" =~ (^|/)(node_modules|\.venv)/ || "$path" == collections/* ]]; then
+      kind=$(dependency_path "$path")
+      if [ "$kind" = install ]; then
         reason="The patch adds files under a dependency install path (node_modules/, .venv/ or collections/)"
         break
       fi
-      role=$(sed -nE 's#^roles/([^/]+)/.*#\1#p' <<<"$path")
-      if [ -n "$role" ] && grep -qxF -- "$role" <<<"$roles"; then
-        reason="The patch adds files under \`roles/$role/\`, a role installed from requirements.yml"
+      if [ -n "$kind" ]; then
+        reason="The patch adds files under \`roles/${kind#role:}/\`, a role installed from requirements.yml"
         break
       fi
       if git check-ignore --no-index -q -- "$path" 2>/dev/null; then
