@@ -232,6 +232,7 @@ jobs:
     timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 30 }}
     permissions:
       actions: read
+      pull-requests: read
     outputs:
       failure_logs: ${{ steps.get-logs.outputs.logs }}
     steps:
@@ -367,12 +368,16 @@ jobs:
           git add -N -A
           git reset -q -- .ai-workflows
           git diff --binary HEAD > agent.patch
+          # A description the agent wrote for the pull request travels beside the patch.
+          if [ -s .ai-workflows/pr-body.md ]; then cp .ai-workflows/pr-body.md agent-pr-body.md; fi
 
       - name: Upload agent patch
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-fix-${{ github.run_id }}
-          path: agent.patch
+          path: |
+            agent.patch
+            agent-pr-body.md
           if-no-files-found: error
           retention-days: 1
 
@@ -434,6 +439,11 @@ jobs:
         with:
           name: ci-fix-${{ github.run_id }}
 
+      # Out of the checkout, so the commit step never publishes it as a file.
+      - name: Set the agent's description aside
+        if: steps.pr-open.outputs.open == 'true'
+        run: if [ -f agent-pr-body.md ]; then mv agent-pr-body.md "$RUNNER_TEMP/pr-body.md"; fi
+
       # The publisher never commits a patch that touches a .github/ path, touches more
       # than 25 files, or adds files under a dependency install path or an ignored
       # path (stop-github-patch.sh); such a patch is handed off with a comment linking
@@ -472,6 +482,7 @@ jobs:
           client-id: ${{ vars.GH_APP_CLAUDE_BOT_ID || secrets.GH_APP_CLAUDE_BOT_ID }}
           private-key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
           permission-contents: write
+          permission-pull-requests: write
 
       - name: Commit fix to PR branch
         if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
@@ -484,6 +495,19 @@ jobs:
           github-token: ${{ steps.commit-token.outputs.token }}
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/commit-fix.js');
+            await run({ github, context, core });
+
+      # The App token makes the edit, so workflows that listen for an edited pull request run again.
+      - name: Update the pull request description
+        if: steps.pr-open.outputs.open == 'true' && steps.workflow-files.outputs.touched != 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
+          PR_BODY_FILE: ${{ runner.temp }}/pr-body.md
+        with:
+          github-token: ${{ steps.commit-token.outputs.token }}
+          script: |
+            const run = require('./.ai-workflows/.github/scripts/ci-fix/update-pr-body.js');
             await run({ github, context, core });
 
   notify-failure:

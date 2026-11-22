@@ -97,6 +97,7 @@ describe('get-failure-logs: AI review gate findings', () => {
     github.rest.actions.getWorkflowRun = mock().mockResolvedValue({ data: { pull_requests: [{ number: 12 }] } });
     github.paginate.mockImplementation(async (method) => (method === github.rest.issues.listComments ? comments : [gateJob]));
     github.rest.actions.downloadJobLogsForWorkflowRun.mockResolvedValue({ data: 'Policy gate failed; see the pull request comment.' });
+    github.rest.pulls.get = mock().mockResolvedValue({ data: { body: 'Adds a role.', base: { ref: 'develop' } } });
     return { core, context, github };
   }
 
@@ -105,6 +106,7 @@ describe('get-failure-logs: AI review gate findings', () => {
     await run({ github, context, core });
     expect(core.getOutput('logs')).toContain('=== FINDINGS: Semantic review (pull request comment) ===');
     expect(core.getOutput('logs')).toContain('omitted_behavior | fail');
+    expect(core.getOutput('logs')).toContain('=== PULL REQUEST DESCRIPTION (base branch develop) ===\nAdds a role.');
   });
 
   it('ignores a look-alike comment from another author and a bot comment without the marker first', async () => {
