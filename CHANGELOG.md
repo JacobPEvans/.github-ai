@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.58.0](https://github.com/JacobPEvans/.github-ai/compare/v2.57.0...v2.58.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **local-model-setup:** reject a daily run limit made only of zeros ([#300](https://github.com/JacobPEvans/.github-ai/issues/300)) ([a0668cd](https://github.com/JacobPEvans/.github-ai/commit/a0668cd55dec5b9bdd53537ecdfd0cacb95fbd0d))
+
 ## [2.57.0](https://github.com/JacobPEvans/.github-ai/compare/v2.56.0...v2.57.0) (2026-11-22)
 
 
