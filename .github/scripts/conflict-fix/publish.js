@@ -1,71 +1,28 @@
-// Open the v2 pull request from the checked-out base tip plus the applied agent patch, then close the original.
+// Land the resolution on the original pull request's branch: a merge commit of that branch's head and the base tip
+// the agent worked on, whose tree is the checked-out base tip plus the applied agent patch.
 //
-// The v2 keeps the original's title (with a `chore: ` prefix when it is not a conventional subject) and labels
-// (never human:review, merge-conflict or needs-lead); its body is the original body plus `Supersedes #N`. The original is closed, with a comment linking the v2, only after the v2's
-// CI has started: a check run or workflow run at the v2 head. The v2 is never armed for auto-merge. If none starts in time, the original stays open and
-// the run fails.
+// The pull request keeps its number, reviews and history. The branch moves forward by one verified commit, with no
+// force-push and no replacement pull request. If there is nothing to publish, or the head moved since it was read,
+// the run fails and the pull request is left as it was.
 
-const { openPr } = require('../shared/verified-commit.js');
+const { mergeToBranch } = require('../shared/verified-commit.js');
 
-const DROPPED_LABELS = new Set(['human:review', 'merge-conflict', 'needs-lead']);
-// The commit subject the conventional-commit rulesets accept; the title is the v2 commit headline and PR title.
-const CONVENTIONAL = /^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9_-]+\))?!?: .+/;
-
-function v2Title(title) {
-  return CONVENTIONAL.test(title) ? title : `chore: ${title}`;
-}
-
-function v2Body(body, number) {
-  const original = (body || '').trimEnd();
-  return `${original ? `${original}\n\n` : ''}Supersedes #${number}`;
-}
-
-function v2Labels(labels) {
-  return (labels || []).map((label) => label.name).filter((name) => !DROPPED_LABELS.has(name));
-}
-
-async function ciStarted(github, owner, repo, sha) {
-  const { data: checks } = await github.rest.checks.listForRef({ owner, repo, ref: sha, per_page: 1 });
-  if (checks.total_count > 0) return true;
-  const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({ owner, repo, head_sha: sha, per_page: 1 });
-  return runs.total_count > 0;
-}
-
-async function waitForCi(github, owner, repo, sha, { timeoutMs, intervalMs }) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (await ciStarted(github, owner, repo, sha)) return true;
-    if (Date.now() + intervalMs > deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-}
-
-async function publish({ github, context, core, number, timeoutMs = 10 * 60 * 1000, intervalMs = 20 * 1000, open = openPr }) {
+async function publish({ github, context, core, number, merge = mergeToBranch }) {
   const { owner, repo } = context.repo;
   const { data: original } = await github.rest.pulls.get({ owner, repo, pull_number: number });
-  const result = await open({
+  const result = await merge({
     github, context, core,
-    branch: `${original.head.ref}-v2`,
-    title: v2Title(original.title),
-    body: v2Body(original.body, number),
-    baseBranch: original.base.ref,
-    labels: v2Labels(original.labels),
-    // The sweep's merge-on-green merges the v2; native auto-merge stays off.
-    autoMerge: false,
+    branch: original.head.ref,
+    headOid: original.head.sha,
+    // A conventional subject, which the commit-message rulesets accept.
+    message: `chore: merge ${original.base.ref} into ${original.head.ref}`,
   });
-  if (!result.opened) {
-    core.setFailed('conflict fix: no changes to publish; the original stays open');
-    return { closed: false };
+  if (!result.merged) {
+    core.setFailed(`conflict fix: no changes to publish; #${number} is left as it was`);
+    return { merged: false };
   }
-  const v2 = result.pr;
-  if (!(await waitForCi(github, owner, repo, v2.head.sha, { timeoutMs, intervalMs }))) {
-    core.setFailed(`conflict fix: CI never started on #${v2.number}; #${number} stays open`);
-    return { closed: false, v2: v2.number };
-  }
-  await github.rest.issues.createComment({ owner, repo, issue_number: number, body: `Superseded by #${v2.number}.` });
-  await github.rest.pulls.update({ owner, repo, pull_number: number, state: 'closed' });
-  core.info(`#${number} closed; superseded by #${v2.number}`);
-  return { closed: true, v2: v2.number };
+  core.info(`#${number}: conflict resolved in ${result.commit.sha}`);
+  return { merged: true, sha: result.commit.sha };
 }
 
 module.exports = async ({ github, context, core }) => {
@@ -76,8 +33,4 @@ module.exports = async ({ github, context, core }) => {
   }
   await publish({ github, context, core, number });
 };
-module.exports.v2Title = v2Title;
-module.exports.v2Body = v2Body;
-module.exports.v2Labels = v2Labels;
-module.exports.waitForCi = waitForCi;
 module.exports.publish = publish;

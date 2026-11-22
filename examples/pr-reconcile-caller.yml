@@ -4,8 +4,8 @@
 # reconciles every open pull request on it: BEHIND gets update-branch, DIRTY gets the
 # merge-conflict label. With conflict_fix: true, each eligible conflicted pull request
 # (head commit at least 15 minutes old, not Renovate, not a promotion, not a v2, no
-# workflow files) is queued once per head commit, and the conflict-fix job below opens
-# a v2 of it on the current base. No workflow_dispatch and no actions permission.
+# workflow files) is queued once per head commit, and the conflict-fix job below pushes
+# the resolution to its branch as a merge commit. No workflow_dispatch and no actions permission.
 #
 # Per-repository text comes from repository variables (both optional):
 #   - var CI_FIX_REPO_CONTEXT  what the repository is and how it builds
