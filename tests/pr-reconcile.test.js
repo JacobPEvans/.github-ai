@@ -111,7 +111,10 @@ describe('reconcile', () => {
     expect(sweep).toContain('    runs-on: review\n');
     expect(sweep).not.toContain('group: pr-reconcile\n');
     expect(sweep).toContain('    permissions:\n      contents: read\n      id-token: write\n');
-    expect(sweep).toContain('      fail-fast: false\n');
+    expect(sweep).toContain('      group: pr-reconcile-sweep\n');
+    expect(sweep).not.toContain('matrix');
+    expect(sweep).toContain('await Promise.allSettled(owners.map(sweep));');
+    expect(sweep).toContain('sweepOwner: owner');
     expect(sweep).toContain('          role: pr-reconcile-sweep\n');
     expect(sweep).toContain('/v1/github/token`');
     expect(sweep).toContain("const permissions = { actions: 'write', checks: 'read', contents: 'write', pull_requests: 'write', statuses: 'write' };");
