@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.60.0](https://github.com/JacobPEvans/.github-ai/compare/v2.59.0...v2.60.0) (2026-11-22)
+
+
+### Features
+
+* **agent:** opencode-qwen run j-d000e0dec975ecaf ([de2cc3b](https://github.com/JacobPEvans/.github-ai/commit/de2cc3bd442174db71600e432d6bf70e2b0e0013))
+
+
+### Bug Fixes
+
+* **local-model-setup:** reject a daily run limit above the safe integer range ([#303](https://github.com/JacobPEvans/.github-ai/issues/303)) ([de2cc3b](https://github.com/JacobPEvans/.github-ai/commit/de2cc3bd442174db71600e432d6bf70e2b0e0013))
+
 ## [2.59.0](https://github.com/JacobPEvans/.github-ai/compare/v2.58.0...v2.59.0) (2026-11-22)
 
 
