@@ -1,12 +1,12 @@
 # Conflict Fix
 #
 # Reusable workflow: called by a consumer repository's CI-fix caller with conflict_pr for a conflicted pull request.
-# The agent re-applies the pull request's net diff onto the current base tip; the publisher opens a v2 pull request
-# (same title and labels, body plus `Supersedes #N`) with a verified commit, and closes the original once the v2's
-# CI has started.
+# The agent re-applies the pull request's net diff onto the current base tip; the publisher lands the result on the
+# pull request's own branch as one verified merge commit of that branch and the base tip. The pull request keeps its
+# number and history; nothing is force-pushed, opened or closed.
 #
-# Refused, with nothing opened: a pull request that is not open or not conflicted, a fork head, a v2, or one whose
-# `<head>-v2` branch exists (at most one v2 per original). The agent's patch may change only files the original
+# Refused, with nothing published: a pull request that is not open or not conflicted, a fork head, a v2, or one whose
+# `<head>-v2` branch exists. The agent's patch may change only files the original
 # pull request changed, and never `.github/`.
 
 name: cc-Conflict Fix
@@ -114,7 +114,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # The v2 branch starts at this commit; the agent's patch applies to it.
+      # The merge commit's base parent is this commit; the agent's patch applies to it.
       - name: Record the base tip
         id: base
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -205,7 +205,7 @@ jobs:
           retention-days: 1
 
   publish:
-    name: Publish the v2 pull request
+    name: Publish the resolution
     needs: fix
     if: ${{ !inputs.dry_run }}
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
@@ -304,7 +304,7 @@ jobs:
           secrets: |
             github/token/${{ steps.commit-role.outputs.role }} token | COMMIT_TOKEN ;
 
-      - name: Open the v2 and close the original
+      - name: Push the resolution to the pull request branch
         if: steps.pr-open.outputs.open == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
@@ -333,7 +333,7 @@ jobs:
             const prNumber = Number(process.env.PR_NUMBER);
             if (!prNumber) return;
             const marker = '<!-- conflict-fix-failed -->';
-            const body = `${marker}\n> **Conflict fix failed.** No v2 pull request replaced this one.\n> [View run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+            const body = `${marker}\n> **Conflict fix failed.** The pull request is unchanged.\n> [View run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
             const repo = { owner: context.repo.owner, repo: context.repo.repo };
             // One failure comment per PR: a later failed run updates it in place.
             const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: prNumber, per_page: 100 });
