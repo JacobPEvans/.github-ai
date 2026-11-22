@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.67.0](https://github.com/JacobPEvans/.github-ai/compare/v2.66.0...v2.67.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **pr-reconcile-sweep:** sweep every owner from one job ([#317](https://github.com/JacobPEvans/.github-ai/issues/317)) ([a8fae4b](https://github.com/JacobPEvans/.github-ai/commit/a8fae4b6c700f8de32d9af692414182a7e04f237))
+
 ## [2.66.0](https://github.com/JacobPEvans/.github-ai/compare/v2.65.0...v2.66.0) (2026-11-22)
 
 
