@@ -1,7 +1,8 @@
 name: AI Merge Gate
 on:
+  # labeled and unlabeled re-run the gate, so an override label takes effect: the reviews read labels from the event.
   pull_request:
-    types: [opened, ready_for_review, synchronize, reopened, edited]
+    types: [opened, ready_for_review, synchronize, reopened, edited, labeled, unlabeled]
 permissions:
   checks: read
   contents: read
