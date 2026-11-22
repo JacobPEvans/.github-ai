@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.61.0](https://github.com/JacobPEvans/.github-ai/compare/v2.60.0...v2.61.0) (2026-11-22)
+
+
+### Features
+
+* **ai-merge-gate:** re-run the gate when a label is added or removed ([#189](https://github.com/JacobPEvans/.github-ai/issues/189)) ([33ae638](https://github.com/JacobPEvans/.github-ai/commit/33ae638728629efe516a46a75d5b90907fd17e66))
+
 ## [2.60.0](https://github.com/JacobPEvans/.github-ai/compare/v2.59.0...v2.60.0) (2026-11-22)
 
 
