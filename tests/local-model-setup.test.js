@@ -20,6 +20,16 @@ for (const key of Object.keys(valid)) {
   });
 }
 
+test('local-only validation reports every missing setting in one run', () => {
+  const run = spawnSync('bash', ['-e', '-c', validate.run], {
+    env: { ...valid, OPENBAO_ADDR: '', OTEL_ENDPOINT: '' },
+    encoding: 'utf8',
+  });
+  expect(run.status).toBe(1);
+  expect(run.stderr).toContain('OPENBAO_ADDR is required');
+  expect(run.stderr).toContain('AI_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required');
+});
+
 for (const limit of ['0', '-1', 'abc']) {
   test(`local-only validation rejects limit ${limit}`, () => {
     expect(spawnSync('bash', ['-e', '-c', validate.run], {
