@@ -457,15 +457,14 @@ function isExcludedRepository(exclusions, owner, repo) {
   return exclusions.has(`${owner}/${repo}`.toLowerCase());
 }
 
-async function targets({ github, context, core }) {
+async function targets({ github, context, core, sweepOwner }) {
   const { owner, repo } = context.repo;
   if (process.env.PR_NUMBER) return [{ owner, repo, number: Number(process.env.PR_NUMBER) }];
   if (process.env.BASE_REF) {
     const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', base: process.env.BASE_REF, per_page: 100 });
     return prs.map((pr) => ({ owner, repo, number: pr.number }));
   }
-  if (process.env.SWEEP_OWNER) {
-    const sweepOwner = process.env.SWEEP_OWNER;
+  if (sweepOwner) {
     if (!/^[A-Za-z0-9-]+$/.test(sweepOwner)) throw new Error(`invalid SWEEP_OWNER: ${sweepOwner}`);
     // user: matches repositories of both user accounts and organizations; org: matches organizations only.
     const items = await github.paginate(github.rest.search.issuesAndPullRequests, {
@@ -481,7 +480,8 @@ async function targets({ github, context, core }) {
   return [];
 }
 
-module.exports = async function run({ github, context, core }) {
+// sweepOwner is an argument, so one job can sweep several owners at once.
+module.exports = async function run({ github, context, core, sweepOwner = process.env.SWEEP_OWNER }) {
   const events = [];
   const resolver = process.env.RESOLVER_REPO || '';
   if (resolver && !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(resolver)) throw new Error(`invalid RESOLVER_REPO: ${resolver}`);
@@ -497,7 +497,7 @@ module.exports = async function run({ github, context, core }) {
     core.setOutput('conflict_prs', '[]');
     return events;
   }
-  const all = await targets({ github, context, core });
+  const all = await targets({ github, context, core, sweepOwner });
   const selected = all.filter((target) => !isExcludedRepository(exclusions, target.owner, target.repo));
   const skipped = all.length - selected.length;
   if (skipped > 0) core.info(`skipped ${skipped} pull requests in excluded repositories`);
