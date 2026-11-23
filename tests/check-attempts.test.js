@@ -56,7 +56,7 @@ describe('check-attempts', () => {
     expect(core.setFailed).toHaveBeenCalled();
   });
 
-  it('counts only attempts by this fixer version, up to four attempts in all', async () => {
+  it('counts only attempts by this fixer version, up to six attempts in all', async () => {
     process.env.FIXER_VERSION = 'new';
     const mine = `${MARKER}\n<!-- ci-fix-version:new -->`;
     github.paginate.mockResolvedValue([{ body: MARKER }, { body: `${MARKER}\n<!-- ci-fix-version:old -->` }, { body: mine }]);
@@ -64,7 +64,7 @@ describe('check-attempts', () => {
     expect(core.getOutput('should_run')).toBe('true');
     expect(core.getOutput('attempt')).toBe('2');
 
-    github.paginate.mockResolvedValue([{ body: MARKER }, { body: MARKER }, { body: MARKER }, { body: mine }]);
+    github.paginate.mockResolvedValue([...Array(5).fill({ body: MARKER }), { body: mine }]);
     await run({ github, context, core });
     expect(core.getOutput('should_run')).toBe('false');
   });
