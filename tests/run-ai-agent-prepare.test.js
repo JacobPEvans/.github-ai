@@ -113,14 +113,14 @@ describe('run-ai-agent prepare validation', () => {
     const step = action.runs.steps.find((s) => s.name === 'Run OpenHands');
     expect(action.inputs.time_limit_minutes.default).toBe('25');
     expect(step.env.TIME_LIMIT_MINUTES).toBe('${{ inputs.time_limit_minutes }}');
-    const run = (python) => {
+    const run = (python, keep = '') => {
       const dir = mkdtempSync(join(tmpdir(), 'openhands-limit-'));
       try {
         writeFileSync(join(dir, 'python'), `#!/bin/sh\n${python}\n`);
         chmodSync(join(dir, 'python'), 0o755);
         return spawnSync('/bin/bash', ['-c', step.run], {
           encoding: 'utf8',
-          env: { PATH: `${dir}:${process.env.PATH}`, RUNNER_TEMP: dir, PROMPT: 'p', MODEL: 'm', TIME_LIMIT_MINUTES: '0.02' },
+          env: { PATH: `${dir}:${process.env.PATH}`, RUNNER_TEMP: dir, PROMPT: 'p', MODEL: 'm', TIME_LIMIT_MINUTES: '0.02', KEEP_EDITS: keep },
         });
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -129,6 +129,10 @@ describe('run-ai-agent prepare validation', () => {
     const stopped = run('sleep 5');
     expect(stopped.status).toBe(124);
     expect(stopped.stdout).toContain('OpenHands stopped at its 0.02-minute limit');
+    const kept = run('sleep 5', 'true');
+    expect(kept.status).toBe(0);
+    expect(kept.stdout).toContain('its edits so far are kept');
+    expect(run('exit 3', 'true').status).toBe(3);
     expect(run('exit 0').status).toBe(0);
     const failed = run('exit 3');
     expect(failed.status).toBe(3);

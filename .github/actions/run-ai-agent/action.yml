@@ -76,6 +76,10 @@ inputs:
     description: Release tag of OpenHands/software-agent-sdk that the openhands agent installs and runs.
     required: false
     default: v1.60.2
+  openhands_keep_edits_at_time_limit:
+    description: "'true' keeps the edits OpenHands made when its time limit stops it, and the step succeeds."
+    required: false
+    default: "false"
   permission_profile:
     description: Codex permission profile. Accepts read-only, workspace, or an explicit profile name.
     required: false
@@ -215,6 +219,7 @@ runs:
         api_key: ${{ inputs.api_key }}
         version: ${{ inputs.openhands_version }}
         working_directory: ${{ inputs.working_directory }}
+        keep_edits_at_time_limit: ${{ inputs.openhands_keep_edits_at_time_limit }}
 
     # Codex runs first (when selected) for two reasons: its drop-sudo safety
     # strategy permanently removes sudo for the rest of the job, and a failed

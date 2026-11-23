@@ -30,6 +30,12 @@ inputs:
       timeout, so a long run fails with a message instead of being cancelled by the job timeout.
     required: false
     default: "25"
+  keep_edits_at_time_limit:
+    description: >-
+      'true' ends the step successfully when the time limit stops the agent, so the caller publishes the edits made
+      so far. Any other value fails the step and the edits are not published.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -62,6 +68,7 @@ runs:
         LLM_API_KEY: ${{ inputs.api_key }}
         PYTHONPATH: ""
         TIME_LIMIT_MINUTES: ${{ inputs.time_limit_minutes }}
+        KEEP_EDITS: ${{ inputs.keep_edits_at_time_limit }}
       run: |
         set -euo pipefail
         printf '%s' "$PROMPT" > "$RUNNER_TEMP/openhands_prompt.md"
@@ -70,6 +77,10 @@ runs:
         LLM_MODEL="openai/$MODEL" timeout --kill-after=30s "${TIME_LIMIT_MINUTES}m" \
           python "$RUNNER_TEMP/openhands_agent_script.py" "$RUNNER_TEMP/openhands_prompt.md" || rc=$?
         if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+          if [ "${KEEP_EDITS:-}" = "true" ]; then
+            echo "::warning::OpenHands stopped at its ${TIME_LIMIT_MINUTES}-minute limit before it finished; its edits so far are kept"
+            exit 0
+          fi
           echo "::error::OpenHands stopped at its ${TIME_LIMIT_MINUTES}-minute limit before it finished; its edits are not published"
         fi
         exit "$rc"
