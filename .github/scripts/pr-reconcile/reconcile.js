@@ -255,7 +255,13 @@ async function rerunFirst(github, owner, repo, pr, broken, statuses, down) {
   const last = statuses.find((status) => status.context === RERUN_CONTEXT);
   const done = Number(/^rerun (\d+):/.exec(last?.description || '')?.[1] || 0);
   if (done >= RERUN_MAX) return null;
-  const check = broken.find((run) => (RERUN_CHECKS.test(run.name) || down.has(run)) && ciFixRunId(run));
+  // A fix was already dispatched at this head and the head did not move: the fixer found nothing to change, so a
+  // failure that is still there is treated as transient and re-run before another fix. One check is not re-run twice
+  // in a row.
+  const tried = statuses.some((status) => status.context === STATUS_CONTEXT && /^ci-fix( |$)/.test(status.description || ''));
+  const lastName = /^rerun \d+: (.*)$/.exec(last?.description || '')?.[1];
+  const check = broken.find((run) => ciFixRunId(run) && (RERUN_CHECKS.test(run.name) || down.has(run)
+    || (tried && run.conclusion === 'failure' && run.name.slice(0, 120) !== (lastName || '').slice(0, 120))));
   if (!check) return null;
   await github.rest.actions.reRunWorkflowFailedJobs({ owner, repo, run_id: Number(ciFixRunId(check)) });
   await github.rest.repos.createCommitStatus({
