@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.81.0](https://github.com/JacobPEvans/.github-ai/compare/v2.80.0...v2.81.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** re-run a still-failing check before a second fix at the same head ([#350](https://github.com/JacobPEvans/.github-ai/issues/350)) ([a593fb5](https://github.com/JacobPEvans/.github-ai/commit/a593fb56a57c638d05626250cbeea0288d15f7ca))
+
 ## [2.80.0](https://github.com/JacobPEvans/.github-ai/compare/v2.79.0...v2.80.0) (2026-11-23)
 
 
