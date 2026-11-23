@@ -82,6 +82,8 @@ function staticBlocker(pr, held) {
   const label = BLOCK_LABELS.find((name) => labels.includes(name));
   if (label) return `label:${label}`;
   if (pr.head.ref.startsWith('agent/zcode/')) return 'zcode-branch';
+  // Renovate merges its lock file maintenance itself inside its own schedule, after the update has soaked.
+  if (/^renovate\/(.+-)?lock-file-maintenance$/.test(pr.head.ref)) return 'renovate-soak';
   // Only the labelled promotion on a git-flow repository is eligible to merge here; every other develop-to-main pull request waits.
   if (pr.base.ref === 'main' && pr.head.ref === 'develop'
     && (pr.base.repo.default_branch !== 'develop' || !labels.includes(FREEZE_LABEL))) return 'promotion';
