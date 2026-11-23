@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.74.0](https://github.com/JacobPEvans/.github-ai/compare/v2.73.0...v2.74.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** apply a title from the agent and pin the catalog at v1.135.2 ([#334](https://github.com/JacobPEvans/.github-ai/issues/334)) ([7afcea2](https://github.com/JacobPEvans/.github-ai/commit/7afcea20b454f58e84ee2f10382c140df257e45b))
+
 ## [2.73.0](https://github.com/JacobPEvans/.github-ai/compare/v2.72.0...v2.73.0) (2026-11-23)
 
 
