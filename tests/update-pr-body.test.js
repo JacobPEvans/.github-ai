@@ -35,4 +35,17 @@ describe('update-pr-body', () => {
     expect(await update(' \n')).toEqual([]);
     expect(await update('x'.repeat(60001))).toEqual([]);
   });
+
+  it('applies a first Title line, with or without a description below it', async () => {
+    expect(await update('Title: fix(role): correct the port\n\n## Changes\n')).toEqual([
+      { owner: 'test-owner', repo: 'test-repo', pull_number: 42, title: 'fix(role): correct the port', body: '## Changes' },
+    ]);
+    expect(await update('Title: fix(role): correct the port\n')).toEqual([
+      { owner: 'test-owner', repo: 'test-repo', pull_number: 42, title: 'fix(role): correct the port' },
+    ]);
+  });
+
+  it('never applies a title that marks a breaking change', async () => {
+    expect(await update('Title: feat(role)!: drop the old port\n')).toEqual([]);
+  });
 });
