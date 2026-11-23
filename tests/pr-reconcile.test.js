@@ -42,6 +42,7 @@ function github(prData, { statuses = [], files = [] } = {}) {
   gh.rest.repos.getCombinedStatusForRef = mock().mockResolvedValue({ data: { statuses } });
   gh.rest.repos.createCommitStatus = mock().mockResolvedValue({});
   gh.rest.repos.createDispatchEvent = mock().mockResolvedValue({});
+  gh.rest.repos.compareCommitsWithBasehead = mock().mockResolvedValue({ data: { behind_by: 0 } });
   gh.rest.actions.createWorkflowDispatch = mock().mockResolvedValue({});
   gh.rest.actions.reRunWorkflowFailedJobs = mock().mockResolvedValue({});
   gh.paginate.mockResolvedValue(files);
@@ -83,6 +84,7 @@ describe('reconcile', () => {
     delete process.env.PR_RECONCILE_EXCLUDE_REPOS;
     delete process.env.CI_FIX_WORKFLOW;
     delete process.env.CI_FIX_SKIP_CHECKS;
+    delete process.env.FIXER_VERSION;
     delete process.env.BASE_REF;
     delete process.env.SWEEP_OWNER;
     process.env.PR_NUMBER = '7';
@@ -97,27 +99,63 @@ describe('reconcile', () => {
     expect(workflow).toContain('      PR_RECONCILE_EXCLUDE_REPOS:\n        required: false');
     expect(workflow.split(line).length - 1).toBe(1);
     expect(workflow.indexOf(line)).toBeGreaterThan(workflow.indexOf('      - name: Reconcile'));
-    expect(sweep.split(line).length - 1).toBe(1);
-    expect(sweep.indexOf(line)).toBeGreaterThan(sweep.indexOf('      - name: Reconcile'));
+    const sweepLine = '          PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}';
+    expect(sweep.split(sweepLine).length - 1).toBe(1);
+    expect(sweep.indexOf(sweepLine)).toBeGreaterThan(sweep.indexOf('      - name: Reconcile'));
     expect(action.match(/PR_RECONCILE_EXCLUDE_REPOS:/g)).toEqual(['PR_RECONCILE_EXCLUDE_REPOS:']);
   });
 
-  it('runs the sweep on self-hosted runners with an OIDC-minted owner token and no stored App key', () => {
+  it('runs the sweep on review runners with an OIDC-minted owner token and no stored App key', () => {
     const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
 
     expect(sweep).toContain('\npermissions:\n  contents: read\n  id-token: write\n\njobs:');
     expect(sweep).toContain('    runs-on: ubuntu-24.04\n    permissions: {}\n');
-    expect(sweep).toContain('    runs-on: self-hosted\n');
+    expect(sweep).toContain('    runs-on: review\n');
     expect(sweep).not.toContain('group: pr-reconcile\n');
     expect(sweep).toContain('    permissions:\n      contents: read\n      id-token: write\n');
-    expect(sweep).toContain('      fail-fast: false\n');
+    expect(sweep).toContain('      group: pr-reconcile-sweep\n');
+    expect(sweep).not.toContain('matrix');
+    expect(sweep).toContain('await Promise.allSettled(owners.map(sweep));');
+    expect(sweep).toContain('sweepOwner: owner');
     expect(sweep).toContain('          role: pr-reconcile-sweep\n');
-    expect(sweep).toContain('"$BAO_ADDR/v1/github/token"');
-    expect(sweep).toContain('{org_name: $o, permissions: {actions: "write", checks: "read", contents: "write", issues: "write", pull_requests: "write", statuses: "write"}}');
-    expect(sweep).toContain('echo "::add-mask::$token"');
+    expect(sweep).toContain('/v1/github/token`');
+    expect(sweep).toContain("const permissions = { actions: 'write', checks: 'read', contents: 'write', pull_requests: 'write', statuses: 'write' };");
+    expect(sweep).toContain('core.setSecret(token);');
+    expect(sweep).toContain('github: getOctokit(token)');
+    expect(sweep).not.toContain('steps.mint');
+    expect(sweep).not.toContain('token=$token');
     expect(sweep).not.toContain('GH_APP_CLAUDE_BOT_PRIVATE_KEY');
     expect(sweep).not.toContain('pr-reconcile.yml');
     expect(sweep).not.toContain('repository:');
+  });
+
+  it('mints the calling repository token through the store when the caller grants OIDC, else the App key', () => {
+    const text = readFileSync('.github/workflows/pr-reconcile.yml', 'utf8');
+    const sweep = readFileSync('.github/workflows/pr-reconcile-sweep.yml', 'utf8');
+    const workflow = Bun.YAML.parse(text);
+    const call = workflow.on.workflow_call;
+    const steps = workflow.jobs.reconcile.steps;
+    const step = (name) => steps.find((s) => s.name === name);
+    const permissions = "const permissions = { contents: 'write', pull_requests: 'write', statuses: 'write' };";
+    const example = readFileSync('examples/pr-reconcile-caller.yml', 'utf8');
+
+    expect(call.secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY.required).toBe(false);
+    expect(call.secrets.OPENBAO_ADDR.required).toBe(false);
+    expect(call.inputs.runner_label.default).toBe('ubuntu-24.04');
+    // Only the review pool or the hosted runner: a caller cannot name an arbitrary runner label.
+    expect(workflow.jobs.reconcile['runs-on']).toBe("${{ inputs.runner_label == 'review' && 'review' || 'ubuntu-24.04' }}");
+    expect(workflow.permissions).toEqual({ contents: 'read' });
+    expect(step('Find the OpenBao address').run).toContain('[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && [ -z "$SWEEP_OWNER" ]');
+    expect(step('Log in to OpenBao').with).toMatchObject({ role: 'pr-reconcile', jwtGithubAudience: 'openbao', outputToken: true });
+    expect(step('Mint repository token').with.script).toContain(permissions);
+    // Single-repository reconcile never dispatches or reruns workflows, so it gets no actions or checks scope.
+    expect(step('Mint repository token').with.script).not.toMatch(/actions:|checks:|issues:|workflows:/);
+    expect(example).toContain('uses: JacobPEvans/.github-ai/.github/workflows/pr-reconcile.yml@v2\n');
+    expect(step('Mint repository token').with.script).toContain('org_name: context.repo.owner, repositories, permissions');
+    expect(step('Mint repository token').with.script).toContain('core.setSecret(token);');
+    for (const name of ['Log in to OpenBao', 'Mint repository token']) expect(step(name).if).toBe("steps.bao.outputs.addr != ''");
+    expect(step('Mint App token').if).toBe("steps.bao.outputs.addr == ''");
+    expect(step('Reconcile').with['github-token']).toBe('${{ steps.bao-token.outputs.token || steps.app-token.outputs.token }}');
   });
 
   it('calls update-branch at the observed head and records the action once', async () => {
@@ -432,11 +470,19 @@ describe('reconcile', () => {
   it('waits while a check run is not completed', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const gh = github(pr());
-    gh.paginate.mockResolvedValueOnce([checkRun({ status: 'in_progress' })]);
+    gh.paginate.mockResolvedValueOnce([checkRun({ status: 'in_progress', conclusion: null })]);
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
     expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-pending' });
     expect('check' in event).toBe(false);
+  });
+
+  it('treats a run with a conclusion as finished whatever its status', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun(), checkRun({ name: 'export', status: 'in_progress', conclusion: 'success' })]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event.outcome).not.toBe('ci-pending');
   });
 
   it('ignores failed checks a code edit cannot fix', async () => {
@@ -580,6 +626,27 @@ describe('reconcile', () => {
     expect(event.check).toBe('codeql');
   });
 
+  it('updates a branch behind the base when the failed check never runs on the base', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'pr-only-scan' })]).mockResolvedValueOnce([]);
+    gh.rest.repos.compareCommitsWithBasehead.mockResolvedValue({ data: { behind_by: 4 } });
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'base-merged', check: 'pr-only-scan' });
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+  });
+
+  it('picks the failed check that finished last', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([
+      checkRun({ name: 'a-title', completed_at: '2026-01-01T09:00:00Z' }),
+      checkRun({ name: 'b-review', completed_at: '2026-01-01T10:00:00Z' }),
+    ]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event).toMatchObject({ outcome: 'ci-fix-dispatched', check: 'b-review' });
+  });
+
   it('picks the alphabetically first failed check so the choice is stable', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const gh = github(pr({ base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }));
@@ -622,7 +689,7 @@ describe('reconcile', () => {
     expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0].description)).not.toContain('ci-fix');
   });
 
-  it('does not start a CI fix for a held, promotion, fork, release or Renovate pull request', async () => {
+  it('does not start a CI fix for a held, promotion, fork or release pull request', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const held = github(pr({ labels: [{ name: 'merge-hold' }] }));
     await run({ github: held, context: createMockContext(), core });
@@ -644,10 +711,14 @@ describe('reconcile', () => {
     expect(release.paginate).not.toHaveBeenCalled();
     expect(release.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
 
+  });
+
+  it('starts a CI fix for a red Renovate pull request', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const renovate = github(pr({ user: { login: 'renovate[bot]' } }));
-    await run({ github: renovate, context: createMockContext(), core });
-    expect(renovate.paginate).not.toHaveBeenCalled();
-    expect(renovate.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    renovate.paginate.mockResolvedValueOnce([checkRun()]);
+    const [event] = await run({ github: renovate, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
   });
 
   it('does not start a CI fix when classify acts, even with failed checks', async () => {
@@ -676,6 +747,66 @@ describe('reconcile', () => {
     expect(gh.paginate).not.toHaveBeenCalled();
     expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
     expect(event).toMatchObject({ action: 'ci-fix', outcome: 'already-done' });
+  });
+
+  it('dispatches again when the fix record is from another fixer version', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    process.env.FIXER_VERSION = 'abcdef1234';
+    const same = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix @abcdef1' }] });
+    let [event] = await run({ github: same, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'already-done' });
+
+    const other = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix' }, { context: 'pr-reconcile-rerun', description: 'rerun 2: ci-unit' }] });
+    other.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
+    [event] = await run({ github: other, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
+    expect(other.rest.repos.createCommitStatus.mock.calls.map((c) => c[0].description)).toContain('ci-fix @abcdef1');
+  });
+
+  it('dispatches again at the same head when a check failed after the recorded CI fix', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const at = (ms) => new Date(Date.now() - ms).toISOString();
+    const statuses = [{ context: 'pr-reconcile', description: 'ci-fix', updated_at: at(60 * 60 * 1000) }];
+    const before = github(pr(), { statuses });
+    before.paginate.mockResolvedValue([checkRun({ completed_at: at(2 * 60 * 60 * 1000) })]);
+    const [skip] = await run({ github: before, context: createMockContext(), core });
+    expect(skip.outcome).toBe('already-done');
+
+    const after = github(pr(), { statuses: [...statuses, { context: 'pr-reconcile-rerun', description: 'rerun 2: ci-unit' }] });
+    after.paginate.mockResolvedValue([checkRun({ completed_at: at(30 * 60 * 1000) })]);
+    const [event] = await run({ github: after, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
+  });
+
+  it('re-runs a check that still fails at a head where a fix was already dispatched', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    process.env.FIXER_VERSION = 'abcdef1234';
+    const statuses = [{ context: 'pr-reconcile', description: 'ci-fix @0000000' }];
+    const first = github(pr(), { statuses });
+    first.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
+    let [event] = await run({ github: first, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'rerun', check: 'ci-unit' });
+    expect(first.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+
+    const again = github(pr(), { statuses: [...statuses, { context: 'pr-reconcile-rerun', description: 'rerun 1: ci-unit' }] });
+    again.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
+    [event] = await run({ github: again, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
+  });
+
+  it('dispatches again at the same head once the recorded CI fix is six hours old', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const at = (ms) => new Date(Date.now() - ms).toISOString();
+    const recent = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix', updated_at: at(5 * 60 * 60 * 1000) }] });
+    const [skip] = await run({ github: recent, context: createMockContext(), core });
+    expect(recent.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(skip.outcome).toBe('already-done');
+
+    const stale = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix', updated_at: at(7 * 60 * 60 * 1000) }, { context: 'pr-reconcile-rerun', description: 'rerun 2: ci-unit' }] });
+    stale.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
+    const [event] = await run({ github: stale, context: createMockContext(), core });
+    expect(stale.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
   });
 
   it('refuses a CI fix workflow name that is not a plain file name', async () => {
@@ -713,13 +844,21 @@ describe('conflict fix', () => {
     core.summary = { addRaw: mock(() => core.summary), write: mock(async () => {}) };
     delete process.env.RESOLVER_REPO;
     delete process.env.CI_FIX_SKIP_CHECKS;
+    delete process.env.FIXER_VERSION;
     delete process.env.MERGE_ENABLED;
     delete process.env.CONFLICT_OUTPUT;
     process.env.CI_FIX_WORKFLOW = 'ci-fix.yml';
     process.env.PR_NUMBER = '7';
   });
 
-  it('dispatches the caller with conflict_pr for a conflict whose head is 15 minutes old, once per head', async () => {
+  it('dispatches a conflict that changes a .github data file outside the CI paths', async () => {
+    const gh = conflictGithub(dirty(), { files: [{ filename: '.github/router-contracts.yml' }] });
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(gh.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+    expect(event.conflict.outcome).not.toBe('conflict-skip');
+  });
+
+  it('dispatches the caller with conflict_pr for a conflict whose head is 15 minutes old', async () => {
     const gh = conflictGithub(dirty(), { ageMs: MIN_AGE });
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.actions.createWorkflowDispatch.mock.calls[0][0]).toEqual({
@@ -727,19 +866,62 @@ describe('conflict fix', () => {
       inputs: { failure_head_branch: 'feat/x', conflict_pr: '7' },
     });
     expect(gh.rest.git.getRef.mock.calls[0][0].ref).toBe('heads/feat/x-v2');
-    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched' })]);
+    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched 1' })]);
     expect(event.conflict).toEqual({ outcome: 'conflict-dispatched', reason: 'ci-fix.yml' });
     expect(core.summary.addRaw.mock.calls[0][0]).toContain('| test-owner/test-repo#7 | conflict-dispatched | ci-fix.yml |');
 
-    const again = conflictGithub(dirty(), { statuses: [{ context: 'pr-reconcile-conflict', description: 'conflict-dispatched' }] });
-    const [second] = await run({ github: again, context: createMockContext(), core });
-    expect(again.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
-    expect(second.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-dispatched' });
+  });
+
+  const record = (description, ageMs) => ({ context: 'pr-reconcile-conflict', description, created_at: new Date(Date.now() - ageMs).toISOString() });
+
+  it('retries an attempt that left the original open after 45 minutes, at most twice per head per day', async () => {
+    const running = conflictGithub(dirty(), { statuses: [record('conflict-dispatched 1', 44 * 60 * 1000)] });
+    const [first] = await run({ github: running, context: createMockContext(), core });
+    expect(running.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(first.conflict).toEqual({ outcome: 'conflict-skip', reason: 'conflict-dispatched 1 under 45 min ago' });
+
+    for (const legacy of ['conflict-dispatched 1', 'conflict-dispatched']) {
+      const failed = conflictGithub(dirty(), { statuses: [record(legacy, 46 * 60 * 1000)] });
+      const [retry] = await run({ github: failed, context: createMockContext(), core });
+      expect(failed.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
+      expect(conflictStatuses(failed)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched 2' })]);
+      expect(retry.conflict).toEqual({ outcome: 'conflict-dispatched', reason: 'ci-fix.yml' });
+    }
+
+    for (const final of ['conflict-dispatched 2', 'conflict-lead']) {
+      const spent = conflictGithub(dirty(), { statuses: [record(final, DAY - 60 * 1000)] });
+      const [skip] = await run({ github: spent, context: createMockContext(), core });
+      expect(spent.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+      expect(skip.conflict).toEqual({ outcome: 'conflict-skip', reason: `already ${final}` });
+    }
+  });
+
+  it('starts the count over at a head whose last attempt is a day old, and never after conflict-lead', async () => {
+    const stale = conflictGithub(dirty(), { statuses: [record('conflict-dispatched 2', DAY + 60 * 1000)] });
+    const [again] = await run({ github: stale, context: createMockContext(), core });
+    expect(conflictStatuses(stale)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched 1' })]);
+    expect(again.conflict).toEqual({ outcome: 'conflict-dispatched', reason: 'ci-fix.yml' });
+
+    // A spent count from another fixer version starts over; the same version stays spent.
+    process.env.FIXER_VERSION = 'abcdef1234';
+    const older = conflictGithub(dirty(), { statuses: [record('conflict-dispatched 2', 46 * 60 * 1000)] });
+    await run({ github: older, context: createMockContext(), core });
+    expect(conflictStatuses(older)).toEqual([expect.objectContaining({ description: 'conflict-dispatched 1 @abcdef1' })]);
+    const spent = conflictGithub(dirty(), { statuses: [record('conflict-dispatched 2 @abcdef1', 46 * 60 * 1000)] });
+    const [kept] = await run({ github: spent, context: createMockContext(), core });
+    expect(kept.conflict.outcome).toBe('conflict-skip');
+    delete process.env.FIXER_VERSION;
+
+    const lead = conflictGithub(dirty(), { statuses: [record('conflict-lead', 2 * DAY)] });
+    const [skip] = await run({ github: lead, context: createMockContext(), core });
+    expect(lead.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    expect(skip.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-lead' });
   });
 
   const skips = [
     ['a head commit its author pushed under 15 minutes ago', {}, { ageMs: MIN_AGE - 60000 }, 'head commit under 15 min old'],
-    ['a pull request that touches workflow files', {}, { files: [{ filename: '.github/workflows/ci.yml' }] }, 'workflow files'],
+    ['a pull request that touches workflow files', {}, { files: [{ filename: '.github/workflows/ci.yml' }] }, 'CI paths'],
+    ['a pull request that touches a composite action', {}, { files: [{ filename: '.github/actions/run/action.yml' }] }, 'CI paths'],
     ['a pull request already sent to the lead', { labels: [{ name: 'needs-lead' }] }, {}, 'needs-lead'],
     ['an original whose v2 branch exists', {}, { v2: true }, 'v2 branch exists'],
   ];
@@ -796,20 +978,26 @@ describe('conflict fix', () => {
     expect(event.conflict).toBeUndefined();
   });
 
-  it('queues instead of dispatching with CONFLICT_OUTPUT, once per head, even without a CI fix workflow', async () => {
+  it('queues instead of dispatching with CONFLICT_OUTPUT, counting attempts per head, even without a CI fix workflow', async () => {
     process.env.CONFLICT_OUTPUT = 'true';
     delete process.env.CI_FIX_WORKFLOW;
     const gh = conflictGithub(dirty());
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
-    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-queued' })]);
+    expect(conflictStatuses(gh)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-queued 1' })]);
     expect(event.conflict).toEqual({ outcome: 'conflict-queued', reason: 'conflict_prs output' });
     expect(conflictPrs()).toEqual(['["7"]']);
 
-    const again = conflictGithub(dirty(), { statuses: [{ context: 'pr-reconcile-conflict', description: 'conflict-queued' }] });
+    const again = conflictGithub(dirty(), { statuses: [record('conflict-queued', 46 * 60 * 1000)] });
     const [second] = await run({ github: again, context: createMockContext(), core });
-    expect(second.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-queued' });
-    expect(conflictPrs()[1]).toBe('[]');
+    expect(conflictStatuses(again)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-queued 2' })]);
+    expect(conflictPrs()[1]).toBe('["7"]');
+
+    const spent = conflictGithub(dirty(), { statuses: [record('conflict-queued 2', 46 * 60 * 1000)] });
+    const [third] = await run({ github: spent, context: createMockContext(), core });
+    expect(third.conflict).toEqual({ outcome: 'conflict-skip', reason: 'already conflict-queued 2' });
+    expect(conflictPrs()[2]).toBe('[]');
+    expect(second.conflict.outcome).toBe('conflict-queued');
   });
 
   it('sets conflict_prs to [] when nothing is queued, including dispatch mode and a skipped head', async () => {
@@ -835,6 +1023,6 @@ describe('conflict fix', () => {
     await run({ github: gh, context: createMockContext(), core });
     const contexts = gh.rest.repos.createCommitStatus.mock.calls.map((c) => [c[0].context, c[0].description]);
     expect(contexts).toContainEqual(['pr-reconcile', 'label-conflict']);
-    expect(contexts).toContainEqual(['pr-reconcile-conflict', 'conflict-dispatched']);
+    expect(contexts).toContainEqual(['pr-reconcile-conflict', 'conflict-dispatched 1']);
   });
 });

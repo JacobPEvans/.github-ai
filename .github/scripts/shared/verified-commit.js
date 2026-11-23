@@ -10,8 +10,10 @@
 // using the JacobPEvans-claude App token. Those commits are GitHub-VERIFIED
 // (satisfy required_signatures), attributed to the bot, and re-trigger CI.
 //
-// Two shapes:
+// Three shapes:
 //   commitToBranch — commit the diff onto an EXISTING branch (e.g. cc-ci-fix).
+//   mergeToBranch  — land the diff on an existing branch as a merge commit of that
+//                    branch and the checked-out base tip (cc-conflict-fix).
 //   openPr         — create a NEW branch, commit the diff, open a PR (resolver,
 //                    code-simplifier, next-steps, post-merge-*).
 const { execFileSync } = require('child_process');
@@ -101,6 +103,30 @@ async function commitToBranch({ github, context, core, branch, message, extraExc
   return { committed: true, commit };
 }
 
+// Shape 3: the working tree is the checked-out base tip plus a resolution. Land it on an existing branch as a merge
+// commit whose parents are that branch's head and the base tip, so the branch moves forward without a force-push.
+// createCommitOnBranch writes single-parent commits only, so this uses the Git Data API; GitHub signs the commit.
+async function mergeToBranch({ github, context, core, branch, headOid, message, extraExcludes }) {
+  const changes = stageChanges(extraExcludes);
+  if (!changes) { core.info('No file changes — nothing to merge.'); return { merged: false }; }
+  const { owner, repo } = context.repo;
+  const baseOid = git(['rev-parse', 'HEAD']).trim();
+  const tree = [];
+  for (const { path, contents } of changes.additions) {
+    const { data: blob } = await github.rest.git.createBlob({ owner, repo, content: contents, encoding: 'base64' });
+    const mode = git(['--literal-pathspecs', 'ls-files', '--stage', '--', path]).split(' ')[0];
+    tree.push({ path, mode, type: 'blob', sha: blob.sha });
+  }
+  for (const { path } of changes.deletions) tree.push({ path, mode: '100644', type: 'blob', sha: null });
+  const { data: base } = await github.rest.git.getCommit({ owner, repo, commit_sha: baseOid });
+  const { data: created } = await github.rest.git.createTree({ owner, repo, base_tree: base.tree.sha, tree });
+  const { data: commit } = await github.rest.git.createCommit({ owner, repo, message, tree: created.sha, parents: [headOid, baseOid] });
+  // force: false makes this a fast-forward from headOid; a head that moved since the read fails here.
+  await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: commit.sha, force: false });
+  core.info(`Merged ${changes.additions.length} change(s), ${changes.deletions.length} deletion(s) into ${branch}: ${commit.sha}`);
+  return { merged: true, commit };
+}
+
 // Shape 2: create a new branch off the checked-out HEAD, verified-commit the diff,
 // and open a PR. Returns { opened, pr } (opened: false when there were no changes). autoMerge: false leaves native
 // auto-merge off, as the human:review label does.
@@ -144,4 +170,4 @@ async function openPr({ github, context, core, branch, title, body, baseBranch, 
   return { opened: true, pr };
 }
 
-module.exports = { stageChanges, commitToBranch, openPr };
+module.exports = { stageChanges, commitToBranch, mergeToBranch, openPr };

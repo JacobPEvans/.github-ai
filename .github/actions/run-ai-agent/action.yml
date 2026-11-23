@@ -7,21 +7,25 @@ description: >-
 
 inputs:
   agent:
-    description: AI agent to run. Supported values are claude, codex and openhands.
+    description: >-
+      AI agent to run. Supported values are claude, codex and openhands. The
+      default, openhands, runs on the router's local medium role.
     required: false
-    default: claude
+    default: openhands
   prompt:
     description: Rendered prompt content sent to the selected agent.
     required: true
   claude_model:
-    description: Optional Claude model override. An empty value uses the provider default.
+    description: >-
+      Optional Claude model override. An empty value uses the router's local
+      medium role, never a provider default.
     required: false
     default: ""
   codex_model:
     description: >-
-      Optional Codex role override. An empty value uses claude_model: a
-      router role is provider-neutral, and the provider default would be a
-      vendor id the router does not serve.
+      Optional Codex role override. An empty value uses claude_model, then the
+      local medium role: a router role is provider-neutral, and the provider
+      default would be a vendor id the router does not serve.
     required: false
     default: ""
   model:
@@ -63,13 +67,19 @@ inputs:
     required: false
     default: ""
   openhands_model:
-    description: Router role alias OpenHands requests. Required when agent is openhands.
+    description: >-
+      Router role alias OpenHands requests. An empty value uses claude_model,
+      then the local medium role.
     required: false
     default: ""
   openhands_version:
     description: Release tag of OpenHands/software-agent-sdk that the openhands agent installs and runs.
     required: false
     default: v1.60.2
+  openhands_keep_edits_at_time_limit:
+    description: "'true' keeps the edits OpenHands made when its time limit stops it, and the step succeeds."
+    required: false
+    default: "false"
   permission_profile:
     description: Codex permission profile. Accepts read-only, workspace, or an explicit profile name.
     required: false
@@ -114,18 +124,6 @@ inputs:
     description: >-
       Optional ntfy hub base URL for the ops alert sent when the Claude run
       hits a gateway, budget or 429 failure. Empty skips the alert.
-    required: false
-    default: ""
-  claude_bot_app_id:
-    description: >-
-      Claude bot App ID (vars.GH_APP_CLAUDE_BOT_ID). Mints the token that posts
-      the neutral check run on a gateway failure. Empty fails the job on that path.
-    required: false
-    default: ""
-  claude_bot_private_key:
-    description: >-
-      Claude bot App private key (secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY). Used
-      only on a gateway failure. Empty fails the job on that path.
     required: false
     default: ""
 
@@ -174,6 +172,7 @@ runs:
         BASE_URL: ${{ inputs.base_url }}
         CLAUDE_ARGS: ${{ inputs.claude_args }}
         CLAUDE_MODEL: ${{ inputs.claude_model || inputs.model }}
+        CODEX_MODEL: ${{ inputs.codex_model }}
         OPENHANDS_MODEL: ${{ inputs.openhands_model }}
         PERMISSION_PROFILE: ${{ inputs.permission_profile }}
       run: '"$GITHUB_ACTION_PATH/prepare.sh" validate'
@@ -185,7 +184,7 @@ runs:
       with:
         repository: dryvist/ai-assistant-instructions
         # renovate: datasource=github-tags depName=dryvist/ai-assistant-instructions
-        ref: a021ead2c50a483afe42fda3b67905507baa649d  # v1.34.6
+        ref: ad42097acc9117db4365ca9b3ef33b12baf26f1f  # v1.34.7
         sparse-checkout: |
           AGENTS.md
           agentsmd/rules
@@ -209,13 +208,18 @@ runs:
     - name: Run OpenHands
       if: steps.prepare.outputs.effective-agent == 'openhands'
       uses: ./.ai-workflows/.github/actions/run-ai-agent/openhands
+      env:
+        # Read operations such as `gh issue view` use the job-scoped token, as for Codex.
+        # Agent jobs must keep this token read-only; publishers run separately.
+        GH_TOKEN: ${{ github.token }}
       with:
         prompt: ${{ inputs.prompt }}
-        model: ${{ inputs.openhands_model }}
+        model: ${{ steps.prepare.outputs.openhands-model }}
         base_url: ${{ inputs.base_url }}
         api_key: ${{ inputs.api_key }}
         version: ${{ inputs.openhands_version }}
         working_directory: ${{ inputs.working_directory }}
+        keep_edits_at_time_limit: ${{ inputs.openhands_keep_edits_at_time_limit }}
 
     # Codex runs first (when selected) for two reasons: its drop-sudo safety
     # strategy permanently removes sudo for the rest of the job, and a failed
@@ -249,7 +253,7 @@ runs:
         responses-api-endpoint: ${{ steps.prepare.outputs.responses-endpoint }}
         working-directory: ${{ inputs.working_directory }}
         permission-profile: ${{ steps.prepare.outputs.permission-profile }}
-        model: ${{ inputs.codex_model || inputs.claude_model || inputs.model }}
+        model: ${{ steps.prepare.outputs.codex-model }}
         effort: ${{ inputs.openai_effort || inputs.effort }}
         codex-version: ${{ inputs.codex_version }}
         codex-args: ${{ inputs.codex_args }}
@@ -313,17 +317,8 @@ runs:
         CLAUDE_GITHUB_TOKEN: ${{ steps.claude.outputs.github_token }}
       run: node "$GITHUB_ACTION_PATH/report-error.js"
 
-    # The check run is posted with the Claude bot App token, minted only on a
-    # gateway failure. A failed mint is named by the report step, which then fails.
-    - name: Mint the check-run token
-      id: check-token
-      if: always() && steps.claude.outcome == 'failure' && steps.report.outputs.gateway_class != ''
-      continue-on-error: true
-      uses: ./.ai-workflows/.github/actions/run-ai-agent/mint-check-token
-      with:
-        client_id: ${{ inputs.claude_bot_app_id }}
-        private_key: ${{ inputs.claude_bot_private_key }}
-
+    # The agent job holds no App key, so this step posts no check run; the summary,
+    # annotation and ops alert carry the reason.
     - name: Report gateway unavailability
       if: always() && steps.claude.outcome == 'failure' && steps.report.outputs.gateway_class != ''
       shell: bash
@@ -334,8 +329,7 @@ runs:
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         # Advisory: a gateway failure ends neutral.
         CONCLUSION: neutral
-        GITHUB_TOKEN: ${{ steps.check-token.outputs.token }}
-        CHECK_TOKEN_CAUSE: ${{ inputs.claude_bot_private_key == '' && 'claude_bot_private_key input is not set (the caller must pass GH_APP_CLAUDE_BOT_PRIVATE_KEY)' || 'the mint step failed' }}
+        CHECK_TOKEN_CAUSE: agent jobs hold no App key
         CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       run: bash "$GITHUB_ACTION_PATH/../../scripts/shared/gateway-failure.sh" report "$JOB_NAME" "$GATEWAY_CLASS"
 

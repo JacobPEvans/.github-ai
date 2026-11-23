@@ -4,6 +4,7 @@
 const GATE_JOB = /\b(\w+) review \/ Policy gate$/i;
 const GATE_AUTHOR = 'github-actions[bot]';
 const FINDINGS_MAX = 8000;
+const DESCRIPTION_MAX = 20000;
 
 async function gateFindings(github, context, runId, rubric) {
   const { owner, repo } = context.repo;
@@ -17,7 +18,31 @@ async function gateFindings(github, context, runId, rubric) {
   const body = comment.body.length > FINDINGS_MAX
     ? `${comment.body.slice(0, FINDINGS_MAX)}\n(findings truncated at ${FINDINGS_MAX} characters)`
     : comment.body;
-  return `\n=== FINDINGS: ${rubric} review (pull request comment) ===\n${body}\n`;
+  // The review reads the description, so the agent gets it too: a finding may be about the description alone.
+  const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+  const description = (pr.body || '').slice(0, DESCRIPTION_MAX);
+  return `\n=== FINDINGS: ${rubric} review (pull request comment) ===\n${body}\n`
+    + `\n=== PULL REQUEST DESCRIPTION (base branch ${pr.base.ref}) ===\n${description}\n`;
+}
+
+// Jobs that failed in other runs at the same head, by name, with the pull request title: a known failure class
+// can fix one of them without its log (a title check has no file to fix).
+async function otherFailures(github, context, runId) {
+  const { owner, repo } = context.repo;
+  const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: runId });
+  const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+    owner, repo, head_sha: run.head_sha, status: 'failure', per_page: 20,
+  });
+  const names = [];
+  for (const other of (data.workflow_runs || []).filter((r) => String(r.id) !== String(runId))) {
+    const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({ owner, repo, run_id: other.id, per_page: 100 });
+    for (const job of (jobs.jobs || []).filter((j) => j.conclusion === 'failure')) names.push(`${other.name} / ${job.name}`);
+  }
+  if (!names.length) return '';
+  const number = run.pull_requests?.[0]?.number;
+  const title = number ? (await github.rest.pulls.get({ owner, repo, pull_number: number })).data.title : '';
+  return `\n=== OTHER JOBS FAILING AT THIS HEAD (no logs) ===\n${[...new Set(names)].map((n) => `- ${n}`).join('\n')}\n`
+    + (title ? `\n=== PULL REQUEST TITLE ===\n${title}\n` : '');
 }
 
 module.exports = async ({ github, context, core }) => {
@@ -53,6 +78,11 @@ module.exports = async ({ github, context, core }) => {
         logs += `(Could not read the review findings: ${e.message})\n`;
       }
     }
+  }
+  try {
+    logs += await otherFailures(github, context, runId);
+  } catch (e) {
+    core.info(`other failing jobs not listed: ${e.message}`);
   }
   const truncated = logs.length > 60000 ? logs.slice(-60000) : logs;
   core.setOutput('logs', truncated);

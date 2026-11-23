@@ -112,6 +112,17 @@ test('workflow_dispatch gates triage on the trusted author read through the API'
   expect(gate.steps[0].uses).toBe(eligibilityCheckout.uses);
   expect(gate.steps[0].with).toEqual(eligibilityCheckout.with);
   expect(gate.steps[1].with.script).toContain('issue-author-gate/check-issue-author.js');
+  // Run the step's own script, so a wrong export shape fails here and not in a caller's run.
+  const stepOutputs = {};
+  const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
+  await new AsyncFunction('require', 'github', 'context', 'core', 'process', gate.steps[1].with.script)(
+    (path) => require(path.replace('./.ai-workflows/', '../')),
+    github,
+    context,
+    { setOutput: (name, value) => { stepOutputs[name] = value; } },
+    { env: { ISSUE_NUMBER: '42' } },
+  );
+  expect(stepOutputs.trusted).toBe('true');
   expect(triage.needs).toBe('gate');
   expect(triage.if).toBe("needs.gate.outputs.trusted == 'true'");
 });

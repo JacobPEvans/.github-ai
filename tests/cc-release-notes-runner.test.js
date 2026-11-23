@@ -4,12 +4,12 @@ const { readFileSync } = require('fs');
 const workflow = Bun.YAML.parse(readFileSync('.github/workflows/cc-release-notes.yml', 'utf8'));
 const highlights = workflow.jobs.highlights;
 
-test('release highlights route trusted events to the self-hosted runner and skip fork PRs', () => {
+test('release highlights route trusted events to the review runner and skip fork PRs', () => {
   expect(highlights.if).toContain("github.event_name != 'pull_request'");
   expect(highlights.if).toContain('github.event.pull_request.head.repo.full_name == github.repository');
   expect(highlights['runs-on']).toContain("github.event_name != 'pull_request'");
   expect(highlights['runs-on']).toContain('github.event.pull_request.head.repo.full_name == github.repository');
-  expect(highlights['runs-on']).toContain("inputs.runner_label || 'self-hosted'");
+  expect(highlights['runs-on']).toContain("startsWith(inputs.runner_label, 'ubuntu-') && inputs.runner_label || 'review'");
   expect(highlights['runs-on']).toContain("'ubuntu-24.04'");
 });
 

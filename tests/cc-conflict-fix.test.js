@@ -3,7 +3,7 @@ const { readFileSync } = require('node:fs');
 const { createMockCore, createMockContext, createMockGithub } = require('./helpers.js');
 const { refusal, prepare } = require('../.github/scripts/conflict-fix/prepare.js');
 const { numstatPaths, subsetRefusal, readPatch } = require('../.github/scripts/conflict-fix/subset.js');
-const { v2Body, v2Labels, waitForCi, publish } = require('../.github/scripts/conflict-fix/publish.js');
+const { publish } = require('../.github/scripts/conflict-fix/publish.js');
 
 const repoName = { full_name: 'test-owner/test-repo' };
 function pr(overrides = {}) {
@@ -103,10 +103,17 @@ describe('subset rule', () => {
     expect(subsetRefusal(patch, ['src/my-file.js'])).toMatch(/does not: src\/my file\.js/);
   });
 
-  it('refuses a .github path that git quotes in the diff header', () => {
-    const patch = realPatch({ '.github/é.yml': 'a\n' }, ({ write }) => write('.github/é.yml', 'b\n'));
-    expect(patch.paths).toEqual(['.github/é.yml']);
-    expect(subsetRefusal(patch, ['.github/é.yml'])).toMatch(/edits \.github\/: \.github\/é\.yml/);
+  it('refuses a CI path that git quotes in the diff header', () => {
+    const patch = realPatch({ '.github/workflows/é.yml': 'a\n' }, ({ write }) => write('.github/workflows/é.yml', 'b\n'));
+    expect(patch.paths).toEqual(['.github/workflows/é.yml']);
+    expect(subsetRefusal(patch, ['.github/workflows/é.yml'])).toMatch(/edits CI paths .*: \.github\/workflows\/é\.yml/);
+  });
+
+  it('refuses a composite action and publishes a .github data file', () => {
+    const action = realPatch({ '.github/actions/run/action.yml': 'a\n' }, ({ write }) => write('.github/actions/run/action.yml', 'b\n'));
+    expect(subsetRefusal(action, ['.github/actions/run/action.yml'])).toMatch(/edits CI paths/);
+    const data = realPatch({ '.github/router-contracts.yml': 'a\n' }, ({ write }) => write('.github/router-contracts.yml', 'b\n'));
+    expect(subsetRefusal(data, ['.github/router-contracts.yml'])).toBe('');
   });
 
   it('checks both names of a rename collected with --no-renames', () => {
@@ -132,71 +139,30 @@ describe('subset rule', () => {
 });
 
 describe('publish', () => {
-  it('keeps the original body and adds the supersedes line', () => {
-    expect(v2Body('Adds a thing.\n', 7)).toBe('Adds a thing.\n\nSupersedes #7');
-    expect(v2Body('', 7)).toBe('Supersedes #7');
-  });
-
-  it('copies labels except human:review, merge-conflict and needs-lead', () => {
-    expect(v2Labels(pr().labels)).toEqual(['enhancement']);
-  });
-
-  it('fails and closes nothing when there is nothing to publish', async () => {
-    const gh = publishGithub({ ciStarts: true });
-    const core = createMockCore();
-    const result = await publish({ github: gh, context: createMockContext(), core, number: 7, open: mock().mockResolvedValue({ opened: false }) });
-    expect(result).toEqual({ closed: false });
-    expect(gh.rest.pulls.update).not.toHaveBeenCalled();
-    expect(core.failures[0]).toMatch(/original stays open/);
-  });
-
-  it('waits until a check run or workflow run exists at the v2 head', async () => {
-    const gh = createMockGithub();
-    gh.rest.checks.listForRef.mockResolvedValue({ data: { total_count: 0 } });
-    gh.rest.actions.listWorkflowRunsForRepo = mock()
-      .mockResolvedValueOnce({ data: { total_count: 0 } })
-      .mockResolvedValueOnce({ data: { total_count: 1 } });
-    expect(await waitForCi(gh, 'o', 'r', 'sha', { timeoutMs: 1000, intervalMs: 0 })).toBe(true);
-    expect(gh.rest.actions.listWorkflowRunsForRepo.mock.calls[0][0]).toMatchObject({ head_sha: 'sha' });
-  });
-
-  function publishGithub({ ciStarts }) {
+  const github = () => {
     const gh = createMockGithub();
     gh.rest.pulls.get.mockResolvedValue({ data: pr() });
-    gh.rest.pulls.update = mock().mockResolvedValue({});
-    gh.rest.issues.createComment.mockResolvedValue({});
-    gh.rest.checks.listForRef.mockResolvedValue({ data: { total_count: ciStarts ? 1 : 0 } });
-    gh.rest.actions.listWorkflowRunsForRepo = mock().mockResolvedValue({ data: { total_count: 0 } });
+    gh.rest.pulls.update = mock();
     return gh;
-  }
-  const opener = () => mock().mockResolvedValue({ opened: true, pr: { number: 9, head: { sha: 'v2sha' } } });
+  };
 
-  it('opens the v2 with the same title, then closes the original only after the v2 CI started', async () => {
-    const gh = publishGithub({ ciStarts: true });
+  it('merges the resolution into the original branch from its current head, and opens or closes nothing', async () => {
+    const gh = github();
     const core = createMockCore();
-    const open = opener();
-    const result = await publish({ github: gh, context: createMockContext(), core, number: 7, timeoutMs: 0, intervalMs: 0, open });
-    expect(result).toEqual({ closed: true, v2: 9 });
-    expect(open.mock.calls[0][0]).toMatchObject({
-      branch: 'feat/x-v2', baseBranch: 'develop', title: 'feat: thing', body: 'Adds a thing.\n\nSupersedes #7', labels: ['enhancement'],
-      autoMerge: false,
-    });
-    expect(gh.rest.checks.listForRef.mock.calls[0][0]).toMatchObject({ ref: 'v2sha' });
-    expect(gh.rest.issues.createComment.mock.calls[0][0]).toMatchObject({ issue_number: 7, body: 'Superseded by #9.' });
-    expect(gh.rest.pulls.update.mock.calls[0][0]).toMatchObject({ pull_number: 7, state: 'closed' });
-    const created = open.mock.invocationCallOrder[0];
-    expect(gh.rest.checks.listForRef.mock.invocationCallOrder[0]).toBeGreaterThan(created);
-    expect(gh.rest.pulls.update.mock.invocationCallOrder[0]).toBeGreaterThan(gh.rest.checks.listForRef.mock.invocationCallOrder[0]);
-  });
-
-  it('leaves the original open and fails when the v2 CI never starts', async () => {
-    const gh = publishGithub({ ciStarts: false });
-    const core = createMockCore();
-    const result = await publish({ github: gh, context: createMockContext(), core, number: 7, timeoutMs: 0, intervalMs: 0, open: opener() });
-    expect(result).toEqual({ closed: false, v2: 9 });
+    const merge = mock().mockResolvedValue({ merged: true, commit: { sha: 'm1' } });
+    const result = await publish({ github: gh, context: createMockContext(), core, number: 7, merge });
+    expect(result).toEqual({ merged: true, sha: 'm1' });
+    expect(merge.mock.calls[0][0]).toMatchObject({ branch: 'feat/x', headOid: 'head1', message: 'chore: merge develop into feat/x' });
     expect(gh.rest.pulls.update).not.toHaveBeenCalled();
     expect(gh.rest.issues.createComment).not.toHaveBeenCalled();
-    expect(core.failures[0]).toMatch(/CI never started on #9; #7 stays open/);
+    expect(core.failures).toEqual([]);
+  });
+
+  it('fails when there is nothing to publish', async () => {
+    const core = createMockCore();
+    const result = await publish({ github: github(), context: createMockContext(), core, number: 7, merge: mock().mockResolvedValue({ merged: false }) });
+    expect(result).toEqual({ merged: false });
+    expect(core.failures[0]).toMatch(/#7 is left as it was/);
   });
 });
 
@@ -207,7 +173,7 @@ describe('workflow', () => {
 
   it('refuses an uncovered patch before applying it, and reads the token after', () => {
     const order = ['Refuse a patch the original does not cover', 'Apply agent patch',
-      'Read the commit token from OpenBao', 'Open the v2 and close the original'].map((name) => names.indexOf(name));
+      'Read the commit token from OpenBao', 'Push the resolution to the pull request branch'].map((name) => names.indexOf(name));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
@@ -215,7 +181,7 @@ describe('workflow', () => {
   it('reads the openhands-write commit token through OIDC and never an App key', () => {
     const token = job.steps.find((step) => step.id === 'commit-token');
     expect(job.permissions['id-token']).toBe('write');
-    expect(token.with.secrets).toContain('github-openhands/token/');
+    expect(token.with.secrets).toContain('github/token/');
     expect(job.steps.find((step) => step.id === 'commit-role').run).toContain('openhands-write-');
     expect(JSON.stringify(workflow)).not.toContain('PRIVATE_KEY');
   });
@@ -224,7 +190,7 @@ describe('workflow', () => {
     expect(workflow.concurrency).toEqual({ group: 'conflict-fix-${{ github.repository }}-${{ inputs.conflict_pr }}', 'cancel-in-progress': false });
   });
 
-  it('starts the v2 from the base tip the agent worked on', () => {
+  it('publishes from the base tip the agent worked on', () => {
     const checkout = job.steps.find((step) => step.name === 'Checkout the base tip the agent worked on');
     expect(checkout.with.ref).toBe('${{ needs.fix.outputs.base_sha }}');
   });

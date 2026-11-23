@@ -86,6 +86,28 @@ describe('get-failure-logs', () => {
   });
 });
 
+describe('get-failure-logs: other failing jobs', () => {
+  it('lists jobs that failed in other runs at the head, with the pull request title', async () => {
+    const core = createMockCore();
+    const github = createMockGithub();
+    github.paginate.mockResolvedValue([{ name: 'build', conclusion: 'failure', id: 1 }]);
+    github.rest.actions.downloadJobLogsForWorkflowRun.mockResolvedValue({ data: 'boom' });
+    github.rest.actions.getWorkflowRun = mock(async () => ({ data: { head_sha: 'abc', pull_requests: [{ number: 7 }] } }));
+    github.rest.actions.listWorkflowRunsForRepo = mock(async () => ({
+      data: { workflow_runs: [{ id: 999, name: 'CI' }, { id: 5, name: 'Conventions' }] },
+    }));
+    github.rest.actions.listJobsForWorkflowRun = mock(async () => ({
+      data: { jobs: [{ name: 'PR Title', conclusion: 'failure' }, { name: 'Other', conclusion: 'success' }] },
+    }));
+    github.rest.pulls = { get: mock(async () => ({ data: { title: 'Add a role' } })) };
+    await run({ github, context: createMockContext({ payload: { workflow_run: { id: 999 } } }), core });
+    const logs = core.getOutput('logs');
+    expect(logs).toContain('=== OTHER JOBS FAILING AT THIS HEAD (no logs) ===\n- Conventions / PR Title\n');
+    expect(logs).not.toContain('CI / PR Title');
+    expect(logs).toContain('=== PULL REQUEST TITLE ===\nAdd a role');
+  });
+});
+
 describe('get-failure-logs: AI review gate findings', () => {
   const marker = '<!-- semantic-review -->';
   const gateJob = { name: 'gate / Semantic review / Policy gate', conclusion: 'failure', id: 7 };
@@ -97,6 +119,7 @@ describe('get-failure-logs: AI review gate findings', () => {
     github.rest.actions.getWorkflowRun = mock().mockResolvedValue({ data: { pull_requests: [{ number: 12 }] } });
     github.paginate.mockImplementation(async (method) => (method === github.rest.issues.listComments ? comments : [gateJob]));
     github.rest.actions.downloadJobLogsForWorkflowRun.mockResolvedValue({ data: 'Policy gate failed; see the pull request comment.' });
+    github.rest.pulls.get = mock().mockResolvedValue({ data: { body: 'Adds a role.', base: { ref: 'develop' } } });
     return { core, context, github };
   }
 
@@ -105,6 +128,7 @@ describe('get-failure-logs: AI review gate findings', () => {
     await run({ github, context, core });
     expect(core.getOutput('logs')).toContain('=== FINDINGS: Semantic review (pull request comment) ===');
     expect(core.getOutput('logs')).toContain('omitted_behavior | fail');
+    expect(core.getOutput('logs')).toContain('=== PULL REQUEST DESCRIPTION (base branch develop) ===\nAdds a role.');
   });
 
   it('ignores a look-alike comment from another author and a bot comment without the marker first', async () => {

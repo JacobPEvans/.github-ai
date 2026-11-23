@@ -82,6 +82,8 @@ function staticBlocker(pr, held) {
   const label = BLOCK_LABELS.find((name) => labels.includes(name));
   if (label) return `label:${label}`;
   if (pr.head.ref.startsWith('agent/zcode/')) return 'zcode-branch';
+  // Renovate merges its lock file maintenance itself inside its own schedule, after the update has soaked.
+  if (/^renovate\/(.+-)?lock-file-maintenance$/.test(pr.head.ref)) return 'renovate-soak';
   // Only the labelled promotion on a git-flow repository is eligible to merge here; every other develop-to-main pull request waits.
   if (pr.base.ref === 'main' && pr.head.ref === 'develop'
     && (pr.base.repo.default_branch !== 'develop' || !labels.includes(FREEZE_LABEL))) return 'promotion';
@@ -121,13 +123,20 @@ function newestRuns(runs) {
     const seen = newest.get(key);
     if (!seen || (check.id ?? 0) >= (seen.id ?? 0)) newest.set(key, check);
   }
-  return [...newest.values()];
+  // A workflow run that concurrency cancelled leaves cancelled and failed runs in its suite; a later same-named
+  // run in another suite replaces each of them. A suite with no cancelled run is never replaced.
+  const cancelled = new Set(runs.filter((check) => check.conclusion === 'cancelled' && check.check_suite?.id)
+    .map((check) => check.check_suite.id));
+  return [...newest.values()].filter((check) => !cancelled.has(check.check_suite?.id)
+    || !runs.some((other) => other.name === check.name && other.check_suite?.id !== check.check_suite.id
+      && (other.id ?? 0) > (check.id ?? 0)));
 }
 
 function checksBlocker(allRuns, statuses, pr) {
   if (!allRuns.length) return 'no-checks';
   const runs = newestRuns(allRuns);
-  if (runs.some((check) => check.status !== 'completed')) return 'checks-pending';
+  // A run with a conclusion is finished even when its status never left in_progress.
+  if (runs.some((check) => check.status !== 'completed' && !check.conclusion)) return 'checks-pending';
   const bad = runs.find((check) => BAD_CONCLUSIONS.includes(check.conclusion));
   if (bad) return `check:${bad.name}`;
   // merge-hold is decided from the live label (held), not from the status written before this run.
@@ -172,6 +181,8 @@ async function tryMerge({ github, owner, repo, pr, held, statuses }) {
   if (live.reviewThreads.nodes.some((thread) => !thread.isResolved)) return skip('unresolved-threads');
   const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
   const checks = checksBlocker(runs, statuses, pr);
+  // gateAbsent: no AI gate run exists at this head, so the caller may refresh the head to start one.
+  if (checks === 'no-gate-success' && !runs.some((check) => GATE_CHECK.test(check.name))) return { ...skip(checks), gateAbsent: true };
   if (checks) return skip(checks);
   if (await frozen(github, owner, repo, pr)) return skip('release-freeze');
   const gitFlowMain = pr.base.ref === 'main' && pr.base.repo.default_branch === 'develop';
@@ -194,4 +205,4 @@ function mergeSummary(events) {
   return ['### Sweep merges', '', '| Pull request | Outcome | Reason | Auto-merge disarmed |', '| --- | --- | --- | --- |', ...rows, ''].join('\n');
 }
 
-module.exports = { mergeEnabled, tryMerge, mergeSummary, majorRelease };
+module.exports = { mergeEnabled, tryMerge, mergeSummary, majorRelease, GATE_CHECK };

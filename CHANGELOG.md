@@ -5,6 +5,343 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.83.0](https://github.com/JacobPEvans/.github-ai/compare/v2.82.0...v2.83.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** update a red branch that is behind when its failed check never runs on the base ([#354](https://github.com/JacobPEvans/.github-ai/issues/354)) ([5d567c7](https://github.com/JacobPEvans/.github-ai/commit/5d567c78c2271e51f25a0b9229defcf9ca4fb8da))
+
+## [2.82.0](https://github.com/JacobPEvans/.github-ai/compare/v2.81.0...v2.82.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** leave Renovate lock file maintenance to its own merge schedule ([#352](https://github.com/JacobPEvans/.github-ai/issues/352)) ([d3bd2f2](https://github.com/JacobPEvans/.github-ai/commit/d3bd2f231d235db87a0a795aca2b922e85c67b2a))
+
+## [2.81.0](https://github.com/JacobPEvans/.github-ai/compare/v2.80.0...v2.81.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** re-run a still-failing check before a second fix at the same head ([#350](https://github.com/JacobPEvans/.github-ai/issues/350)) ([a593fb5](https://github.com/JacobPEvans/.github-ai/commit/a593fb56a57c638d05626250cbeea0288d15f7ca))
+
+## [2.80.0](https://github.com/JacobPEvans/.github-ai/compare/v2.79.0...v2.80.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** start the CI fix for a red Renovate pull request ([#348](https://github.com/JacobPEvans/.github-ai/issues/348)) ([d946ee5](https://github.com/JacobPEvans/.github-ai/commit/d946ee553491d1b9b9ada306429983bdd9a9ed5d))
+
+## [2.79.0](https://github.com/JacobPEvans/.github-ai/compare/v2.78.0...v2.79.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** hand the fixer the failed check that finished last ([#346](https://github.com/JacobPEvans/.github-ai/issues/346)) ([795189a](https://github.com/JacobPEvans/.github-ai/commit/795189a4c0a4ab90d6caaa32bced95a5b250accc))
+
+## [2.78.0](https://github.com/JacobPEvans/.github-ai/compare/v2.77.0...v2.78.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** keep fixing a pull request that is making progress ([#344](https://github.com/JacobPEvans/.github-ai/issues/344)) ([288fb16](https://github.com/JacobPEvans/.github-ai/commit/288fb161e7b4ff72e86354ed69aeb4d1e2f62e85))
+
+## [2.77.0](https://github.com/JacobPEvans/.github-ai/compare/v2.76.0...v2.77.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** keep agent scratch files out of the published fix ([#341](https://github.com/JacobPEvans/.github-ai/issues/341)) ([ec4e258](https://github.com/JacobPEvans/.github-ai/commit/ec4e258931a5397d4205982b6ab421680eee6b19))
+* **ci-fix:** pin the prompt catalog at v1.135.3 ([#340](https://github.com/JacobPEvans/.github-ai/issues/340)) ([f2cc59f](https://github.com/JacobPEvans/.github-ai/commit/f2cc59f39e8a1118c875eb901f29a5409d63b345))
+
+## [2.76.0](https://github.com/JacobPEvans/.github-ai/compare/v2.75.0...v2.76.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** keep the agent edits when its time limit stops it ([#338](https://github.com/JacobPEvans/.github-ai/issues/338)) ([313fd71](https://github.com/JacobPEvans/.github-ai/commit/313fd71fcaa0f6fc2d70f8da14b0835fefcc37a7))
+* **ci-fix:** keep the agent's edits when its time limit stops it ([313fd71](https://github.com/JacobPEvans/.github-ai/commit/313fd71fcaa0f6fc2d70f8da14b0835fefcc37a7))
+
+## [2.75.0](https://github.com/JacobPEvans/.github-ai/compare/v2.74.0...v2.75.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** show the fixer every failing job and count unpublished attempts ([#336](https://github.com/JacobPEvans/.github-ai/issues/336)) ([2b114ec](https://github.com/JacobPEvans/.github-ai/commit/2b114ecc76d2cd3b7eee567d4cdaef130f100fdd))
+
+## [2.74.0](https://github.com/JacobPEvans/.github-ai/compare/v2.73.0...v2.74.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** apply a title from the agent and pin the catalog at v1.135.2 ([#334](https://github.com/JacobPEvans/.github-ai/issues/334)) ([7afcea2](https://github.com/JacobPEvans/.github-ai/commit/7afcea20b454f58e84ee2f10382c140df257e45b))
+
+## [2.73.0](https://github.com/JacobPEvans/.github-ai/compare/v2.72.0...v2.73.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** pin the prompt catalog at v1.134.3 and allow six attempts a day ([#332](https://github.com/JacobPEvans/.github-ai/issues/332)) ([f34d373](https://github.com/JacobPEvans/.github-ai/commit/f34d373ea0dce342b474f4fa2aec273276c6f1a0))
+
+## [2.72.0](https://github.com/JacobPEvans/.github-ai/compare/v2.71.0...v2.72.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** count fix attempts per fixer version ([#330](https://github.com/JacobPEvans/.github-ai/issues/330)) ([b2badaa](https://github.com/JacobPEvans/.github-ai/commit/b2badaa200ef260e88a944585b975df20e5b2136))
+
+## [2.71.0](https://github.com/JacobPEvans/.github-ai/compare/v2.70.0...v2.71.0) (2026-11-23)
+
+
+### Features
+
+* **prompts:** pin the prompt catalog at v1.134.1 ([#328](https://github.com/JacobPEvans/.github-ai/issues/328)) ([ce8f7bc](https://github.com/JacobPEvans/.github-ai/commit/ce8f7bc273204a0900ea3c35fd7ae91c6e4c2826))
+
+## [2.70.0](https://github.com/JacobPEvans/.github-ai/compare/v2.69.0...v2.70.0) (2026-11-22)
+
+
+### Features
+
+* **prompts:** pin the prompt catalog at v1.133.0 ([#326](https://github.com/JacobPEvans/.github-ai/issues/326)) ([a6df03d](https://github.com/JacobPEvans/.github-ai/commit/a6df03d19e6c4a768d3be3de044658ec092cb9ae))
+
+## [2.69.0](https://github.com/JacobPEvans/.github-ai/compare/v2.68.0...v2.69.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** count a check run with a conclusion as finished ([#324](https://github.com/JacobPEvans/.github-ai/issues/324)) ([69d3d0c](https://github.com/JacobPEvans/.github-ai/commit/69d3d0c094e1e494d426b0a4fad447354cb3ecf4))
+
+## [2.68.0](https://github.com/JacobPEvans/.github-ai/compare/v2.67.0...v2.68.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** let a later run replace a cancelled workflow run ([#322](https://github.com/JacobPEvans/.github-ai/issues/322)) ([10a6ed5](https://github.com/JacobPEvans/.github-ai/commit/10a6ed551ac80a3450b6e5b0b90e93c636cf66ec))
+
+## [2.67.0](https://github.com/JacobPEvans/.github-ai/compare/v2.66.0...v2.67.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **pr-reconcile-sweep:** sweep every owner from one job ([#317](https://github.com/JacobPEvans/.github-ai/issues/317)) ([a8fae4b](https://github.com/JacobPEvans/.github-ai/commit/a8fae4b6c700f8de32d9af692414182a7e04f237))
+
+## [2.66.0](https://github.com/JacobPEvans/.github-ai/compare/v2.65.0...v2.66.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **checkout-prompts:** pin the prompt catalog at v1.132.1 ([#318](https://github.com/JacobPEvans/.github-ai/issues/318)) ([f507506](https://github.com/JacobPEvans/.github-ai/commit/f507506bebeb8a46516993d7636d0368014b79ba))
+
+## [2.65.0](https://github.com/JacobPEvans/.github-ai/compare/v2.64.0...v2.65.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **agent-jobs:** give the agent job more time than the agent ([#314](https://github.com/JacobPEvans/.github-ai/issues/314)) ([44f19a2](https://github.com/JacobPEvans/.github-ai/commit/44f19a2366fa017da1443458d9418db578ddc7f7))
+
+## [2.64.0](https://github.com/JacobPEvans/.github-ai/compare/v2.63.0...v2.64.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **checkout-prompts:** pin the prompt catalog at v1.132.0 ([#313](https://github.com/JacobPEvans/.github-ai/issues/313)) ([a5a313f](https://github.com/JacobPEvans/.github-ai/commit/a5a313f1e332b4dd196db488fbff99b7c9e6a46c))
+
+## [2.63.0](https://github.com/JacobPEvans/.github-ai/compare/v2.62.0...v2.63.0) (2026-11-22)
+
+
+### Features
+
+* **ci-fix:** let the agent correct the pull request description ([#311](https://github.com/JacobPEvans/.github-ai/issues/311)) ([d898704](https://github.com/JacobPEvans/.github-ai/commit/d898704d991bc7ae80259daf7b119e8cb62486e7))
+
+## [2.62.0](https://github.com/JacobPEvans/.github-ai/compare/v2.61.0...v2.62.0) (2026-11-22)
+
+
+### Features
+
+* **conflict-fix:** land the resolution on the pull request own branch ([#309](https://github.com/JacobPEvans/.github-ai/issues/309)) ([d973240](https://github.com/JacobPEvans/.github-ai/commit/d973240b67903301937b841c66b66aa028acfeb2))
+* **conflict-fix:** land the resolution on the pull request's own branch ([d973240](https://github.com/JacobPEvans/.github-ai/commit/d973240b67903301937b841c66b66aa028acfeb2))
+
+
+### Bug Fixes
+
+* **pr-reconcile:** refresh a head that has no AI gate run ([#308](https://github.com/JacobPEvans/.github-ai/issues/308)) ([85f1718](https://github.com/JacobPEvans/.github-ai/commit/85f1718bfbf65b57a7d8cd0c4bf66c95d8498bdd))
+
+## [2.61.0](https://github.com/JacobPEvans/.github-ai/compare/v2.60.0...v2.61.0) (2026-11-22)
+
+
+### Features
+
+* **ai-merge-gate:** re-run the gate when a label is added or removed ([#189](https://github.com/JacobPEvans/.github-ai/issues/189)) ([33ae638](https://github.com/JacobPEvans/.github-ai/commit/33ae638728629efe516a46a75d5b90907fd17e66))
+
+## [2.60.0](https://github.com/JacobPEvans/.github-ai/compare/v2.59.0...v2.60.0) (2026-11-22)
+
+
+### Features
+
+* **agent:** opencode-qwen run j-d000e0dec975ecaf ([de2cc3b](https://github.com/JacobPEvans/.github-ai/commit/de2cc3bd442174db71600e432d6bf70e2b0e0013))
+
+
+### Bug Fixes
+
+* **local-model-setup:** reject a daily run limit above the safe integer range ([#303](https://github.com/JacobPEvans/.github-ai/issues/303)) ([de2cc3b](https://github.com/JacobPEvans/.github-ai/commit/de2cc3bd442174db71600e432d6bf70e2b0e0013))
+
+## [2.59.0](https://github.com/JacobPEvans/.github-ai/compare/v2.58.0...v2.59.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** run the sweep on review runners and look again at stuck heads ([#304](https://github.com/JacobPEvans/.github-ai/issues/304)) ([df63e08](https://github.com/JacobPEvans/.github-ai/commit/df63e0819a5385b8d7ddb84e0b97d933f5730529))
+
+## [2.58.0](https://github.com/JacobPEvans/.github-ai/compare/v2.57.0...v2.58.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **local-model-setup:** reject a daily run limit made only of zeros ([#300](https://github.com/JacobPEvans/.github-ai/issues/300)) ([a0668cd](https://github.com/JacobPEvans/.github-ai/commit/a0668cd55dec5b9bdd53537ecdfd0cacb95fbd0d))
+
+## [2.57.0](https://github.com/JacobPEvans/.github-ai/compare/v2.56.0...v2.57.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **local-model-setup:** report every missing input in one run ([#298](https://github.com/JacobPEvans/.github-ai/issues/298)) ([76a01de](https://github.com/JacobPEvans/.github-ai/commit/76a01de712d63b51bf4c37c71b6cf57299ba4361))
+
+## [2.56.0](https://github.com/JacobPEvans/.github-ai/compare/v2.55.0...v2.56.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **dogfood:** grant actions: read to the review responder caller ([#294](https://github.com/JacobPEvans/.github-ai/issues/294)) ([4f00913](https://github.com/JacobPEvans/.github-ai/commit/4f009133c469d02dcbb8302706a01b3d6b733c18))
+
+## [2.55.0](https://github.com/JacobPEvans/.github-ai/compare/v2.54.0...v2.55.0) (2026-11-21)
+
+
+### Features
+
+* **ci-fix:** hand off a patch that adds dependency or ignored paths, or touches more than 25 files ([#292](https://github.com/JacobPEvans/.github-ai/issues/292)) ([6393adc](https://github.com/JacobPEvans/.github-ai/commit/6393adc27d8120821081070cd8613a4d91728803))
+
+## [2.54.0](https://github.com/JacobPEvans/.github-ai/compare/v2.53.0...v2.54.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **ci-fix:** read the OIDC publisher's commit token from the github/token mount ([#290](https://github.com/JacobPEvans/.github-ai/issues/290)) ([31cc446](https://github.com/JacobPEvans/.github-ai/commit/31cc446b7775c87085b535f83ffd75b82e364d6a))
+
+## [2.53.0](https://github.com/JacobPEvans/.github-ai/compare/v2.52.0...v2.53.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **checkout-prompts:** pin the prompt catalog at v1.128.2 ([#288](https://github.com/JacobPEvans/.github-ai/issues/288)) ([ad9eb84](https://github.com/JacobPEvans/.github-ai/commit/ad9eb84719533b3b71337f0b26dc2e2609061d95))
+
+## [2.52.0](https://github.com/JacobPEvans/.github-ai/compare/v2.51.0...v2.52.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **workflows:** run agent jobs only on review or GitHub-hosted runners ([#285](https://github.com/JacobPEvans/.github-ai/issues/285)) ([c2ca1c7](https://github.com/JacobPEvans/.github-ai/commit/c2ca1c729ea810824fb3589783aad5a71a08a058))
+
+## [2.51.0](https://github.com/JacobPEvans/.github-ai/compare/v2.50.0...v2.51.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **ci-fix:** hand off patches that edit .github files ([#283](https://github.com/JacobPEvans/.github-ai/issues/283)) ([f634019](https://github.com/JacobPEvans/.github-ai/commit/f634019d3759fff625b3bba2f0aa85162325efca))
+
+## [2.50.0](https://github.com/JacobPEvans/.github-ai/compare/v2.49.0...v2.50.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **workflows:** run agent jobs without the App key ([#281](https://github.com/JacobPEvans/.github-ai/issues/281)) ([075f704](https://github.com/JacobPEvans/.github-ai/commit/075f704452ff3dd57eee6a5666a43bef33870818))
+
+## [2.49.0](https://github.com/JacobPEvans/.github-ai/compare/v2.48.0...v2.49.0) (2026-11-21)
+
+
+### Features
+
+* **run-ai-agent:** give the OpenHands step the job token for reads ([#278](https://github.com/JacobPEvans/.github-ai/issues/278)) ([ab32549](https://github.com/JacobPEvans/.github-ai/commit/ab3254983e2f0d0aea0484b9196d67d9cb3e9b36))
+
+## [2.48.0](https://github.com/JacobPEvans/.github-ai/compare/v2.47.0...v2.48.0) (2026-11-21)
+
+
+### Features
+
+* **pr-reconcile:** mint the calling repository token through the store OIDC role ([#277](https://github.com/JacobPEvans/.github-ai/issues/277)) ([6543b5a](https://github.com/JacobPEvans/.github-ai/commit/6543b5aa01be1e043fc2c6f7c3803bc6204c5dd4))
+* **pr-reconcile:** mint the calling repository's token through the store's OIDC role ([6543b5a](https://github.com/JacobPEvans/.github-ai/commit/6543b5aa01be1e043fc2c6f7c3803bc6204c5dd4))
+
+## [2.47.0](https://github.com/JacobPEvans/.github-ai/compare/v2.46.0...v2.47.0) (2026-11-21)
+
+
+### Features
+
+* **policy-gate:** give the security review the reusable workflows a change calls ([#270](https://github.com/JacobPEvans/.github-ai/issues/270)) ([a741b73](https://github.com/JacobPEvans/.github-ai/commit/a741b7332c5e412891ee405662440125614cee65))
+
+## [2.46.0](https://github.com/JacobPEvans/.github-ai/compare/v2.45.0...v2.46.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **cc-dep-review:** default each agent to the review alias its router key serves ([#267](https://github.com/JacobPEvans/.github-ai/issues/267)) ([9960c2f](https://github.com/JacobPEvans/.github-ai/commit/9960c2f3db77df628d9130976452bcd75761b108))
+* **issue-triage:** call the exported issue author check ([#268](https://github.com/JacobPEvans/.github-ai/issues/268)) ([f1a5849](https://github.com/JacobPEvans/.github-ai/commit/f1a58493537e47a7652ba59547f8ce77d6dda2d4))
+
+## [2.45.0](https://github.com/JacobPEvans/.github-ai/compare/v2.44.0...v2.45.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **run-ai-agent:** default to OpenHands on the local medium role ([#264](https://github.com/JacobPEvans/.github-ai/issues/264)) ([8f9c8ff](https://github.com/JacobPEvans/.github-ai/commit/8f9c8ff6cd609ccd131e9ea804bc88d448d32984))
+
+## [2.44.0](https://github.com/JacobPEvans/.github-ai/compare/v2.43.0...v2.44.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **conflict-fix:** pin prompts to v1.127.2 ([#261](https://github.com/JacobPEvans/.github-ai/issues/261)) ([7001dcf](https://github.com/JacobPEvans/.github-ai/commit/7001dcf1518ab71864bd4eab718cb0edd5f01006))
+
+## [2.43.0](https://github.com/JacobPEvans/.github-ai/compare/v2.42.0...v2.43.0) (2026-11-21)
+
+
+### Features
+
+* **ci-fix:** add the cc-ci-fix-oidc entry that publishes workflow fixes with an OpenBao token ([#258](https://github.com/JacobPEvans/.github-ai/issues/258)) ([f55199f](https://github.com/JacobPEvans/.github-ai/commit/f55199fcc4558606a7fe0cce1cdd50056d542e16))
+
+## [2.42.0](https://github.com/JacobPEvans/.github-ai/compare/v2.41.0...v2.42.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **conflict-fix:** share one CI path rule between reconcile and publish ([#253](https://github.com/JacobPEvans/.github-ai/issues/253)) ([ffb207b](https://github.com/JacobPEvans/.github-ai/commit/ffb207b1a3bde19a5d9a6d912d1aee2451c40183))
+
+## [2.41.0](https://github.com/JacobPEvans/.github-ai/compare/v2.40.0...v2.41.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** mint the sweep token inside the reconcile step without issues access ([#251](https://github.com/JacobPEvans/.github-ai/issues/251)) ([3e51904](https://github.com/JacobPEvans/.github-ai/commit/3e519042970f4704b0582b2f8b9493a474d53397))
+
+## [2.40.0](https://github.com/JacobPEvans/.github-ai/compare/v2.39.0...v2.40.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** retry an unpublished conflict fix once per head after 45 minutes ([#248](https://github.com/JacobPEvans/.github-ai/issues/248)) ([6dac9c2](https://github.com/JacobPEvans/.github-ai/commit/6dac9c2d3b8dd8445882fe9b76cfa609ccff61bb))
+
+## [2.39.0](https://github.com/JacobPEvans/.github-ai/compare/v2.38.0...v2.39.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **conflict-fix:** read the commit token from the github OpenBao mount ([#246](https://github.com/JacobPEvans/.github-ai/issues/246)) ([f66d834](https://github.com/JacobPEvans/.github-ai/commit/f66d83429ba8dd8b638ca25d6a24209beec1d69c))
+
+## [2.38.0](https://github.com/JacobPEvans/.github-ai/compare/v2.37.0...v2.38.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **ci-fix:** void the attempt marker when the commit token could not be minted ([#239](https://github.com/JacobPEvans/.github-ai/issues/239)) ([f04945e](https://github.com/JacobPEvans/.github-ai/commit/f04945eee923ab9afcc7b77ca5d61dbf645c4daa))
+
 ## [2.37.0](https://github.com/JacobPEvans/.github-ai/compare/v2.36.0...v2.37.0) (2026-11-20)
 
 

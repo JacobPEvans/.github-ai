@@ -74,6 +74,18 @@ describe('sweep merge', () => {
 
   const reconcileOne = async (gh) => (await run({ github: gh, context: createMockContext(), core }))[0];
 
+  it('merges a green head that has a recorded CI fix, and leaves a red one alone', async () => {
+    process.env.CI_FIX_WORKFLOW = 'ci-fix.yml';
+    const now = new Date().toISOString();
+    const statuses = [{ context: 'pr-reconcile', state: 'success', description: 'ci-fix', created_at: now, updated_at: now }];
+    const greenHead = github(pr(), { statuses });
+    expect(await reconcileOne(greenHead)).toMatchObject({ action: 'ci-fix', outcome: 'already-done', merge: { outcome: 'merged' } });
+    const red = { name: 'lint', status: 'completed', conclusion: 'failure', app: { slug: 'github-actions' } };
+    const redHead = github(pr(), { statuses, checks: [red, green('AI Merge Gate / AI Merge Gate')] });
+    expect((await reconcileOne(redHead)).merge.outcome).not.toBe('merged');
+    expect(redHead.rest.pulls.merge).not.toHaveBeenCalled();
+  });
+
   it('squash-merges a green bot pull request at its exact head and writes the summary', async () => {
     const gh = github(pr());
     const event = await reconcileOne(gh);
@@ -104,6 +116,7 @@ describe('sweep merge', () => {
     ['label:needs-lead', pr({ labels: [{ name: 'needs-lead' }] }), {}],
     ['held', pr({ labels: [{ name: 'merge-hold' }] }), {}],
     ['zcode-branch', pr({ head: { ref: 'agent/zcode/j-1', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
+    ['renovate-soak', pr({ head: { ref: 'renovate/lock-file-maintenance', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
     ['promotion', promotion({ labels: [] }), {}],
     ['stacked:fix/base', pr({ base: { ref: 'fix/base', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }), {}],
     ['stacked:fix/base', pr({ base: { ref: 'fix/base', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } } }), {}],
@@ -182,6 +195,38 @@ describe('sweep merge', () => {
     }
   });
 
+  it('refreshes a head that has no AI gate run, only where the repository runs the gate', async () => {
+    const gateWorkflow = [{ name: 'AI Merge Gate', state: 'active' }];
+    const build = (data, workflows) => {
+      const gh = github(data, { checks: [green('lint')] });
+      gh.rest.actions.listRepoWorkflows = mock();
+      gh.rest.pulls.updateBranch = mock().mockResolvedValue({});
+      gh.rest.pulls.update = mock().mockResolvedValue({});
+      const paginate = gh.paginate.getMockImplementation();
+      gh.paginate.mockImplementation(async (fn, ...rest) => (fn === gh.rest.actions.listRepoWorkflows ? workflows : paginate(fn, ...rest)));
+      return gh;
+    };
+    const agent = build(pr(), gateWorkflow);
+    expect((await reconcileOne(agent)).merge).toMatchObject({ outcome: 'merge-skip', reason: 'no-gate-success', refresh: 'updated' });
+    expect(agent.rest.pulls.updateBranch).toHaveBeenCalledTimes(1);
+
+    const noWorkflow = build(pr(), [{ name: 'AI Merge Gate', state: 'disabled_manually' }]);
+    expect((await reconcileOne(noWorkflow)).merge.refresh).toBe('no-gate-workflow');
+    expect(noWorkflow.rest.pulls.updateBranch).not.toHaveBeenCalled();
+
+    const current = build(pr(), gateWorkflow);
+    current.rest.pulls.updateBranch.mockRejectedValue(Object.assign(new Error('x'), { status: 422 }));
+    expect((await reconcileOne(current)).merge.refresh).toBe('up-to-date');
+
+    const box = '- [ ] <!-- rebase-check -->If you want to rebase/retry this PR, check this box';
+    const renovate = build(pr({ user: { login: 'renovate[bot]', type: 'Bot' }, labels: [{ name: 'update:major' }], body: box }), gateWorkflow);
+    expect((await reconcileOne(renovate)).merge.refresh).toBe('rebase-requested');
+    expect(renovate.rest.pulls.updateBranch).not.toHaveBeenCalled();
+
+    const ran = github(pr(), { checks: [green('lint'), { ...green('AI Merge Gate'), conclusion: 'neutral' }] });
+    expect((await reconcileOne(ran)).merge.refresh).toBeUndefined();
+  });
+
   it('judges only the newest run of each check name within a check suite', async () => {
     const gate = { ...green('AI Merge Gate'), id: 1, check_suite: { id: 10 } };
     const lint = (id, suite, conclusion = 'success') => ({ ...green('lint'), id, conclusion, check_suite: { id: suite } });
@@ -191,6 +236,19 @@ describe('sweep merge', () => {
     expect((await reconcileOne(rerunRed)).merge.reason).toBe('check:lint');
     const otherSuiteRed = github(pr(), { checks: [gate, lint(2, 20, 'failure'), lint(3, 30)] });
     expect((await reconcileOne(otherSuiteRed)).merge.reason).toBe('check:lint');
+    const stuckStatus = github(pr(), { checks: [gate, { ...lint(2, 20), status: 'in_progress' }] });
+    expect((await reconcileOne(stuckStatus)).merge.outcome).toBe('merged');
+  });
+
+  it('lets a later run replace the runs of a cancelled workflow run, and nothing else', async () => {
+    const run = (name, id, suite, conclusion = 'success') => ({ ...green(name), id, conclusion, check_suite: { id: suite } });
+    const superseded = [run('scan', 1, 10, 'cancelled'), run('AI Merge Gate', 2, 10, 'failure')];
+    const replaced = github(pr(), { checks: [...superseded, run('scan', 3, 20), run('AI Merge Gate', 4, 20)] });
+    expect((await reconcileOne(replaced)).merge.outcome).toBe('merged');
+    const partly = github(pr(), { checks: [...superseded, run('AI Merge Gate', 4, 20)] });
+    expect((await reconcileOne(partly)).merge.reason).toBe('check:scan');
+    const older = github(pr(), { checks: [run('scan', 5, 10, 'cancelled'), run('AI Merge Gate', 6, 10, 'failure'), run('scan', 3, 20), run('AI Merge Gate', 4, 20)] });
+    expect((await reconcileOne(older)).merge.reason).toMatch(/^check:/);
   });
 
   it('merges a green labelled promotion with a merge commit and never touches its labels', async () => {

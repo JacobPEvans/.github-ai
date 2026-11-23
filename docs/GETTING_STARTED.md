@@ -43,6 +43,10 @@ For OIDC-based check publishing, call `_ai-merge-gate-oidc.yml` with a reviewed
 release SHA. Grant the calling job `checks: read`, `contents: read`,
 `pull-requests: write`, and `id-token: write`.
 
+Trigger the caller on `pull_request` types `opened`, `ready_for_review`, `synchronize`, `reopened`, `edited`,
+`labeled` and `unlabeled`. The reviews read the override labels from the event, so a gate without `labeled` never
+sees an override label until the next push.
+
 Run the caller on a test PR and verify that both the security and semantic
 review jobs publish their verdict checks before switching other repositories
 to that release.
@@ -91,7 +95,8 @@ compatible during migration.
 A repository in the PR Reconcile sweep uses [`examples/ci-fix-caller.yml`](../examples/ci-fix-caller.yml),
 unchanged, as `.github/workflows/ci-fix.yml`. The sweep dispatches it for a pull request whose checks failed;
 per-repository text comes from the `CI_FIX_REPO_CONTEXT`, `CI_FIX_CI_STRUCTURE` and `CI_FIX_EXTRA_TOOLS`
-repository variables.
+repository variables. That caller uses `cc-ci-fix-oidc.yml`, the same job graph whose publish job reads its commit
+token from OpenBao through GitHub OIDC, so the calling job grants `id-token: write`.
 
 ```yaml
 jobs:

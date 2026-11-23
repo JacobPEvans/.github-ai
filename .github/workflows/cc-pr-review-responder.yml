@@ -122,7 +122,7 @@ jobs:
   respond:
     name: Respond to review feedback
     needs: check-daily-limit
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ startsWith(inputs.runner_label || 'ubuntu-24.04', 'ubuntu-') && (inputs.runner_label || 'ubuntu-24.04') || 'review' }}
     # No id-token grant: callers grant only the standard set, and a reusable job
     # that requests more fails at startup for every caller. local_only's OpenBao
     # OIDC step therefore cannot mint a token from this job and fails closed.
@@ -227,7 +227,7 @@ jobs:
         id: agent
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
-          agent: ${{ inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'claude' }}
+          agent: ${{ inputs.local_only && 'claude' || vars.GH_ACTION_AI_AGENT || 'openhands' }}
           prompt: ${{ steps.prompt.outputs.content }}
           claude_model: ${{ steps.router-model.outputs.model }}
           codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}
