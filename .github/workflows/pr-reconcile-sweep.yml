@@ -79,6 +79,11 @@ jobs:
           exportToken: false
           outputToken: true
 
+      # Callers run the fixers at v2, so that tag's commit is the fixer version the attempt records carry.
+      - name: Resolve fixer version
+        id: fixer
+        run: echo "sha=$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}" refs/tags/v2 | cut -f1)" >> "$GITHUB_OUTPUT"
+
       # Second call site of reconcile.js beside pr-reconcile-run: it mints each owner token here so no token leaves this step.
       - name: Reconcile
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -88,6 +93,7 @@ jobs:
           SWEEP_OWNERS: ${{ needs.owners.outputs.owners }}
           RESOLVER_REPO: ${{ vars.PR_RECONCILE_RESOLVER_REPO }}
           CI_FIX_WORKFLOW: ${{ vars.PR_RECONCILE_CI_FIX_WORKFLOW }}
+          FIXER_VERSION: ${{ steps.fixer.outputs.sha }}
           CI_FIX_SKIP_CHECKS: ${{ vars.PR_RECONCILE_CI_FIX_SKIP_CHECKS }}
           MERGE_ENABLED: ${{ vars.PR_RECONCILE_MERGE }}
           PR_RECONCILE_EXCLUDE_REPOS: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}

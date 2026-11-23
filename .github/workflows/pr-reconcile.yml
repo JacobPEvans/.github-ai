@@ -177,3 +177,4 @@ jobs:
           resolver_repo: ${{ inputs.resolver_repo }}
           exclude_repos: ${{ secrets.PR_RECONCILE_EXCLUDE_REPOS }}
           conflict_output: ${{ inputs.conflict_fix }}
+          fixer_version: ${{ job.workflow_sha }}

@@ -128,8 +128,13 @@ function olderThan(status, ms, now = Date.now()) {
   return Number.isFinite(at) && now - at >= ms;
 }
 
+// Fix records carry the fixer version, so a record written for another version does not hold this one back.
+function fixerTag() {
+  return process.env.FIXER_VERSION ? ` @${process.env.FIXER_VERSION.slice(0, 7)}` : '';
+}
+
 function ciFixDone(statuses) {
-  return statuses.some((status) => status.context === STATUS_CONTEXT && status.description === 'ci-fix'
+  return statuses.some((status) => status.context === STATUS_CONTEXT && status.description === `ci-fix${fixerTag()}`
     && !olderThan(status, CI_FIX_RETRY_MS));
 }
 
@@ -303,12 +308,14 @@ async function recordConflict(github, owner, repo, sha, outcome) {
 async function startConflictFix(github, owner, repo, pr, settings, statuses, now = Date.now()) {
   const labels = (pr.labels || []).map((label) => label.name);
   // The combined status holds only the latest status per context, so the attempt count lives in its description:
-  // 'conflict-queued N' or 'conflict-dispatched N' (no N counts as 1). Any other record is final.
+  // 'conflict-queued N' or 'conflict-dispatched N' (no N counts as 1), then the fixer version. Any other record is
+  // final. A count from another fixer version starts over.
   const last = statuses.find((status) => status.context === CONFLICT_CONTEXT);
-  const attempt = /^conflict-(?:queued|dispatched)(?: (\d+))?$/.exec(last?.description || '');
-  const done = attempt && !olderThan(last, CONFLICT_RESET_MS, now) ? Number(attempt[1] || 1) : 0;
+  const attempt = /^conflict-(?:queued|dispatched)(?: (\d+))?( @\w+)?$/.exec(last?.description || '');
+  const counts = attempt && (attempt[2] || '') === fixerTag() && !olderThan(last, CONFLICT_RESET_MS, now);
+  const done = counts ? Number(attempt[1] || 1) : 0;
   if (last && (!attempt || done >= CONFLICT_MAX)) return { outcome: 'conflict-skip', reason: `already ${last.description}` };
-  if (done && now - Date.parse(last.updated_at || last.created_at) < CONFLICT_RETRY_MS) {
+  if (attempt && now - Date.parse(last.updated_at || last.created_at) < CONFLICT_RETRY_MS) {
     return { outcome: 'conflict-skip', reason: `${last.description} under 45 min ago` };
   }
   if (labels.includes(LEAD_LABEL)) return { outcome: 'conflict-skip', reason: 'needs-lead' };
@@ -328,7 +335,7 @@ async function startConflictFix(github, owner, repo, pr, settings, statuses, now
     if (error.status !== 404) throw error;
   }
   if (settings.output) {
-    await recordConflict(github, owner, repo, pr.head.sha, `conflict-queued ${done + 1}`);
+    await recordConflict(github, owner, repo, pr.head.sha, `conflict-queued ${done + 1}${fixerTag()}`);
     return { outcome: 'conflict-queued', reason: 'conflict_prs output' };
   }
   try {
@@ -345,7 +352,7 @@ async function startConflictFix(github, owner, repo, pr, settings, statuses, now
     const outcome = error.status === 404 ? 'conflict-no-caller' : 'conflict-no-input';
     return { outcome, reason: `HTTP ${error.status}; retried next sweep` };
   }
-  await recordConflict(github, owner, repo, pr.head.sha, `conflict-dispatched ${done + 1}`);
+  await recordConflict(github, owner, repo, pr.head.sha, `conflict-dispatched ${done + 1}${fixerTag()}`);
   return { outcome: 'conflict-dispatched', reason: settings.workflow };
 }
 
@@ -408,7 +415,7 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
         check = fix.check;
         // A missing caller workflow is final, so it is recorded like a taken action and not retried every sweep.
         if (['ci-fix-dispatched', 'ci-fix-no-caller', 'base-merged'].includes(outcome)) {
-          await record(github, owner, repo, pr.head.sha, 'ci-fix');
+          await record(github, owner, repo, pr.head.sha, `ci-fix${fixerTag()}`);
         }
       } catch (error) {
         outcome = `error:${error.status || 'unknown'}`;

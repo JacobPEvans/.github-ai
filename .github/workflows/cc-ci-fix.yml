@@ -154,6 +154,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+          FIXER_VERSION: ${{ job.workflow_sha }}
         with:
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/check-attempts.js');
@@ -216,6 +217,7 @@ jobs:
           PR_NUMBER: ${{ needs.should-fix.outputs.pr_number }}
           ATTEMPT: ${{ needs.should-fix.outputs.attempt }}
           DRY_RUN: ${{ inputs.dry_run }}
+          FIXER_VERSION: ${{ job.workflow_sha }}
         with:
           script: |
             const run = require('./.ai-workflows/.github/scripts/ci-fix/post-attempt-comment.js');
