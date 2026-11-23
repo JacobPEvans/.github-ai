@@ -42,6 +42,7 @@ function github(prData, { statuses = [], files = [] } = {}) {
   gh.rest.repos.getCombinedStatusForRef = mock().mockResolvedValue({ data: { statuses } });
   gh.rest.repos.createCommitStatus = mock().mockResolvedValue({});
   gh.rest.repos.createDispatchEvent = mock().mockResolvedValue({});
+  gh.rest.repos.compareCommitsWithBasehead = mock().mockResolvedValue({ data: { behind_by: 0 } });
   gh.rest.actions.createWorkflowDispatch = mock().mockResolvedValue({});
   gh.rest.actions.reRunWorkflowFailedJobs = mock().mockResolvedValue({});
   gh.paginate.mockResolvedValue(files);
@@ -623,6 +624,16 @@ describe('reconcile', () => {
     const [event] = await run({ github: gh, context: createMockContext(), core });
     expect(gh.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
     expect(event.check).toBe('codeql');
+  });
+
+  it('updates a branch behind the base when the failed check never runs on the base', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([checkRun({ name: 'pr-only-scan' })]).mockResolvedValueOnce([]);
+    gh.rest.repos.compareCommitsWithBasehead.mockResolvedValue({ data: { behind_by: 4 } });
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'base-merged', check: 'pr-only-scan' });
+    expect(gh.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
   });
 
   it('picks the failed check that finished last', async () => {

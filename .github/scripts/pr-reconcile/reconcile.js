@@ -238,7 +238,14 @@ async function mergeBaseFirst(github, owner, repo, pr, check) {
   const base = await github.paginate(github.rest.checks.listForRef, {
     owner, repo, ref: pr.base.ref, check_name: check.name, per_page: 100,
   });
-  if (!base.some((run) => run.status === 'completed' && run.conclusion === 'success')) return false;
+  // A check that never runs on the base (it runs on pull requests only) cannot be compared there. A branch that is
+  // behind the base is then brought up to date first, because the base may hold the fix.
+  if (!base.length) {
+    const { data } = await github.rest.repos.compareCommitsWithBasehead({
+      owner, repo, basehead: `${pr.base.ref}...${pr.head.sha}`,
+    });
+    if (!(data.behind_by > 0)) return false;
+  } else if (!base.some((run) => run.status === 'completed' && run.conclusion === 'success')) return false;
   try {
     await github.rest.pulls.updateBranch({ owner, repo, pull_number: pr.number, expected_head_sha: pr.head.sha });
     return true;
