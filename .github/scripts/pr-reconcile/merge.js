@@ -13,6 +13,8 @@ const GATE_CHECK = /(^|\/ )AI Merge Gate$/;
 const REPO_GATE_CHECK = /(^|\/ )Merge Gate$/;
 const RENOVATE_BRANCH = 'renovate/';
 const RENOVATE_UPDATE_APPS = ['jacobpevans-release-please[bot]'];
+// Pull requests written by a sandbox agent are merged by a reviewer, never by the sweep.
+const SANDBOX_AUTHORS = ['jacobs-agent-smith[bot]'];
 const BLOCK_LABELS = ['human:review', 'merge-hold', 'needs-lead'];
 const FREEZE_LABEL = 'release:in-progress';
 const BAD_CONCLUSIONS = ['failure', 'cancelled', 'timed_out', 'action_required', 'stale'];
@@ -82,6 +84,7 @@ function staticBlocker(pr, held) {
   const label = BLOCK_LABELS.find((name) => labels.includes(name));
   if (label) return `label:${label}`;
   if (pr.head.ref.startsWith('agent/zcode/')) return 'zcode-branch';
+  if (SANDBOX_AUTHORS.includes(pr.user && pr.user.login)) return 'sandbox-author';
   // Renovate merges its lock file maintenance itself inside its own schedule, after the update has soaked.
   if (/^renovate\/(.+-)?lock-file-maintenance$/.test(pr.head.ref)) return 'renovate-soak';
   // Only the labelled promotion on a git-flow repository is eligible to merge here; every other develop-to-main pull request waits.
