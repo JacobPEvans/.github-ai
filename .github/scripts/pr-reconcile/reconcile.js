@@ -220,8 +220,8 @@ function ciFixSettings() {
 // The CI fix applies only to pull requests the reconcile leaves alone otherwise.
 function ciFixEligible(pr, held) {
   const promotion = pr.base.ref === 'main' && pr.head.ref === 'develop';
-  const renovate = (pr.user && pr.user.login || '').startsWith('renovate');
-  return !held && !promotion && !renovate;
+  // Renovate rebases its own conflicts, but a red Renovate update needs a code change like any other red PR.
+  return !held && !promotion;
 }
 
 // A github-actions check run links its workflow run in its page URLs.
