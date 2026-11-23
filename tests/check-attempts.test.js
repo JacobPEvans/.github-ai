@@ -56,16 +56,20 @@ describe('check-attempts', () => {
     expect(core.setFailed).toHaveBeenCalled();
   });
 
-  it('counts only attempts by this fixer version, and stops after four attempts that published nothing', async () => {
+  it('counts only attempts by this fixer version, and stops after four attempts in a row that published nothing', async () => {
     process.env.FIXER_VERSION = 'new';
-    const mine = `${MARKER}\n<!-- ci-fix-version:new -->`;
-    const fix = { commit: { message: 'fix: resolve CI failure (auto-fix attempt 1)' } };
-    const comments = [...Array(4).fill({ body: MARKER }), { body: mine }];
-    github.paginate.mockImplementation(async (method) => (method === github.rest.pulls.listCommits ? [] : comments));
+    const at = (minutes) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
+    const comments = [50, 40, 30, 20].map((m) => ({ body: MARKER, created_at: at(m) }))
+      .concat({ body: `${MARKER}\n<!-- ci-fix-version:new -->`, created_at: at(10) });
+    const fix = (m) => ({ commit: { message: 'fix: resolve CI failure (auto-fix attempt 1)', committer: { date: at(m) } } });
+    const withCommits = (commits) => github.paginate.mockImplementation(
+      async (method) => (method === github.rest.pulls.listCommits ? commits : comments));
+
+    withCommits([fix(60)]);
     await run({ github, context, core });
     expect(core.getOutput('should_run')).toBe('false');
 
-    github.paginate.mockImplementation(async (method) => (method === github.rest.pulls.listCommits ? [fix, fix] : comments));
+    withCommits([fix(60), fix(25)]);
     await run({ github, context, core });
     expect(core.getOutput('should_run')).toBe('true');
     expect(core.getOutput('attempt')).toBe('2');

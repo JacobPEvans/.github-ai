@@ -737,6 +737,21 @@ describe('reconcile', () => {
     expect(other.rest.repos.createCommitStatus.mock.calls.map((c) => c[0].description)).toContain('ci-fix @abcdef1');
   });
 
+  it('dispatches again at the same head when a check failed after the recorded CI fix', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const at = (ms) => new Date(Date.now() - ms).toISOString();
+    const statuses = [{ context: 'pr-reconcile', description: 'ci-fix', updated_at: at(60 * 60 * 1000) }];
+    const before = github(pr(), { statuses });
+    before.paginate.mockResolvedValue([checkRun({ completed_at: at(2 * 60 * 60 * 1000) })]);
+    const [skip] = await run({ github: before, context: createMockContext(), core });
+    expect(skip.outcome).toBe('already-done');
+
+    const after = github(pr(), { statuses });
+    after.paginate.mockResolvedValue([checkRun({ completed_at: at(30 * 60 * 1000) })]);
+    const [event] = await run({ github: after, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
+  });
+
   it('dispatches again at the same head once the recorded CI fix is six hours old', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const at = (ms) => new Date(Date.now() - ms).toISOString();

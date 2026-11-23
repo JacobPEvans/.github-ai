@@ -9,7 +9,8 @@
 // CI fix: when CI_FIX_WORKFLOW names a workflow file, a pull request that is
 // otherwise left alone but has failed github-actions checks gets one
 // workflow_dispatch per head commit to fix them, and another every CI_FIX_RETRY_MS
-// while that head stays red; the fixer's own attempt cap bounds the total. CI_FIX_SKIP_CHECKS is a
+// while that head stays red, or sooner when a check fails after the dispatch; the fixer's own attempt cap bounds
+// the total. CI_FIX_SKIP_CHECKS is a
 // case-insensitive regex of check names a coding agent should not touch.
 // When the failed check passes at the tip of the base branch, the base is merged
 // in first (update-branch) and no fix is dispatched for that head; this applies to skipped checks too.
@@ -134,8 +135,18 @@ function fixerTag() {
 }
 
 function ciFixDone(statuses) {
-  return statuses.some((status) => status.context === STATUS_CONTEXT && status.description === `ci-fix${fixerTag()}`
+  return statuses.find((status) => status.context === STATUS_CONTEXT && status.description === `ci-fix${fixerTag()}`
     && !olderThan(status, CI_FIX_RETRY_MS));
+}
+
+// A check that failed after the fix was recorded is a new failure at the same head (a re-run after an edit), so the
+// record no longer covers it. A record with no timestamp is not compared, and no checks are listed for it.
+async function failedSince(github, owner, repo, pr, settings, done) {
+  const at = Date.parse(done.updated_at || done.created_at || '');
+  if (!Number.isFinite(at)) return false;
+  const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
+  return (runs || []).some((check) => check.conclusion === 'failure' && check.app && check.app.slug === 'github-actions'
+    && !settings.skip.test(check.name) && Date.parse(check.completed_at || '') > at);
 }
 
 async function record(github, owner, repo, sha, action) {
@@ -406,7 +417,8 @@ async function reconcile({ github, core, owner, repo, number, ciFix, merge = fal
     }
   } else if (ciFix.workflow && decision.action === 'none' && decision.state !== 'closed' && ciFixEligible(pr, held)) {
     action = 'ci-fix';
-    if (ciFixDone(statuses)) {
+    const done = ciFixDone(statuses);
+    if (done && !(await failedSince(github, owner, repo, pr, ciFix, done))) {
       outcome = 'already-done';
     } else {
       try {
