@@ -625,6 +625,17 @@ describe('reconcile', () => {
     expect(event.check).toBe('codeql');
   });
 
+  it('picks the failed check that finished last', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    const gh = github(pr());
+    gh.paginate.mockResolvedValueOnce([
+      checkRun({ name: 'a-title', completed_at: '2026-01-01T09:00:00Z' }),
+      checkRun({ name: 'b-review', completed_at: '2026-01-01T10:00:00Z' }),
+    ]);
+    const [event] = await run({ github: gh, context: createMockContext(), core });
+    expect(event).toMatchObject({ outcome: 'ci-fix-dispatched', check: 'b-review' });
+  });
+
   it('picks the alphabetically first failed check so the choice is stable', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const gh = github(pr({ base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }));

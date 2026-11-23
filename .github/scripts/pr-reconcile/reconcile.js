@@ -291,7 +291,9 @@ async function startCiFix(github, owner, repo, pr, settings, statuses = []) {
   }
   const failed = failures.filter((check) => !settings.skip.test(check.name) && !/review the diff/i.test(check.name));
   if (!failed.length) return { outcome: 'noop' };
-  const check = failed[0];
+  // The newest failure is the live evidence: an older one may already be fixed and only waits for its check to run
+  // again. Checks with no completion time keep the name order.
+  const check = failed.reduce((a, b) => (Date.parse(b.completed_at || '') > Date.parse(a.completed_at || '') ? b : a));
   const runId = ciFixRunId(check);
   if (!runId) return { outcome: 'ci-fix-no-run', check: check.name };
   try {
