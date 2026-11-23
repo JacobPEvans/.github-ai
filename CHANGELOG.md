@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.80.0](https://github.com/JacobPEvans/.github-ai/compare/v2.79.0...v2.80.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** start the CI fix for a red Renovate pull request ([#348](https://github.com/JacobPEvans/.github-ai/issues/348)) ([d946ee5](https://github.com/JacobPEvans/.github-ai/commit/d946ee553491d1b9b9ada306429983bdd9a9ed5d))
+
 ## [2.79.0](https://github.com/JacobPEvans/.github-ai/compare/v2.78.0...v2.79.0) (2026-11-23)
 
 
