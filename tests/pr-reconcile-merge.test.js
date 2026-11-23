@@ -116,7 +116,7 @@ describe('sweep merge', () => {
     ['label:needs-lead', pr({ labels: [{ name: 'needs-lead' }] }), {}],
     ['held', pr({ labels: [{ name: 'merge-hold' }] }), {}],
     ['zcode-branch', pr({ head: { ref: 'agent/zcode/j-1', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
-    ['sandbox-author', pr({ user: { login: 'jacobs-agent-smith[bot]' } }), {}],
+    ['sandbox-author', pr({ user: { login: 'jacobs-agent-smith[bot]', type: 'Bot' } }), {}],
     ['renovate-soak', pr({ head: { ref: 'renovate/lock-file-maintenance', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
     ['promotion', promotion({ labels: [] }), {}],
     ['stacked:fix/base', pr({ base: { ref: 'fix/base', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }), {}],
