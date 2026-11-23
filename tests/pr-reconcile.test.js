@@ -678,7 +678,7 @@ describe('reconcile', () => {
     expect(gh.rest.repos.createCommitStatus.mock.calls.map((c) => c[0].description)).not.toContain('ci-fix');
   });
 
-  it('does not start a CI fix for a held, promotion, fork, release or Renovate pull request', async () => {
+  it('does not start a CI fix for a held, promotion, fork or release pull request', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const held = github(pr({ labels: [{ name: 'merge-hold' }] }));
     await run({ github: held, context: createMockContext(), core });
@@ -700,10 +700,14 @@ describe('reconcile', () => {
     expect(release.paginate).not.toHaveBeenCalled();
     expect(release.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
 
+  });
+
+  it('starts a CI fix for a red Renovate pull request', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const renovate = github(pr({ user: { login: 'renovate[bot]' } }));
-    await run({ github: renovate, context: createMockContext(), core });
-    expect(renovate.paginate).not.toHaveBeenCalled();
-    expect(renovate.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+    renovate.paginate.mockResolvedValueOnce([checkRun()]);
+    const [event] = await run({ github: renovate, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
   });
 
   it('does not start a CI fix when classify acts, even with failed checks', async () => {
