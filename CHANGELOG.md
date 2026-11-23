@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.77.0](https://github.com/JacobPEvans/.github-ai/compare/v2.76.0...v2.77.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** keep agent scratch files out of the published fix ([#341](https://github.com/JacobPEvans/.github-ai/issues/341)) ([ec4e258](https://github.com/JacobPEvans/.github-ai/commit/ec4e258931a5397d4205982b6ab421680eee6b19))
+* **ci-fix:** pin the prompt catalog at v1.135.3 ([#340](https://github.com/JacobPEvans/.github-ai/issues/340)) ([f2cc59f](https://github.com/JacobPEvans/.github-ai/commit/f2cc59f39e8a1118c875eb901f29a5409d63b345))
+
 ## [2.76.0](https://github.com/JacobPEvans/.github-ai/compare/v2.75.0...v2.76.0) (2026-11-23)
 
 
