@@ -13,6 +13,7 @@ describe('post-attempt-comment', () => {
     process.env.PR_NUMBER = '10';
     process.env.ATTEMPT = '1';
     delete process.env.DRY_RUN;
+    delete process.env.FIXER_VERSION;
     github.rest.issues.createComment.mockResolvedValue({});
   });
 
@@ -26,6 +27,12 @@ describe('post-attempt-comment', () => {
     );
     const body = github.rest.issues.createComment.mock.calls[0][0].body;
     expect(body).toContain('Attempt 1/2');
+  });
+
+  it('adds the fixer version to the marker comment', async () => {
+    process.env.FIXER_VERSION = 'abc123';
+    await run({ github, context, core });
+    expect(github.rest.issues.createComment.mock.calls[0][0].body).toContain(`${MARKER}\n<!-- ci-fix-version:abc123 -->`);
   });
 
   it('labels dry-run attempts while retaining the per-PR tracking marker', async () => {

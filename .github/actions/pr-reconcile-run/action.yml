@@ -40,6 +40,10 @@ inputs:
     description: "'true' queues eligible conflicted pull requests in the conflict_prs output instead of dispatching a fix (empty = off)."
     required: false
     default: ""
+  fixer_version:
+    description: Commit of the fixer workflows the callers run; attempt records carry it (empty = unversioned records).
+    required: false
+    default: ""
 outputs:
   conflict_prs:
     description: JSON array of the pull request numbers queued for a conflict fix ('[]' when none).
@@ -61,6 +65,7 @@ runs:
         MERGE_ENABLED: ${{ inputs.merge }}
         PR_RECONCILE_EXCLUDE_REPOS: ${{ inputs.exclude_repos }}
         CONFLICT_OUTPUT: ${{ inputs.conflict_output }}
+        FIXER_VERSION: ${{ inputs.fixer_version }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |

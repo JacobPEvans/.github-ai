@@ -83,6 +83,7 @@ describe('reconcile', () => {
     delete process.env.PR_RECONCILE_EXCLUDE_REPOS;
     delete process.env.CI_FIX_WORKFLOW;
     delete process.env.CI_FIX_SKIP_CHECKS;
+    delete process.env.FIXER_VERSION;
     delete process.env.BASE_REF;
     delete process.env.SWEEP_OWNER;
     process.env.PR_NUMBER = '7';
@@ -722,6 +723,20 @@ describe('reconcile', () => {
     expect(event).toMatchObject({ action: 'ci-fix', outcome: 'already-done' });
   });
 
+  it('dispatches again when the fix record is from another fixer version', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    process.env.FIXER_VERSION = 'abcdef1234';
+    const same = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix @abcdef1' }] });
+    let [event] = await run({ github: same, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'already-done' });
+
+    const other = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix' }] });
+    other.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
+    [event] = await run({ github: other, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
+    expect(other.rest.repos.createCommitStatus.mock.calls.map((c) => c[0].description)).toContain('ci-fix @abcdef1');
+  });
+
   it('dispatches again at the same head once the recorded CI fix is six hours old', async () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     const at = (ms) => new Date(Date.now() - ms).toISOString();
@@ -772,6 +787,7 @@ describe('conflict fix', () => {
     core.summary = { addRaw: mock(() => core.summary), write: mock(async () => {}) };
     delete process.env.RESOLVER_REPO;
     delete process.env.CI_FIX_SKIP_CHECKS;
+    delete process.env.FIXER_VERSION;
     delete process.env.MERGE_ENABLED;
     delete process.env.CONFLICT_OUTPUT;
     process.env.CI_FIX_WORKFLOW = 'ci-fix.yml';
@@ -828,6 +844,16 @@ describe('conflict fix', () => {
     const [again] = await run({ github: stale, context: createMockContext(), core });
     expect(conflictStatuses(stale)).toEqual([expect.objectContaining({ sha: 'head1', description: 'conflict-dispatched 1' })]);
     expect(again.conflict).toEqual({ outcome: 'conflict-dispatched', reason: 'ci-fix.yml' });
+
+    // A spent count from another fixer version starts over; the same version stays spent.
+    process.env.FIXER_VERSION = 'abcdef1234';
+    const older = conflictGithub(dirty(), { statuses: [record('conflict-dispatched 2', 46 * 60 * 1000)] });
+    await run({ github: older, context: createMockContext(), core });
+    expect(conflictStatuses(older)).toEqual([expect.objectContaining({ description: 'conflict-dispatched 1 @abcdef1' })]);
+    const spent = conflictGithub(dirty(), { statuses: [record('conflict-dispatched 2 @abcdef1', 46 * 60 * 1000)] });
+    const [kept] = await run({ github: spent, context: createMockContext(), core });
+    expect(kept.conflict.outcome).toBe('conflict-skip');
+    delete process.env.FIXER_VERSION;
 
     const lead = conflictGithub(dirty(), { statuses: [record('conflict-lead', 2 * DAY)] });
     const [skip] = await run({ github: lead, context: createMockContext(), core });

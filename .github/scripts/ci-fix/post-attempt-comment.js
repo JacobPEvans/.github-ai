@@ -6,12 +6,14 @@ module.exports = async ({ github, context, core }) => {
   }
   const attempt = process.env.ATTEMPT || '?';
   const dryRun = process.env.DRY_RUN === 'true';
+  const version = process.env.FIXER_VERSION || '';
   await github.rest.issues.createComment({
     owner: context.repo.owner,
     repo: context.repo.repo,
     issue_number: prNumber,
     body: [
       '<!-- claude-ci-fix-attempt -->',
+      ...(version ? [`<!-- ci-fix-version:${version} -->`] : []),
       `### CI Auto-Fix Attempt ${attempt}/2`,
       '',
       'The AI agent is analyzing the CI failure and preparing a proposed fix...',
