@@ -1,5 +1,5 @@
 const { expect, test } = require('bun:test');
-const { mkdtempSync, rmSync, writeFileSync, readFileSync } = require('fs');
+const { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } = require('fs');
 const { join } = require('path');
 const { tmpdir } = require('os');
 const { execFileSync } = require('child_process');
@@ -121,6 +121,37 @@ test('render.sh marks exit 1 when any check fails, and still renders the table',
   });
 });
 
+test('render.sh renders a failed code verdict like a failed security verdict', () => {
+  withTempDir((dir) => {
+    writeFileSync(
+      join(dir, 'response.json'),
+      JSON.stringify({
+        summary: 'One violation.',
+        findings: [
+          {
+            check: 'regression',
+            result: 'fail',
+            file: 'roles/foo/tasks/main.yml',
+            line: 4,
+            detail: 'drops the retry the old task had',
+          },
+          { check: 'correctness', result: 'pass', file: '', line: 0, detail: '' },
+          { check: 'missing_test', result: 'pass', file: '', line: 0, detail: '' },
+          { check: 'native_first', result: 'pass', file: '', line: 0, detail: '' },
+        ],
+      }),
+    );
+
+    const result = run(dir, 'render.sh', { MODEL: 'small', RESPONSE_FILE: join(dir, 'response.json') });
+
+    expect(result.exitCode).toBe(0); // rendering itself never fails the job
+    const body = readFileSync(join(dir, 'policy-gate.md'), 'utf8');
+    expect(body).toContain('| regression | fail | roles/foo/tasks/main.yml | 4 |');
+    expect(body).toContain('_Router role `small`._'); // the non-leak footer, as for security
+    expect(readFileSync(join(dir, 'policy-gate.exit'), 'utf8').trim()).toBe('1');
+  });
+});
+
 test('render.sh takes the title and override label from the rubric', () => {
   withTempDir((dir) => {
     writeFileSync(join(dir, 'override.flag'), '');
@@ -197,7 +228,7 @@ test('collect.sh replaces reference-only additions for leak without changing lin
   }, { RUBRIC: 'leak' });
 });
 
-test.each(['security', 'semantic', 'policy'])('collect.sh preserves reference-only lines for %s', (rubric) => {
+test.each(['security', 'semantic', 'policy', 'code'])('collect.sh preserves reference-only lines for %s', (rubric) => {
   withCollectedDiff('  API_KEY: ${{ secrets.API_KEY }}\n', (diff, raw) => {
     expect(diff.toString()).toBe(raw.toString().replace('${{ secrets.API_KEY }}', '<secret-reference:API_KEY>'));
   }, { RUBRIC: rubric });
@@ -215,7 +246,7 @@ test('collect.sh omits reference-only context and preserves removals for leak', 
   }, { RUBRIC: 'leak' }, context + 'REMOVED: ${{ secrets.TOKEN }}\n');
 });
 
-test.each(['leak', 'security', 'semantic', 'policy', undefined])('collect.sh selects context for %s and preserves added lines and hunk coordinates', (rubric) => {
+test.each(['leak', 'security', 'semantic', 'policy', 'code', undefined])('collect.sh selects context for %s and preserves added lines and hunk coordinates', (rubric) => {
   const before = 'permissions:\n  pull-requests: write\n  uses: example/action@v1\n  env:\n    API_KEY: ${{ secrets.API_KEY }}\n';
   const after = before.replace('@v1', '@v2');
   withCollectedDiff(after, (diff, raw) => {
@@ -247,4 +278,59 @@ test('collect.sh preserves literal text and non-assignment additions for leak', 
   withCollectedDiff(content, (diff, raw) => {
     expect(diff.toString()).toBe(raw.toString().replace('${{ secrets.TOKEN }}', '<secret-reference:TOKEN>'));
   }, { RUBRIC: 'leak' });
+});
+
+test('collect.sh appends up to three trusted reusable workflows a changed workflow calls, for the security diff only', () => {
+  const collect = (rubric, uses, ghExit = 0) => withTempDir((dir) => {
+    const git = (args) => execFileSync('git', args, {
+      cwd: dir,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com',
+        GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com',
+      },
+    }).trim();
+    git(['init', '-q']);
+    const base = git(['commit-tree', git(['write-tree']), '-m', 'base']);
+    mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, '.github', 'workflows', 'caller.yml'),
+      ['jobs:', ...uses.flatMap((ref, i) => [`  j${i}:`, `    uses: ${ref}`]), ''].join('\n'));
+    git(['add', '.github']);
+    const head = git(['commit-tree', git(['write-tree']), '-p', base, '-m', 'head']);
+    // The stub logs each request and answers with the requested path, so the test sees what was read.
+    writeFileSync(join(dir, 'bin', 'gh'), `#!/bin/sh\nfor a; do last=$a; done\nprintf '%s\\n' "$last" >> "${dir}/gh.log"\nprintf 'called body for %s' "$last"\nexit ${ghExit}\n`);
+    chmodSync(join(dir, 'bin', 'gh'), 0o755);
+    const result = run(dir, 'collect.sh', {
+      RUBRIC: rubric, BASE_SHA: base, HEAD_SHA: head, MAX_DIFF_KB: '150',
+      GITHUB_REPOSITORY_OWNER: 'Self', PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+    });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    let log = '';
+    try { log = readFileSync(join(dir, 'gh.log'), 'utf8'); } catch {}
+    return { diff: readFileSync(join(dir, 'diff.txt'), 'utf8'), log, stdout: result.stdout.toString() };
+  });
+
+  const shared = 'JacobPEvans/.github-ai/.github/workflows/cc-ci-fix.yml@v2';
+  const { diff, log } = collect('security', [shared, shared, './.github/workflows/local.yml']);
+  expect(diff.startsWith('diff --git')).toBe(true);
+  expect(diff.indexOf('end of the diff; context follows')).toBeGreaterThan(diff.indexOf('diff --git'));
+  expect(diff).toContain(`CALLED REUSABLE WORKFLOW ${shared}, context only and not part of this pull request`);
+  expect(diff).toContain('called body for repos/JacobPEvans/.github-ai/contents/.github/workflows/cc-ci-fix.yml?ref=v2');
+  expect(log.trim().split('\n')).toEqual(['repos/JacobPEvans/.github-ai/contents/.github/workflows/cc-ci-fix.yml?ref=v2']);
+
+  const external = collect('security', ['stranger/tools/.github/workflows/x.yml@main']);
+  expect(external.log).toBe('');
+  expect(external.diff).toContain('External reusable workflow stranger/tools/.github/workflows/x.yml@main is called; it was not read.');
+  expect(external.diff).not.toContain('called body');
+
+  const many = collect('security', ['a', 'b', 'c', 'd'].map((n) => `self/repo/.github/workflows/${n}.yml@v1`));
+  expect(many.log.trim().split('\n')).toHaveLength(3);
+  expect(many.diff).toContain('Reusable workflow self/repo/.github/workflows/d.yml@v1 is called; it was not read (limit 3).');
+
+  expect(collect('policy', [shared]).log).toBe('');
+  const unreadable = collect('security', [shared], 1);
+  expect(unreadable.diff).not.toContain('CALLED REUSABLE WORKFLOW');
+  expect(unreadable.stdout).toContain(`::warning::could not read the called workflow ${shared}`);
 });

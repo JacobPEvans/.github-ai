@@ -8,6 +8,33 @@ const workflow = (name) => Bun.YAML.parse(readFileSync(join('.github', 'workflow
 const frontdoor = workflow('ai-merge-gate.yml');
 const gate = workflow('_ai-merge-gate.yml');
 
+test('the OIDC entry is the same graph with id-token: write on each review job only', () => {
+  const oidc = workflow('_ai-merge-gate-oidc.yml');
+  const reviews = ['leak', 'security', 'semantic', 'code'];
+  for (const job of reviews) {
+    expect(gate.jobs[job].permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
+    expect(oidc.jobs[job].permissions).toEqual({ contents: 'read', 'id-token': 'write', 'pull-requests': 'write' });
+  }
+  const withoutIdToken = structuredClone(oidc.jobs);
+  for (const job of reviews) delete withoutIdToken[job].permissions['id-token'];
+  for (const job of ['gitleaks', 'router', 'gate']) {
+    expect(withoutIdToken[job]['runs-on']).toBe("${{ inputs.runner_label || 'ubuntu-26.04' }}");
+    withoutIdToken[job]['runs-on'] = gate.jobs[job]['runs-on'];
+  }
+  expect(withoutIdToken).toEqual(gate.jobs);
+
+  const normalizeRunnerDefault = (workflow) => {
+    const normalized = structuredClone(workflow.on);
+    normalized.workflow_call.inputs.runner_label.default = '<runner default>';
+    normalized.workflow_call.inputs.runner_label.description = '<runner description>';
+    return normalized;
+  };
+  expect(normalizeRunnerDefault(oidc)).toEqual(normalizeRunnerDefault(gate));
+  expect(oidc.permissions).toEqual(gate.permissions);
+  expect(oidc.concurrency).toEqual(gate.concurrency);
+  expect(JSON.stringify(gate)).not.toContain('id-token');
+});
+
 test('the public workflow starts the gate for the required pull request events and passes named secrets', () => {
   expect(frontdoor.on.pull_request.types).toEqual(fixture.pull_request_types);
   expect(frontdoor.jobs.gate.with.runner_label).toContain("&& 'review' || 'ubuntu-latest'");
@@ -22,6 +49,22 @@ test('the reusable workflow exposes router and check credentials to its caller',
   expect(call.secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY.required).toBe(false);
 });
 
+test('the OIDC entry defaults hosted jobs to Ubuntu 26.04 and forwards runner overrides', () => {
+  const oidc = workflow('_ai-merge-gate-oidc.yml');
+  expect(oidc.on.workflow_call.inputs.runner_label.default).toBe('ubuntu-26.04');
+  expect(oidc.on.workflow_call.inputs.runner_label.description).toContain('ubuntu-26.04');
+
+  for (const job of ['gitleaks', 'router', 'gate']) {
+    expect(oidc.jobs[job]['runs-on']).toBe("${{ inputs.runner_label || 'ubuntu-26.04' }}");
+  }
+  for (const job of ['leak', 'security', 'semantic', 'code']) {
+    expect(oidc.jobs[job].with.runner_label).toBe('$' + '{{ inputs.runner_label }}');
+  }
+
+  const source = readFileSync(join('.github', 'workflows', '_ai-merge-gate-oidc.yml'), 'utf8');
+  expect(source).toMatch(/_ai-merge-gate-oidc\.yml@[0-9a-f]{40} # v2\.\d+\.\d+\n/);
+});
+
 test('the three policy reviews use dogfood rubrics, models, and blocking mode', () => {
   for (const { job, rubric, model } of fixture.review_jobs) {
     const review = gate.jobs[job];
@@ -31,6 +74,15 @@ test('the three policy reviews use dogfood rubrics, models, and blocking mode', 
       expect(review.secrets[name]).toBe('$' + '{{ secrets.' + name + ' }}');
     }
   }
+});
+
+test('the code review is advisory and the final check does not wait for it', () => {
+  const review = gate.jobs.code;
+  expect(review.uses).toBe('./.github/workflows/policy-gate.yml');
+  expect(review.with).toMatchObject({ rubric: 'code', model: 'standard', blocking: false });
+  expect(review.if).toBe(gate.jobs.semantic.if);
+  expect(review.secrets).toEqual(gate.jobs.semantic.secrets);
+  expect(gate.jobs.gate.needs).not.toContain('code');
 });
 
 test('the leak reviews raise only their completion ceiling to 4000 tokens', () => {

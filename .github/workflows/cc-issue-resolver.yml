@@ -113,7 +113,7 @@ jobs:
     name: AI Resolve
     needs: eligibility-check
     if: needs.eligibility-check.outputs.should_run == 'true'
-    runs-on: ${{ inputs.runner_label }}
+    runs-on: ${{ startsWith(inputs.runner_label, 'ubuntu-') && inputs.runner_label || 'review' }}
     permissions:
       contents: read
       issues: read
@@ -164,7 +164,7 @@ jobs:
       - name: Run AI agent
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
-          agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
+          agent: ${{ vars.GH_ACTION_AI_AGENT || 'openhands' }}
           prompt: ${{ steps.prompt.outputs.content }}
           claude_model: ${{ inputs.model || vars.GH_ACTION_AI_MODEL_PLAN || vars.GH_ACTION_AI_MODEL }}
           codex_model: ${{ inputs.model || vars.GH_ACTION_AI_CODEX_MODEL }}
@@ -174,8 +174,6 @@ jobs:
           api_key: ${{ secrets.LLM_ROUTER_API_KEY }}
           openai_effort: ${{ vars.GH_ACTION_AI_CODEX_EFFORT }}
           codex_version: ${{ vars.GH_ACTION_AI_CODEX_VERSION }}
-          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
-          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
       - name: Collect agent patch
         run: |

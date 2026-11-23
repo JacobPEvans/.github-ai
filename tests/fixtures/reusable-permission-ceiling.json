@@ -1,4 +1,10 @@
 {
+  "_ai-merge-gate-oidc.yml": {
+    "checks": "read",
+    "contents": "read",
+    "id-token": "write",
+    "pull-requests": "write"
+  },
   "_ai-merge-gate.yml": {
     "checks": "read",
     "contents": "read",
@@ -10,6 +16,13 @@
     "issues": "write",
     "pull-requests": "read"
   },
+  "cc-ci-fix-oidc.yml": {
+    "actions": "read",
+    "contents": "write",
+    "id-token": "write",
+    "issues": "write",
+    "pull-requests": "write"
+  },
   "cc-ci-fix.yml": {
     "actions": "read",
     "contents": "write",
@@ -19,6 +32,11 @@
   "cc-code-simplifier.yml": {
     "actions": "read",
     "contents": "write",
+    "pull-requests": "write"
+  },
+  "cc-conflict-fix.yml": {
+    "contents": "read",
+    "id-token": "write",
     "pull-requests": "write"
   },
   "cc-dep-review.yml": {
@@ -135,5 +153,11 @@
   "thread-triage.yml": {
     "contents": "read",
     "pull-requests": "write"
+  },
+  "verdict.yml": {
+    "actions": "read",
+    "contents": "read",
+    "id-token": "write",
+    "pull-requests": "read"
   }
 }

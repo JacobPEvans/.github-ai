@@ -1,0 +1,68 @@
+name: Router credentials
+description: >-
+  Read the model router's base URL and the key for this repository's visibility
+  from OpenBao through the ci-ai-review OIDC role. The role binds to the
+  verdict.yml workflow identity, so only jobs of that workflow can use this.
+  The calling job needs id-token: write and a runner with OPENBAO_ADDR set.
+  Fails the step when any value is missing.
+# Each default is a vault-action selector, `<mount>/data/<path> <field>`, readable by the ci-ai-review policy.
+inputs:
+  key-path:
+    description: vault-action selector for the private-repository router key.
+    default: secret/data/apps/github-actions-pr-review github_actions_pr_review_llm_router_key
+  oss-key-path:
+    description: vault-action selector for the open-source router key.
+    default: secret/data/apps/github-actions-oss github_actions_oss_llm_router_key
+  url-path:
+    description: vault-action selector for the router base URL.
+    default: config/data/ci-ai-review base_url
+outputs:
+  base-url:
+    description: Router base URL ending in /v1.
+    value: ${{ steps.read.outputs.LLM_ROUTER_BASE_URL }}
+  api-key:
+    description: Router key for this repository's visibility.
+    value: ${{ github.event.repository.private && steps.read.outputs.LLM_ROUTER_API_KEY || steps.read.outputs.LLM_ROUTER_OSS_API_KEY }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve OpenBao address
+      id: bao
+      shell: bash
+      run: |
+        test -n "${OPENBAO_ADDR:-}" || { echo "::error::OPENBAO_ADDR is not set on this runner" >&2; exit 1; }
+        echo "addr=$OPENBAO_ADDR" >> "$GITHUB_OUTPUT"
+
+    - name: Read router credentials from OpenBao
+      id: read
+      continue-on-error: true
+      uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+      with:
+        url: ${{ steps.bao.outputs.addr }}
+        method: jwt
+        path: github-actions
+        role: ci-ai-review
+        jwtGithubAudience: openbao
+        exportEnv: false
+        exportToken: false
+        secrets: |
+          ${{ inputs.key-path }} | LLM_ROUTER_API_KEY ;
+          ${{ inputs.oss-key-path }} | LLM_ROUTER_OSS_API_KEY ;
+          ${{ inputs.url-path }} | LLM_ROUTER_BASE_URL ;
+
+    - name: Verify router credentials
+      shell: bash
+      env:
+        LOOKUP_OUTCOME: ${{ steps.read.outcome }}
+        BASE_URL: ${{ steps.read.outputs.LLM_ROUTER_BASE_URL }}
+        PRIVATE_API_KEY: ${{ steps.read.outputs.LLM_ROUTER_API_KEY }}
+        OSS_API_KEY: ${{ steps.read.outputs.LLM_ROUTER_OSS_API_KEY }}
+        REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+      run: |
+        test "$LOOKUP_OUTCOME" = success || { echo "::error::OpenBao could not provide the router credentials" >&2; exit 1; }
+        test -n "$BASE_URL" || { echo "::error::OpenBao did not return LLM_ROUTER_BASE_URL" >&2; exit 1; }
+        if [ "$REPOSITORY_PRIVATE" = "true" ]; then
+          test -n "$PRIVATE_API_KEY" || { echo "::error::OpenBao did not return LLM_ROUTER_API_KEY for a private repository" >&2; exit 1; }
+        else
+          test -n "$OSS_API_KEY" || { echo "::error::OpenBao did not return LLM_ROUTER_OSS_API_KEY for an open-source repository" >&2; exit 1; }
+        fi

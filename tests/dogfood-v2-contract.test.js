@@ -32,3 +32,9 @@ for (const [name, jobName, reusableName] of callers) {
     }
   });
 }
+
+test('dogfood-pr-review-responder grants the permission ceiling of the local responder workflow', () => {
+  const caller = workflow('dogfood-pr-review-responder');
+  expect(caller.jobs.respond.uses).toBe('./.github/workflows/cc-pr-review-responder.yml');
+  expect(caller.permissions).toEqual(ceilingOf('cc-pr-review-responder', workflow('cc-pr-review-responder')));
+});

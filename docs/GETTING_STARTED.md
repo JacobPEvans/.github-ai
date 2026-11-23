@@ -37,6 +37,20 @@ jobs:
 `@main`, `@develop`, a branch, or a bare major tag such as `@vN`. Renovate moves the SHA and the comment together. A patch bump merges
 after the Merge Gate is green. A minor or major bump is merged by a person.
 
+## AI Merge Gate
+
+For OIDC-based check publishing, call `_ai-merge-gate-oidc.yml` with a reviewed
+release SHA. Grant the calling job `checks: read`, `contents: read`,
+`pull-requests: write`, and `id-token: write`.
+
+Trigger the caller on `pull_request` types `opened`, `ready_for_review`, `synchronize`, `reopened`, `edited`,
+`labeled` and `unlabeled`. The reviews read the override labels from the event, so a gate without `labeled` never
+sees an override label until the next push.
+
+Run the caller on a test PR and verify that both the security and semantic
+review jobs publish their verdict checks before switching other repositories
+to that release.
+
 ---
 
 ## Available Workflows
@@ -78,6 +92,12 @@ Call after the CI jobs fail. The reusable workflow reads the originating run and
 failures to repair and default-branch failures to issue creation. Existing `workflow_run` callers remain
 compatible during migration.
 
+A repository in the PR Reconcile sweep uses [`examples/ci-fix-caller.yml`](../examples/ci-fix-caller.yml),
+unchanged, as `.github/workflows/ci-fix.yml`. The sweep dispatches it for a pull request whose checks failed;
+per-repository text comes from the `CI_FIX_REPO_CONTEXT`, `CI_FIX_CI_STRUCTURE` and `CI_FIX_EXTRA_TOOLS`
+repository variables. That caller uses `cc-ci-fix-oidc.yml`, the same job graph whose publish job reads its commit
+token from OpenBao through GitHub OIDC, so the calling job grants `id-token: write`.
+
 ```yaml
 jobs:
   ci-failure-handler:
@@ -117,6 +137,18 @@ The caller must grant `id-token: write`. The fix job's OIDC credential step requ
 cannot elevate the caller's token, so a caller without it fails at startup.
 
 Inputs: `repo_context` (required), `ci_structure` (required), `extra_tools` (optional)
+
+#### `cc-conflict-fix.yml`
+
+Called with `conflict_pr` for a conflicted pull request. The agent re-applies the pull request's net diff onto the
+current base tip. The publisher opens a v2 pull request from branch `<head>-v2`, with the same title and labels
+(never `human:review`) and the original body plus `Supersedes #N`. It closes the original, with a comment linking
+the v2, once the v2's CI has started.
+
+The run opens nothing for a pull request that is not open or not conflicted, a fork head, a v2, or one whose
+`<head>-v2` branch exists. It also opens nothing when the agent's patch changes a file the original did not change,
+or anything under `.github/`. The commit token comes from OpenBao through OIDC, so the caller grants
+`id-token: write`.
 
 #### `cc-post-merge-docs-review.yml`
 

@@ -340,10 +340,26 @@ describe('gateway wiring in the workflows', () => {
     expect(gateway.env.CONCLUSION).toContain("inputs.blocking && 'failure'");
     expect(gateway.env.CONCLUSION).toContain("'neutral'");
     expect(gateway.env.CHECK_NAME).toBe('${{ env.REVIEW_NAME }}');
-    expect(gateway.env.CHECK_APP_SLUG).toBe('${{ steps.check-token.outputs.app-slug }}');
+    const slug = '${{ steps.check-token.outputs.app-slug }}';
+    const appId = '${{ vars.GH_APP_CLAUDE_BOT_ID }}';
+    const token = '${{ steps.check-token-oidc.outputs.CHECK_TOKEN || steps.check-token.outputs.token }}';
+    expect(gateway.env.CHECK_APP_SLUG).toBe(slug);
+    expect(gateway.env.GITHUB_TOKEN).toBe(token);
+    expect(verdict.env.CHECK_APP_SLUG).toBe(slug);
+    expect(gateway.env.CHECK_APP_ID).toBe(appId);
+    expect(verdict.env.CHECK_APP_ID).toBe(appId);
+    expect(verdict.env.GH_TOKEN).toBe(token);
     expect(gateway.run).toContain('gateway-failure.sh report "$REVIEW_NAME"');
     expect(job.env.REVIEW_NAME).toContain("'policy-gate'");
-    expect(mint.if).toBe("steps.state.outputs.state != 'override'");
+    const oidc = step(job, 'Read the check-run token from OpenBao');
+    expect(oidc.uses).toBe('hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc');
+    expect(oidc.with.method).toBe('jwt');
+    expect(oidc.with.jwtGithubAudience).toBe('https://github.com/${{ github.repository_owner }}');
+    expect(oidc.with.role).toBe('${{ steps.check-role.outputs.role }}');
+    expect(oidc.with.secrets).toContain('github/token/${{ steps.check-role.outputs.role }} token | CHECK_TOKEN');
+    expect(step(job, 'Find the OpenBao check-token role').run).toContain('role=gate-checks-${OWNER,,}');
+    expect(mint.if).toBe("steps.state.outputs.state != 'override' && steps.check-token-oidc.outputs.CHECK_TOKEN == ''");
+    expect(step(job, 'Record which path minted the check-run token').run).toContain('GITHUB_STEP_SUMMARY');
     expect(verdict.if).toBe("steps.state.outputs.state == 'ok'");
     expect(verdict.run).toContain('check-run.sh update');
     expect(verdict.run).toContain('check-run.sh upsert');
@@ -400,7 +416,6 @@ describe('gateway wiring in the workflows', () => {
       step(load('policy-gate.yml').jobs.gate, 'Mint the check-run token'),
       step(load('docs-drift.yml').jobs.drift, 'Mint the check-run token'),
       step(load('pr-agent.yml').jobs['pr-agent'], 'Mint the check-run token'),
-      step(load('cc-release-notes.yml').jobs.highlights, 'Mint the check-run token'),
     ];
     for (const mint of directMints) {
       expect(mint.uses).toBe(pinned);
@@ -412,10 +427,11 @@ describe('gateway wiring in the workflows', () => {
     expect(sharedMint.uses).toBe(pinned);
     expect(sharedMint.with['permission-checks']).toBe('write');
 
-    const runAiMint = action.runs.steps.find((s) => s.name === 'Mint the check-run token');
-    expect(runAiMint.id).toBe('check-token');
-    expect(runAiMint.uses).toBe('./.ai-workflows/.github/actions/run-ai-agent/mint-check-token');
-    expect(runAiMint['continue-on-error']).toBe(true);
+    // The agent action mints nothing; its gateway report has no token and names why.
+    expect(action.runs.steps.find((s) => s.name === 'Mint the check-run token')).toBeUndefined();
+    const report = action.runs.steps.find((s) => s.name === 'Report gateway unavailability');
+    expect(report.env.GITHUB_TOKEN).toBeUndefined();
+    expect(report.env.CHECK_TOKEN_CAUSE).toBe('agent jobs hold no App key');
   });
 
   it('the App key is named as the cause when it is absent', () => {
@@ -423,14 +439,14 @@ describe('gateway wiring in the workflows', () => {
     expect(step(job, 'Report gateway unavailability').env.CHECK_TOKEN_CAUSE).toContain('GH_APP_CLAUDE_BOT_PRIVATE_KEY is not set');
   });
 
-  it('every run-ai-agent caller in the touched set passes the App ID and key', () => {
+  it('no run-ai-agent caller in the touched set passes an App ID or key', () => {
     for (const file of ['issue-backlog-sweep.yml', 'cc-ci-fix.yml', 'cc-release-notes.yml']) {
       const workflow = load(file);
       const agent = Object.values(workflow.jobs)
         .flatMap((job) => job.steps ?? [])
         .find((s) => s.uses === './.ai-workflows/.github/actions/run-ai-agent');
-      expect(agent.with.claude_bot_app_id).toBe('${{ vars.GH_APP_CLAUDE_BOT_ID }}');
-      expect(agent.with.claude_bot_private_key).toBe('${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}');
+      expect(agent.with.claude_bot_app_id).toBeUndefined();
+      expect(agent.with.claude_bot_private_key).toBeUndefined();
     }
   });
 

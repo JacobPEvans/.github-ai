@@ -2,22 +2,46 @@
 //
 // One idempotent reconcile(pr) per pull request. The state comes only from
 // GitHub API fields. BEHIND gets the update-branch API. DIRTY gets the
-// merge-conflict label (and needs-lead when workflow files are involved, which
+// merge-conflict label (and needs-lead when CI paths (ci-paths.js) are involved, which
 // this token cannot write); a resolver is started by repository_dispatch when
 // RESOLVER_REPO is set. Each decision is logged as one JSON event line.
 //
 // CI fix: when CI_FIX_WORKFLOW names a workflow file, a pull request that is
 // otherwise left alone but has failed github-actions checks gets one
-// workflow_dispatch per head commit to fix them. CI_FIX_SKIP_CHECKS is a
+// workflow_dispatch per head commit to fix them, and another every CI_FIX_RETRY_MS
+// while that head stays red, or sooner when a check fails after the dispatch; the fixer's own attempt cap bounds
+// the total. CI_FIX_SKIP_CHECKS is a
 // case-insensitive regex of check names a coding agent should not touch.
+// When the failed check passes at the tip of the base branch, the base is merged
+// in first (update-branch) and no fix is dispatched for that head; this applies to skipped checks too.
+// Re-run first: an AI review run that crashed or was cancelled, and Uses Resolve (it reads live references), get
+// a re-run of their workflow run instead, at most twice per head (the pr-reconcile-rerun status counts them). An
+// AI review never gets a CI-fix dispatch.
 //
 // Hold: every reconcile sets the `merge-hold` commit status at the head: failure
 // while the PR carries the merge-hold label, success otherwise. A ruleset that
 // requires this status blocks the merge itself, so re-armed auto-merge cannot
 // race a hold, and the PR stays ready and mergeable.
 //
+// Conflict fix: when CI_FIX_WORKFLOW is set, a conflicted pull request (not Renovate, not a promotion, not touching
+// a CI path, ci-paths.js) whose head commit is at least 15 minutes old gets a workflow_dispatch with conflict_pr, at most
+// CONFLICT_MAX per head per day: an attempt that left the original open with no v2 branch is retried after
+// CONFLICT_RETRY_MS, and a count older than CONFLICT_RESET_MS starts over, since a conflicted head does not move;
+// the caller opens a v2 pull request on the current base. A v2 that conflicts again gets needs-lead, never a v3.
+// The commit status context pr-reconcile-conflict records it, apart from the pr-reconcile action record. A
+// repository without a caller that takes conflict_pr records nothing and is retried every sweep.
+// With CONFLICT_OUTPUT=true the same checks queue the pull request instead of dispatching: the run records
+// conflict-queued at the head and returns the numbers in the conflict_prs output, so the calling workflow starts
+// the conflict fix as a reusable-workflow job (no dispatch, no actions permission).
+//
+// Merge: when MERGE_ENABLED is true, a bot pull request left alone otherwise is merged once it is green at its exact
+// head (merge.js); every merge and skip reason goes to the run summary.
+//
 // Modes: PR_NUMBER (one PR in this repo), BASE_REF (every open PR on that base,
 // for push-to-base), SWEEP_OWNER (every open PR of the owner).
+
+const { mergeEnabled, tryMerge, mergeSummary, GATE_CHECK } = require('./merge.js');
+const { isCiPath } = require('./ci-paths.js');
 
 const CONFLICT_LABEL = 'merge-conflict';
 const LEAD_LABEL = 'needs-lead';
@@ -25,13 +49,29 @@ const STATUS_CONTEXT = 'pr-reconcile';
 const HOLD_CONTEXT = 'merge-hold';
 const HOLD_LABEL = 'merge-hold';
 const UNKNOWN_RETRIES = 3;
+const CONFLICT_CONTEXT = 'pr-reconcile-conflict';
+// The author's own push gets 15 minutes to settle before a fix starts.
+const CONFLICT_MIN_AGE_MS = 15 * 60 * 1000;
+const CONFLICT_MAX = 2;
+const CONFLICT_RETRY_MS = 45 * 60 * 1000; // longer than one conflict-fix run, so a running attempt is not doubled
+const CONFLICT_RESET_MS = 24 * 60 * 60 * 1000;
+// A fix that committed nothing leaves the head where it was, so the same head is looked at again after this long.
+const CI_FIX_RETRY_MS = 6 * 60 * 60 * 1000;
+const V2_BODY = /^Supersedes #\d+\b/m;
 // Unknown-state retries stop after the retry budget; no new PR starts after the run budget, so a large sweep
 // ends inside the 5-minute job timeout and the next sweep picks up the rest.
 let retryDeadline = Infinity;
 const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
-// Meta gates and scans a coding agent cannot fix by editing code.
-const CI_FIX_SKIP_DEFAULT = 'merge gate|review|freeze|policy|semantic|codeql|dependency|release';
+// Checks a code edit cannot fix: gate aggregators that mirror another check, review-router outages, review runs
+// that crashed instead of returning a verdict, release freezes and release checks, and eligibility gates. Review
+// verdicts (Policy gate), Workflow Policy, CodeQL and dependency review do start a fix.
+// Flake Lock Fresh fails on upstream drift of the base's lock file: a lock bump on the base and update-branch clear it.
+const CI_FIX_SKIP_DEFAULT = 'merge gate|router availability|review the diff|freeze|release|eligibility|flake lock fresh';
+const RERUN_CHECKS = /review the diff|uses resolve/i;
+const RERUN_CONTEXT = 'pr-reconcile-rerun';
+const RERUN_MAX = 2;
+const GATEWAY_STEP = /gateway unavailab/i;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -70,7 +110,7 @@ async function getPr(github, owner, repo, number) {
 
 async function touchesWorkflows(github, owner, repo, number) {
   const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: number, per_page: 100 });
-  return files.some((file) => file.filename.startsWith('.github/workflows/'));
+  return files.some((file) => isCiPath(file.filename));
 }
 
 // At most once per (PR, head SHA, action): the commit status at the head records the last action taken.
@@ -81,6 +121,32 @@ async function headStatuses(github, owner, repo, sha) {
 
 function alreadyDone(statuses, action) {
   return statuses.some((status) => status.context === STATUS_CONTEXT && status.description === action);
+}
+
+// A record with no timestamp counts as fresh.
+function olderThan(status, ms, now = Date.now()) {
+  const at = Date.parse(status.updated_at || status.created_at || '');
+  return Number.isFinite(at) && now - at >= ms;
+}
+
+// Fix records carry the fixer version, so a record written for another version does not hold this one back.
+function fixerTag() {
+  return process.env.FIXER_VERSION ? ` @${process.env.FIXER_VERSION.slice(0, 7)}` : '';
+}
+
+function ciFixDone(statuses) {
+  return statuses.find((status) => status.context === STATUS_CONTEXT && status.description === `ci-fix${fixerTag()}`
+    && !olderThan(status, CI_FIX_RETRY_MS));
+}
+
+// A check that failed after the fix was recorded is a new failure at the same head (a re-run after an edit), so the
+// record no longer covers it. A record with no timestamp is not compared, and no checks are listed for it.
+async function failedSince(github, owner, repo, pr, settings, done) {
+  const at = Date.parse(done.updated_at || done.created_at || '');
+  if (!Number.isFinite(at)) return false;
+  const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
+  return (runs || []).some((check) => check.conclusion === 'failure' && check.app && check.app.slug === 'github-actions'
+    && !settings.skip.test(check.name) && Date.parse(check.completed_at || '') > at);
 }
 
 async function record(github, owner, repo, sha, action) {
@@ -145,7 +211,7 @@ function ciFixSettings() {
   if (workflow && !/^[A-Za-z0-9._-]+\.ya?ml$/.test(workflow)) throw new Error(`invalid CI_FIX_WORKFLOW: ${workflow}`);
   const pattern = process.env.CI_FIX_SKIP_CHECKS || CI_FIX_SKIP_DEFAULT;
   try {
-    return { workflow, skip: new RegExp(pattern, 'i') };
+    return { workflow, skip: new RegExp(pattern, 'i'), output: process.env.CONFLICT_OUTPUT === 'true' };
   } catch {
     throw new Error(`invalid CI_FIX_SKIP_CHECKS: ${pattern}`);
   }
@@ -154,8 +220,8 @@ function ciFixSettings() {
 // The CI fix applies only to pull requests the reconcile leaves alone otherwise.
 function ciFixEligible(pr, held) {
   const promotion = pr.base.ref === 'main' && pr.head.ref === 'develop';
-  const renovate = (pr.user && pr.user.login || '').startsWith('renovate');
-  return !held && !promotion && !renovate;
+  // Renovate rebases its own conflicts, but a red Renovate update needs a code change like any other red PR.
+  return !held && !promotion;
 }
 
 // A github-actions check run links its workflow run in its page URLs.
@@ -167,16 +233,80 @@ function ciFixRunId(check) {
   return '';
 }
 
-async function startCiFix(github, owner, repo, pr, settings) {
+// A head that predates a base fix fails a check the base passes; merging the base in is the fix.
+async function mergeBaseFirst(github, owner, repo, pr, check) {
+  const base = await github.paginate(github.rest.checks.listForRef, {
+    owner, repo, ref: pr.base.ref, check_name: check.name, per_page: 100,
+  });
+  // A check that never runs on the base (it runs on pull requests only) cannot be compared there. A branch that is
+  // behind the base is then brought up to date first, because the base may hold the fix.
+  if (!base.length) {
+    const { data } = await github.rest.repos.compareCommitsWithBasehead({
+      owner, repo, basehead: `${pr.base.ref}...${pr.head.sha}`,
+    });
+    if (!(data.behind_by > 0)) return false;
+  } else if (!base.some((run) => run.status === 'completed' && run.conclusion === 'success')) return false;
+  try {
+    await github.rest.pulls.updateBranch({ owner, repo, pull_number: pr.number, expected_head_sha: pr.head.sha });
+    return true;
+  } catch (error) {
+    // 422: the head already contains the base, or the merge conflicts; the agent fix runs instead.
+    if (error.status === 422) return false;
+    throw error;
+  }
+}
+
+// Re-runs one workflow run behind a re-run check while the head has fewer than RERUN_MAX recorded re-runs.
+// The combined status holds only the latest status per context, so the count lives in its description: 'rerun N: ...'.
+async function rerunFirst(github, owner, repo, pr, broken, statuses, down) {
+  const last = statuses.find((status) => status.context === RERUN_CONTEXT);
+  const done = Number(/^rerun (\d+):/.exec(last?.description || '')?.[1] || 0);
+  if (done >= RERUN_MAX) return null;
+  // A fix was already dispatched at this head and the head did not move: the fixer found nothing to change, so a
+  // failure that is still there is treated as transient and re-run before another fix. One check is not re-run twice
+  // in a row.
+  const tried = statuses.some((status) => status.context === STATUS_CONTEXT && /^ci-fix( |$)/.test(status.description || ''));
+  const lastName = /^rerun \d+: (.*)$/.exec(last?.description || '')?.[1];
+  const check = broken.find((run) => ciFixRunId(run) && (RERUN_CHECKS.test(run.name) || down.has(run)
+    || (tried && run.conclusion === 'failure' && run.name.slice(0, 120) !== (lastName || '').slice(0, 120))));
+  if (!check) return null;
+  await github.rest.actions.reRunWorkflowFailedJobs({ owner, repo, run_id: Number(ciFixRunId(check)) });
+  await github.rest.repos.createCommitStatus({
+    owner, repo, sha: pr.head.sha, state: 'success', context: RERUN_CONTEXT, description: `rerun ${done + 1}: ${check.name}`.slice(0, 140),
+  });
+  return { outcome: 'rerun', check: check.name };
+}
+
+// A Policy gate job that failed in its gateway-unavailability step stopped before a verdict: re-run, never fixed.
+async function gatewayDown(github, owner, repo, check) {
+  const job = /\/job\/(\d+)/.exec(check.details_url || '')?.[1];
+  if (!/policy gate/i.test(check.name) || !job) return false;
+  const { data } = await github.rest.actions.getJobForWorkflowRun({ owner, repo, job_id: Number(job) });
+  return (data.steps || []).some((step) => step.conclusion === 'failure' && GATEWAY_STEP.test(step.name));
+}
+
+async function startCiFix(github, owner, repo, pr, settings, statuses = []) {
   const runs = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 });
-  if (runs.some((check) => check.status !== 'completed')) return { outcome: 'ci-pending' };
-  const failed = runs
-    .filter((check) => check.conclusion === 'failure'
-      && check.app && check.app.slug === 'github-actions'
-      && !settings.skip.test(check.name))
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  // A run with a conclusion is finished even when its status never left in_progress.
+  if (runs.some((check) => check.status !== 'completed' && !check.conclusion)) return { outcome: 'ci-pending' };
+  const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const broken = runs
+    .filter((check) => ['failure', 'cancelled', 'timed_out'].includes(check.conclusion)
+      && check.app && check.app.slug === 'github-actions')
+    .sort(byName);
+  const down = new Set();
+  for (const check of broken) if (await gatewayDown(github, owner, repo, check)) down.add(check);
+  const rerun = await rerunFirst(github, owner, repo, pr, broken, statuses, down);
+  if (rerun) return rerun;
+  const failures = broken.filter((check) => check.conclusion === 'failure' && !down.has(check));
+  for (const check of failures) {
+    if (await mergeBaseFirst(github, owner, repo, pr, check)) return { outcome: 'base-merged', check: check.name };
+  }
+  const failed = failures.filter((check) => !settings.skip.test(check.name) && !/review the diff/i.test(check.name));
   if (!failed.length) return { outcome: 'noop' };
-  const check = failed[0];
+  // The newest failure is the live evidence: an older one may already be fixed and only waits for its check to run
+  // again. Checks with no completion time keep the name order.
+  const check = failed.reduce((a, b) => (Date.parse(b.completed_at || '') > Date.parse(a.completed_at || '') ? b : a));
   const runId = ciFixRunId(check);
   if (!runId) return { outcome: 'ci-fix-no-run', check: check.name };
   try {
@@ -194,7 +324,87 @@ async function startCiFix(github, owner, repo, pr, settings) {
   return { outcome: 'ci-fix-dispatched', check: check.name };
 }
 
-async function reconcile({ github, core, owner, repo, number, ciFix }) {
+async function recordConflict(github, owner, repo, sha, outcome) {
+  await github.rest.repos.createCommitStatus({
+    owner, repo, sha, state: 'success', context: CONFLICT_CONTEXT, description: outcome,
+  });
+}
+
+// One conflict-fix decision for a pull request the reconcile labelled as conflicted. Returns { outcome, reason }.
+async function startConflictFix(github, owner, repo, pr, settings, statuses, now = Date.now()) {
+  const labels = (pr.labels || []).map((label) => label.name);
+  // The combined status holds only the latest status per context, so the attempt count lives in its description:
+  // 'conflict-queued N' or 'conflict-dispatched N' (no N counts as 1), then the fixer version. Any other record is
+  // final. A count from another fixer version starts over.
+  const last = statuses.find((status) => status.context === CONFLICT_CONTEXT);
+  const attempt = /^conflict-(?:queued|dispatched)(?: (\d+))?( @\w+)?$/.exec(last?.description || '');
+  const counts = attempt && (attempt[2] || '') === fixerTag() && !olderThan(last, CONFLICT_RESET_MS, now);
+  const done = counts ? Number(attempt[1] || 1) : 0;
+  if (last && (!attempt || done >= CONFLICT_MAX)) return { outcome: 'conflict-skip', reason: `already ${last.description}` };
+  if (attempt && now - Date.parse(last.updated_at || last.created_at) < CONFLICT_RETRY_MS) {
+    return { outcome: 'conflict-skip', reason: `${last.description} under 45 min ago` };
+  }
+  if (labels.includes(LEAD_LABEL)) return { outcome: 'conflict-skip', reason: 'needs-lead' };
+  if (pr.head.ref.endsWith('-v2') || V2_BODY.test(pr.body || '')) {
+    await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: [LEAD_LABEL] });
+    await recordConflict(github, owner, repo, pr.head.sha, 'conflict-lead');
+    return { outcome: 'conflict-lead', reason: 'a v2 conflicted again' };
+  }
+  if (await touchesWorkflows(github, owner, repo, pr.number)) return { outcome: 'conflict-skip', reason: 'CI paths' };
+  const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: pr.head.sha });
+  const age = now - Date.parse(commit.commit.committer.date);
+  if (!(age >= CONFLICT_MIN_AGE_MS)) return { outcome: 'conflict-skip', reason: 'head commit under 15 min old' };
+  try {
+    await github.rest.git.getRef({ owner, repo, ref: `heads/${pr.head.ref}-v2` });
+    return { outcome: 'conflict-skip', reason: 'v2 branch exists' };
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+  if (settings.output) {
+    await recordConflict(github, owner, repo, pr.head.sha, `conflict-queued ${done + 1}${fixerTag()}`);
+    return { outcome: 'conflict-queued', reason: 'conflict_prs output' };
+  }
+  try {
+    await github.rest.actions.createWorkflowDispatch({
+      owner, repo,
+      workflow_id: settings.workflow,
+      ref: pr.base.repo.default_branch,
+      inputs: { failure_head_branch: pr.head.ref, conflict_pr: String(pr.number) },
+    });
+  } catch (error) {
+    // 404: no caller; 422: a caller without the conflict_pr input. Nothing is recorded, so the next sweep retries
+    // once the caller rollout reaches this repository.
+    if (![404, 422].includes(error.status)) throw error;
+    const outcome = error.status === 404 ? 'conflict-no-caller' : 'conflict-no-input';
+    return { outcome, reason: `HTTP ${error.status}; retried next sweep` };
+  }
+  await recordConflict(github, owner, repo, pr.head.sha, `conflict-dispatched ${done + 1}${fixerTag()}`);
+  return { outcome: 'conflict-dispatched', reason: settings.workflow };
+}
+
+function conflictSummary(events) {
+  const rows = events.filter((event) => event.conflict)
+    .map((event) => `| ${event.repository}#${event.pr} | ${event.conflict.outcome} | ${event.conflict.reason || '-'} |`);
+  if (!rows.length) return '';
+  return ['### Conflict fixes', '', '| Pull request | Outcome | Reason |', '| --- | --- | --- |', ...rows, ''].join('\n');
+}
+
+// The AI gate runs on pull request events only, so a head with no gate run (opened while the gate was off) waits forever.
+// Where the repository runs the gate, bring the base in: the new head is the event. Renovate rebases its own branch.
+async function gateRefresh(github, owner, repo, pr) {
+  const workflows = await github.paginate(github.rest.actions.listRepoWorkflows, { owner, repo, per_page: 100 });
+  if (!workflows.some((workflow) => workflow.state === 'active' && GATE_CHECK.test(workflow.name))) return 'no-gate-workflow';
+  const renovate = (pr.user && pr.user.login || '').startsWith('renovate');
+  try {
+    return await act(github, owner, repo, pr, { action: renovate ? 'renovate-rebase' : 'update-branch' });
+  } catch (error) {
+    // 422: the head already contains the base, so the next base move refreshes it.
+    if (error.status === 422) return 'up-to-date';
+    throw error;
+  }
+}
+
+async function reconcile({ github, core, owner, repo, number, ciFix, merge = false }) {
   const pr = await getPr(github, owner, repo, number);
   const decision = classify(pr);
   let outcome = 'noop';
@@ -222,20 +432,42 @@ async function reconcile({ github, core, owner, repo, number, ciFix }) {
     }
   } else if (ciFix.workflow && decision.action === 'none' && decision.state !== 'closed' && ciFixEligible(pr, held)) {
     action = 'ci-fix';
-    if (alreadyDone(statuses, 'ci-fix')) {
+    const done = ciFixDone(statuses);
+    if (done && !(await failedSince(github, owner, repo, pr, ciFix, done))) {
       outcome = 'already-done';
     } else {
       try {
-        const fix = await startCiFix(github, owner, repo, pr, ciFix);
+        const fix = await startCiFix(github, owner, repo, pr, ciFix, statuses);
         outcome = fix.outcome;
         check = fix.check;
         // A missing caller workflow is final, so it is recorded like a taken action and not retried every sweep.
-        if (['ci-fix-dispatched', 'ci-fix-no-caller'].includes(outcome)) {
-          await record(github, owner, repo, pr.head.sha, 'ci-fix');
+        if (['ci-fix-dispatched', 'ci-fix-no-caller', 'base-merged'].includes(outcome)) {
+          await record(github, owner, repo, pr.head.sha, `ci-fix${fixerTag()}`);
         }
       } catch (error) {
         outcome = `error:${error.status || 'unknown'}`;
       }
+    }
+  }
+  let conflict;
+  if ((ciFix.workflow || ciFix.output) && decision.action === 'label-conflict' && !held) {
+    try {
+      conflict = await startConflictFix(github, owner, repo, pr, ciFix, statuses);
+    } catch (error) {
+      conflict = { outcome: `conflict-error:${error.status || 'unknown'}`, reason: 'api' };
+    }
+  }
+  // A release-please branch is skipped by classify but still merges on green; a failed check never merges.
+  const mergeable = decision.action === 'none' || (decision.action === 'skip' && decision.state !== 'fork');
+  let mergeResult;
+  // A head with a recorded CI fix may be green by now (a fixed description, a re-run); the merge reads its checks itself.
+  const settled = outcome === 'noop' || (action === 'ci-fix' && outcome === 'already-done');
+  if (merge && mergeable && decision.state !== 'closed' && settled) {
+    try {
+      mergeResult = await tryMerge({ github, owner, repo, pr, held, statuses });
+      if (mergeResult.gateAbsent) mergeResult.refresh = await gateRefresh(github, owner, repo, pr);
+    } catch (error) {
+      mergeResult = { outcome: `merge-error:${error.status || 'unknown'}`, reason: 'api' };
     }
   }
   const event = {
@@ -243,6 +475,8 @@ async function reconcile({ github, core, owner, repo, number, ciFix }) {
     state: decision.state, action, outcome, held,
   };
   if (check) event.check = check;
+  if (mergeResult) event.merge = mergeResult;
+  if (conflict) event.conflict = conflict;
   core.info(JSON.stringify(event));
   return event;
 }
@@ -260,15 +494,14 @@ function isExcludedRepository(exclusions, owner, repo) {
   return exclusions.has(`${owner}/${repo}`.toLowerCase());
 }
 
-async function targets({ github, context, core }) {
+async function targets({ github, context, core, sweepOwner }) {
   const { owner, repo } = context.repo;
   if (process.env.PR_NUMBER) return [{ owner, repo, number: Number(process.env.PR_NUMBER) }];
   if (process.env.BASE_REF) {
     const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', base: process.env.BASE_REF, per_page: 100 });
     return prs.map((pr) => ({ owner, repo, number: pr.number }));
   }
-  if (process.env.SWEEP_OWNER) {
-    const sweepOwner = process.env.SWEEP_OWNER;
+  if (sweepOwner) {
     if (!/^[A-Za-z0-9-]+$/.test(sweepOwner)) throw new Error(`invalid SWEEP_OWNER: ${sweepOwner}`);
     // user: matches repositories of both user accounts and organizations; org: matches organizations only.
     const items = await github.paginate(github.rest.search.issuesAndPullRequests, {
@@ -284,11 +517,13 @@ async function targets({ github, context, core }) {
   return [];
 }
 
-module.exports = async function run({ github, context, core }) {
+// sweepOwner is an argument, so one job can sweep several owners at once.
+module.exports = async function run({ github, context, core, sweepOwner = process.env.SWEEP_OWNER }) {
   const events = [];
   const resolver = process.env.RESOLVER_REPO || '';
   if (resolver && !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(resolver)) throw new Error(`invalid RESOLVER_REPO: ${resolver}`);
   const ciFix = ciFixSettings();
+  const merge = mergeEnabled();
   const started = Date.now();
   retryDeadline = started + module.exports.retryBudgetMs;
   const exclusions = excludedRepositories();
@@ -296,9 +531,10 @@ module.exports = async function run({ github, context, core }) {
     && isExcludedRepository(exclusions, context.repo.owner, context.repo.repo)) {
     core.info('skipped 1 reconcile target in excluded repositories');
     core.setOutput('events', JSON.stringify(events));
+    core.setOutput('conflict_prs', '[]');
     return events;
   }
-  const all = await targets({ github, context, core });
+  const all = await targets({ github, context, core, sweepOwner });
   const selected = all.filter((target) => !isExcludedRepository(exclusions, target.owner, target.repo));
   const skipped = all.length - selected.length;
   if (skipped > 0) core.info(`skipped ${skipped} pull requests in excluded repositories`);
@@ -308,7 +544,7 @@ module.exports = async function run({ github, context, core }) {
       break;
     }
     try {
-      events.push(await reconcile({ github, core, ...target, ciFix }));
+      events.push(await reconcile({ github, core, ...target, ciFix, merge }));
     } catch (error) {
       // One PR that vanished or failed to read must not stop the rest of the sweep.
       const event = {
@@ -319,11 +555,16 @@ module.exports = async function run({ github, context, core }) {
       events.push(event);
     }
   }
+  const summary = [mergeSummary(events), conflictSummary(events)].filter(Boolean).join('\n');
+  if (summary) await core.summary.addRaw(summary).write();
   core.setOutput('events', JSON.stringify(events));
+  const queued = events.filter((event) => event.conflict && event.conflict.outcome === 'conflict-queued');
+  core.setOutput('conflict_prs', JSON.stringify(queued.map((event) => String(event.pr))));
   return events;
 };
 module.exports.classify = classify;
 module.exports.reconcile = reconcile;
+module.exports.conflictSummary = conflictSummary;
 module.exports.retryDelayMs = 5000;
 module.exports.retryBudgetMs = 3 * 60 * 1000;
 module.exports.runBudgetMs = 4 * 60 * 1000;

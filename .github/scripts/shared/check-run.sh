@@ -2,13 +2,14 @@
 # One check run per name on a head commit, so a rerun replaces the earlier outcome.
 #
 #   check-run.sh upsert <name> <conclusion> <title> <summary>   PATCH the latest run with
-#                       this name from CHECK_APP_SLUG, or POST a new one
+#                       this name from CHECK_APP_SLUG (else CHECK_APP_ID), or POST a new one
 #   check-run.sh update <name> <conclusion> <title> <summary>   PATCH only; no matching run
 #                       writes nothing
 #
-# Reads GH_TOKEN, GITHUB_REPOSITORY, CHECK_HEAD_SHA and CHECK_APP_SLUG. Without
-# CHECK_APP_SLUG, or when the lookup fails, upsert POSTs with a warning and update
-# exits 1. A refused write exits 1.
+# Reads GH_TOKEN, GITHUB_REPOSITORY, CHECK_HEAD_SHA, CHECK_APP_SLUG and CHECK_APP_ID.
+# The slug selects the app when set; otherwise the numeric App ID does. Without
+# either, or when the lookup fails, upsert POSTs with a warning and update exits 1.
+# A refused write exits 1.
 set -euo pipefail
 
 usage() {
@@ -39,8 +40,8 @@ fi
 
 run_id=""
 lookup_error=""
-if [ -z "${CHECK_APP_SLUG:-}" ]; then
-  lookup_error="CHECK_APP_SLUG is empty"
+if [ -z "${CHECK_APP_SLUG:-}" ] && [ -z "${CHECK_APP_ID:-}" ]; then
+  lookup_error="CHECK_APP_SLUG and CHECK_APP_ID are empty"
 else
   if lookup_response="$(gh api -X GET \
     "repos/$GITHUB_REPOSITORY/commits/$CHECK_HEAD_SHA/check-runs" \
@@ -49,9 +50,11 @@ else
     -f per_page=100 2>&1)"; then
     if ! run_id="$(jq -r \
       --arg name "$name" \
-      --arg app_slug "$CHECK_APP_SLUG" \
+      --arg app_slug "${CHECK_APP_SLUG:-}" \
+      --arg app_id "${CHECK_APP_ID:-}" \
       '(if type == "array" then . else (.check_runs // []) end)
-       | map(select(.name == $name and .app.slug == $app_slug))
+       | map(select(.name == $name and (if $app_slug != ""
+           then .app.slug == $app_slug else (.app.id | tostring) == $app_id end)))
        | max_by([(.started_at // .completed_at // .created_at // ""), (.id // 0)])
        | .id // empty' <<< "$lookup_response" 2>/dev/null)"; then
       lookup_error="the check-run lookup returned invalid JSON"

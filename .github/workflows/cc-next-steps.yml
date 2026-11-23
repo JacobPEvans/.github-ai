@@ -93,7 +93,7 @@ jobs:
   analyze:
     needs: [check-pr-ceiling, check-daily-limit]
     if: needs.check-pr-ceiling.outputs.allowed == 'true' && needs.check-daily-limit.outputs.should_run == 'true'
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ startsWith(inputs.runner_label || 'ubuntu-24.04', 'ubuntu-') && (inputs.runner_label || 'ubuntu-24.04') || 'review' }}
     permissions:
       contents: read
       issues: read
@@ -141,8 +141,6 @@ jobs:
           codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}
           permission_profile: workspace
           allowed_tools: "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git status:*),Bash(git branch:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh search prs:*)"
-          claude_bot_app_id: ${{ vars.GH_APP_CLAUDE_BOT_ID }}
-          claude_bot_private_key: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
       - name: Capture proposed patch
         run: git diff --binary -- . ':(exclude).ai-output/**' > .ai-output/changes.patch
