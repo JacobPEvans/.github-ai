@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.76.0](https://github.com/JacobPEvans/.github-ai/compare/v2.75.0...v2.76.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** keep the agent edits when its time limit stops it ([#338](https://github.com/JacobPEvans/.github-ai/issues/338)) ([313fd71](https://github.com/JacobPEvans/.github-ai/commit/313fd71fcaa0f6fc2d70f8da14b0835fefcc37a7))
+* **ci-fix:** keep the agent's edits when its time limit stops it ([313fd71](https://github.com/JacobPEvans/.github-ai/commit/313fd71fcaa0f6fc2d70f8da14b0835fefcc37a7))
+
 ## [2.75.0](https://github.com/JacobPEvans/.github-ai/compare/v2.74.0...v2.75.0) (2026-11-23)
 
 
