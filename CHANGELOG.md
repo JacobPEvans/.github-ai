@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.82.0](https://github.com/JacobPEvans/.github-ai/compare/v2.81.0...v2.82.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** leave Renovate lock file maintenance to its own merge schedule ([#352](https://github.com/JacobPEvans/.github-ai/issues/352)) ([d3bd2f2](https://github.com/JacobPEvans/.github-ai/commit/d3bd2f231d235db87a0a795aca2b922e85c67b2a))
+
 ## [2.81.0](https://github.com/JacobPEvans/.github-ai/compare/v2.80.0...v2.81.0) (2026-11-23)
 
 
