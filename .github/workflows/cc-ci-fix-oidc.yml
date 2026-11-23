@@ -333,6 +333,8 @@ jobs:
         run: |
           git add -N -A
           git reset -q -- .ai-workflows
+          # A new file under a top-level dot path is agent scratch (a tool cache, a token file), never part of a fix.
+          git diff --name-only --diff-filter=A -z HEAD -- '.*' | xargs -0 -r git reset -q --
           git diff --binary HEAD > agent.patch
           # A description the agent wrote for the pull request travels beside the patch.
           if [ -s .ai-workflows/pr-body.md ]; then cp .ai-workflows/pr-body.md agent-pr-body.md; fi
