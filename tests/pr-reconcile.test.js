@@ -745,7 +745,7 @@ describe('reconcile', () => {
     let [event] = await run({ github: same, context: createMockContext(), core });
     expect(event).toMatchObject({ action: 'ci-fix', outcome: 'already-done' });
 
-    const other = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix' }] });
+    const other = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix' }, { context: 'pr-reconcile-rerun', description: 'rerun 2: ci-unit' }] });
     other.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
     [event] = await run({ github: other, context: createMockContext(), core });
     expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
@@ -761,9 +761,25 @@ describe('reconcile', () => {
     const [skip] = await run({ github: before, context: createMockContext(), core });
     expect(skip.outcome).toBe('already-done');
 
-    const after = github(pr(), { statuses });
+    const after = github(pr(), { statuses: [...statuses, { context: 'pr-reconcile-rerun', description: 'rerun 2: ci-unit' }] });
     after.paginate.mockResolvedValue([checkRun({ completed_at: at(30 * 60 * 1000) })]);
     const [event] = await run({ github: after, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
+  });
+
+  it('re-runs a check that still fails at a head where a fix was already dispatched', async () => {
+    process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
+    process.env.FIXER_VERSION = 'abcdef1234';
+    const statuses = [{ context: 'pr-reconcile', description: 'ci-fix @0000000' }];
+    const first = github(pr(), { statuses });
+    first.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
+    let [event] = await run({ github: first, context: createMockContext(), core });
+    expect(event).toMatchObject({ action: 'ci-fix', outcome: 'rerun', check: 'ci-unit' });
+    expect(first.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+
+    const again = github(pr(), { statuses: [...statuses, { context: 'pr-reconcile-rerun', description: 'rerun 1: ci-unit' }] });
+    again.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
+    [event] = await run({ github: again, context: createMockContext(), core });
     expect(event).toMatchObject({ action: 'ci-fix', outcome: 'ci-fix-dispatched' });
   });
 
@@ -775,7 +791,7 @@ describe('reconcile', () => {
     expect(recent.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
     expect(skip.outcome).toBe('already-done');
 
-    const stale = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix', updated_at: at(7 * 60 * 60 * 1000) }] });
+    const stale = github(pr(), { statuses: [{ context: 'pr-reconcile', description: 'ci-fix', updated_at: at(7 * 60 * 60 * 1000) }, { context: 'pr-reconcile-rerun', description: 'rerun 2: ci-unit' }] });
     stale.paginate.mockResolvedValueOnce([checkRun({ name: 'ci-unit' })]);
     const [event] = await run({ github: stale, context: createMockContext(), core });
     expect(stale.rest.actions.createWorkflowDispatch).toHaveBeenCalledTimes(1);
