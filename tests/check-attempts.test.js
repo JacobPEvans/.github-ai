@@ -56,16 +56,18 @@ describe('check-attempts', () => {
     expect(core.setFailed).toHaveBeenCalled();
   });
 
-  it('counts only attempts by this fixer version, up to six attempts in all', async () => {
+  it('counts only attempts by this fixer version, and stops after four attempts that published nothing', async () => {
     process.env.FIXER_VERSION = 'new';
     const mine = `${MARKER}\n<!-- ci-fix-version:new -->`;
-    github.paginate.mockResolvedValue([{ body: MARKER }, { body: `${MARKER}\n<!-- ci-fix-version:old -->` }, { body: mine }]);
+    const fix = { commit: { message: 'fix: resolve CI failure (auto-fix attempt 1)' } };
+    const comments = [...Array(4).fill({ body: MARKER }), { body: mine }];
+    github.paginate.mockImplementation(async (method) => (method === github.rest.pulls.listCommits ? [] : comments));
+    await run({ github, context, core });
+    expect(core.getOutput('should_run')).toBe('false');
+
+    github.paginate.mockImplementation(async (method) => (method === github.rest.pulls.listCommits ? [fix, fix] : comments));
     await run({ github, context, core });
     expect(core.getOutput('should_run')).toBe('true');
     expect(core.getOutput('attempt')).toBe('2');
-
-    github.paginate.mockResolvedValue([...Array(5).fill({ body: MARKER }), { body: mine }]);
-    await run({ github, context, core });
-    expect(core.getOutput('should_run')).toBe('false');
   });
 });
