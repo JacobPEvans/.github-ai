@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.73.0](https://github.com/JacobPEvans/.github-ai/compare/v2.72.0...v2.73.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **ci-fix:** pin the prompt catalog at v1.134.3 and allow six attempts a day ([#332](https://github.com/JacobPEvans/.github-ai/issues/332)) ([f34d373](https://github.com/JacobPEvans/.github-ai/commit/f34d373ea0dce342b474f4fa2aec273276c6f1a0))
+
 ## [2.72.0](https://github.com/JacobPEvans/.github-ai/compare/v2.71.0...v2.72.0) (2026-11-23)
 
 
