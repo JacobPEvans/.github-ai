@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.85.0](https://github.com/JacobPEvans/.github-ai/compare/v2.84.0...v2.85.0) (2026-11-25)
+
+
+### Features
+
+* **ci-fix:** pass no App key from the canonical ci-fix caller ([#359](https://github.com/JacobPEvans/.github-ai/issues/359)) ([73cc00b](https://github.com/JacobPEvans/.github-ai/commit/73cc00b98b4deb60a467b822a35ac02b2ab07f39))
+
 ## [2.84.0](https://github.com/JacobPEvans/.github-ai/compare/v2.83.0...v2.84.0) (2026-11-23)
 
 
