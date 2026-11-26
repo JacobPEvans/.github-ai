@@ -2,8 +2,9 @@
 # Reusable: new pull request size gate.
 #
 # Fails a pull request created after the cutoff when it changes more than 1,000
-# lines, not counting generated and lock files. Earlier pull requests skip the
-# job. The AI Merge Gate calls it, so every repository that runs the gate gets it.
+# lines, not counting generated and lock files. Earlier pull requests, and
+# develop-to-main promotions (which carry already-checked pull requests), skip
+# the job. The AI Merge Gate calls it, so every repository that runs the gate gets it.
 name: New PR size gate
 
 "on":
@@ -18,7 +19,9 @@ jobs:
     name: Check pull request size
     if: >-
       github.event_name == 'pull_request' &&
-      github.event.pull_request.created_at > '2026-11-19T20:00:00Z'
+      github.event.pull_request.created_at > '2026-11-19T20:00:00Z' &&
+      !(github.event.pull_request.head.ref == 'develop' &&
+        github.event.pull_request.base.ref == 'main')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
