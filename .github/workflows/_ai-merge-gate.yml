@@ -35,8 +35,9 @@ on:
         description: Org gitleaks-action license key; the scan fails closed without it.
         required: false
 
+# A label event that only reuses the last verdict runs in its own group, so it never cancels a review in progress.
 concurrency:
-  group: ai-merge-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ai-merge-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && !(github.event.pull_request.state == 'open' && endsWith(github.event.label.name, '-override')) && '-reuse' || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -47,6 +48,8 @@ permissions:
 jobs:
   gitleaks:
     name: Gitleaks secret scan
+    needs: router
+    if: needs.router.outputs.mode == 'review'
     runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
@@ -72,9 +75,26 @@ jobs:
     timeout-minutes: 2
     permissions: {}
     outputs:
-      available: ${{ steps.probe.outputs.available }}
+      available: ${{ steps.probe.outputs.available || 'false' }}
+      mode: ${{ steps.mode.outputs.mode }}
     steps:
+      # A label event re-runs the scans and reviews only for an override label on an open pull request. Any other
+      # label event reuses the last AI Merge Gate verdict at this head, with no router call.
+      - id: mode
+        env:
+          EVENT_ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+          PR_STATE: ${{ github.event.pull_request.state }}
+        run: |
+          mode=review
+          if [[ "$EVENT_ACTION" == labeled || "$EVENT_ACTION" == unlabeled ]]; then
+            if [[ "$PR_STATE" != open || "$LABEL_NAME" != *-override ]]; then
+              mode=reuse
+            fi
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
       - id: probe
+        if: steps.mode.outputs.mode == 'review'
         env:
           LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
           LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
@@ -185,8 +205,11 @@ jobs:
       SEMANTIC_RESULT: ${{ needs.semantic.result }}
       GH_TOKEN: ${{ github.token }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      MODE: ${{ needs.router.outputs.mode }}
+      RUN_ID: ${{ github.run_id }}
     steps:
       - name: Verify Copilot agent checks
+        if: env.MODE != 'reuse'
         run: |
           # The API occasionally returns a transient HTML error page; piping it
           # straight into --jq crashed the gate (false-negative merge block).
@@ -206,6 +229,7 @@ jobs:
             exit 1
           fi
       - name: Enforce scan and review conclusions
+        if: env.MODE != 'reuse'
         run: |
           set -euo pipefail
           if [[ "$REPO_PRIVATE" == "true" && "$LEAK_RESULT" == "skipped" ]]; then
@@ -232,3 +256,32 @@ jobs:
             esac
           done
           echo "All required scans and reviews passed or were skipped on a draft pull request."
+      # The newest completed AI Merge Gate check at this head from another run is the verdict; none fails closed.
+      - name: Reuse the previous verdict at this head
+        if: env.MODE == 'reuse'
+        run: |
+          set -uo pipefail
+          for i in 1 2 3; do
+            PREVIOUS=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs?filter=all&per_page=100" \
+              --jq '[.check_runs[] | select(.name | test("(^|/ )AI Merge Gate$")) | select(.status == "completed") | select((.details_url // "") | contains("/runs/" + env.RUN_ID + "/") | not)] | sort_by(.completed_at) | last | .conclusion // "none"') && break
+            PREVIOUS=""
+            sleep $((i * 5))
+          done
+          if [ -z "${PREVIOUS:-}" ]; then
+            echo "::error::check-runs API unreadable after retries"
+            exit 1
+          fi
+          echo "Previous AI Merge Gate conclusion at ${HEAD_SHA}: ${PREVIOUS}"
+          case "$PREVIOUS" in
+            success)
+              echo "Label event: the previous verdict stands; no review ran."
+              ;;
+            none)
+              echo "::error::No completed AI Merge Gate verdict at this head to reuse; push a commit or re-run the gate."
+              exit 1
+              ;;
+            *)
+              echo "::error::The previous AI Merge Gate verdict at this head is ${PREVIOUS}."
+              exit 1
+              ;;
+          esac
