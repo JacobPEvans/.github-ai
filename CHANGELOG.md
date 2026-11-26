@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.86.0](https://github.com/JacobPEvans/.github-ai/compare/v2.85.0...v2.86.0) (2026-11-26)
+
+
+### Features
+
+* **pr-size:** require a size check on new pull requests ([#361](https://github.com/JacobPEvans/.github-ai/issues/361)) ([bf8d5ca](https://github.com/JacobPEvans/.github-ai/commit/bf8d5cae2ded2dd5eb6423ae91afa75d8a276064))
+
 ## [2.85.0](https://github.com/JacobPEvans/.github-ai/compare/v2.84.0...v2.85.0) (2026-11-25)
 
 
