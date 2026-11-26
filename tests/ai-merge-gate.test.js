@@ -125,7 +125,7 @@ test('the final check waits for every required job and only accepts draft skips'
   expect(script).toContain('unexpected conclusion');
 
   for (const scenario of fixture.gate_scenarios) {
-    const [gitleaks, leak, security, semantic] = scenario.results;
+    const [gitleaks, leak, security, semantic, size] = scenario.results;
     const result = spawnSync('/bin/bash', ['-c', script], {
       encoding: 'utf8',
       env: {
@@ -136,6 +136,7 @@ test('the final check waits for every required job and only accepts draft skips'
         LEAK_RESULT: leak,
         SECURITY_RESULT: security,
         SEMANTIC_RESULT: semantic,
+        SIZE_RESULT: size,
       },
     });
     expect(result.status, scenario.name).toBe(scenario.exit_code);

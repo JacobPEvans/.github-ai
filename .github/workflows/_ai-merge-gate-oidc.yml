@@ -174,10 +174,14 @@ jobs:
       NTFY_BASE_URL: ${{ secrets.NTFY_BASE_URL }}
       GH_APP_CLAUDE_BOT_PRIVATE_KEY: ${{ secrets.GH_APP_CLAUDE_BOT_PRIVATE_KEY }}
 
+  size:
+    name: PR size
+    uses: ./.github/workflows/pr-size-gate.yml
+
   gate:
     name: AI Merge Gate
     if: always()
-    needs: [gitleaks, router, leak, security, semantic]
+    needs: [gitleaks, router, leak, security, semantic, size]
     runs-on: ${{ inputs.runner_label || 'ubuntu-26.04' }}
     timeout-minutes: 5
     permissions:
@@ -191,6 +195,7 @@ jobs:
       LEAK_RESULT: ${{ needs.leak.result }}
       SECURITY_RESULT: ${{ needs.security.result }}
       SEMANTIC_RESULT: ${{ needs.semantic.result }}
+      SIZE_RESULT: ${{ needs.size.result }}
       GH_TOKEN: ${{ github.token }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -239,4 +244,12 @@ jobs:
                 ;;
             esac
           done
+          # The size job is skipped for pull requests created before the size-gate cutoff.
+          case "$SIZE_RESULT" in
+            success|skipped) ;;
+            *)
+              echo "::error::The PR size check concluded with $SIZE_RESULT. Split the change into stacked PRs."
+              exit 1
+              ;;
+          esac
           echo "All required scans and reviews passed or were skipped on a draft pull request."
