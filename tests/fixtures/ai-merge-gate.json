@@ -5,71 +5,83 @@
     { "job": "security", "rubric": "security", "model": "critical" },
     { "job": "semantic", "rubric": "semantic", "model": "standard" }
   ],
-  "required_jobs": ["gitleaks", "router", "leak", "security", "semantic"],
+  "required_jobs": ["gitleaks", "router", "leak", "security", "semantic", "size"],
   "router_secrets": ["LLM_ROUTER_BASE_URL", "LLM_ROUTER_API_KEY"],
   "gate_scenarios": [
     {
       "name": "all success",
       "draft": false,
-      "results": ["success", "success", "success", "success"],
+      "results": ["success", "success", "success", "success", "success"],
       "exit_code": 0
     },
     {
       "name": "failure",
       "draft": false,
-      "results": ["failure", "success", "success", "success"],
+      "results": ["failure", "success", "success", "success", "success"],
       "exit_code": 1
     },
     {
       "name": "cancellation",
       "draft": false,
-      "results": ["success", "cancelled", "success", "success"],
+      "results": ["success", "cancelled", "success", "success", "success"],
       "exit_code": 1
     },
     {
       "name": "draft skip",
       "draft": true,
-      "results": ["success", "skipped", "success", "success"],
+      "results": ["success", "skipped", "success", "success", "success"],
       "exit_code": 0
     },
     {
       "name": "non-draft skip",
       "draft": false,
-      "results": ["success", "skipped", "success", "success"],
+      "results": ["success", "skipped", "success", "success", "success"],
       "exit_code": 1
     },
     {
       "name": "unknown result",
       "draft": false,
-      "results": ["action_required", "success", "success", "success"],
+      "results": ["action_required", "success", "success", "success", "success"],
       "exit_code": 1
     },
     {
       "name": "private repo leak skip",
       "draft": false,
       "private": true,
-      "results": ["success", "skipped", "success", "success"],
+      "results": ["success", "skipped", "success", "success", "success"],
       "exit_code": 0
     },
     {
       "name": "private repo leak failure",
       "draft": false,
       "private": true,
-      "results": ["success", "failure", "success", "success"],
+      "results": ["success", "failure", "success", "success", "success"],
       "exit_code": 1
     },
     {
       "name": "private repo security skip",
       "draft": false,
       "private": true,
-      "results": ["success", "success", "skipped", "success"],
+      "results": ["success", "success", "skipped", "success", "success"],
       "exit_code": 1
     },
     {
       "name": "private repo gitleaks skip",
       "draft": false,
       "private": true,
-      "results": ["skipped", "skipped", "success", "success"],
+      "results": ["skipped", "skipped", "success", "success", "success"],
+      "exit_code": 1
+    },
+    {
+      "name": "size skipped before the cutoff",
+      "draft": false,
+      "results": ["success", "success", "success", "success", "skipped"],
+      "exit_code": 0
+    },
+    {
+      "name": "size failure",
+      "draft": false,
+      "results": ["success", "success", "success", "success", "failure"],
       "exit_code": 1
     }
   ]
