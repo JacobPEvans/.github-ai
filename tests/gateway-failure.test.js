@@ -409,7 +409,7 @@ describe('gateway wiring in the workflows', () => {
   });
 
   it('every mint of the check-run token uses the pinned App-token action with checks: write', () => {
-    const pinned = 'actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510';
+    const pinned = 'actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc';
     const action = Bun.YAML.parse(readFileSync(join('.github', 'actions', 'run-ai-agent', 'action.yml'), 'utf8'));
     const sharedMintAction = Bun.YAML.parse(readFileSync(join('.github', 'actions', 'run-ai-agent', 'mint-check-token', 'action.yml'), 'utf8'));
     const directMints = [

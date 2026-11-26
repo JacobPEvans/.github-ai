@@ -158,6 +158,6 @@ test('only the dependency review deadline job uses the check-token mint action',
   expect(runAiAgentText).not.toContain('actions/create-github-app-token');
   expect(Object.keys(mintAction.inputs).sort()).toEqual(['client_id', 'private_key']);
   expect(mintAction.outputs.token.value).toBe('${{ steps.mint.outputs.token }}');
-  expect(mintAction.runs.steps[0].uses).toBe('actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510');
+  expect(mintAction.runs.steps[0].uses).toBe('actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc');
   expect(mintAction.runs.steps[0].with['permission-checks']).toBe('write');
 });
