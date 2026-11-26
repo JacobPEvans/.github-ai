@@ -242,7 +242,7 @@ runs:
       id: codex
       if: steps.prepare.outputs.effective-agent == 'codex'
       continue-on-error: true
-      uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # v1.13
+      uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # v1.14
       env:
         # Read operations such as `gh issue view` use the job-scoped token.
         # Agent jobs must keep this token read-only; publishers run separately.
@@ -274,7 +274,7 @@ runs:
       # Failure is judged by the report step below: a gateway, budget or 429
       # error ends the job without failing it, any other error still fails it.
       continue-on-error: true
-      uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+      uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
       env:
         # The CLI's own variable name; it points at the router.
         ANTHROPIC_BASE_URL: ${{ steps.prepare.outputs.claude-base-url }}
