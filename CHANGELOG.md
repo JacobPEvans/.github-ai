@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.87.0](https://github.com/JacobPEvans/.github-ai/compare/v2.86.0...v2.87.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* **pr-size:** skip the size gate on develop-to-main promotions ([#365](https://github.com/JacobPEvans/.github-ai/issues/365)) ([2f7a86e](https://github.com/JacobPEvans/.github-ai/commit/2f7a86e36471f271fc185786eacc250875cb8550))
+
 ## [2.86.0](https://github.com/JacobPEvans/.github-ai/compare/v2.85.0...v2.86.0) (2026-11-26)
 
 
