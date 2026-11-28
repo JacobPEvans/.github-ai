@@ -29,10 +29,10 @@ on:
         required: false
         default: medium
       time_limit_minutes:
-        description: Minutes the reviewer may run before it is stopped and the job fails. At most 20; the job stops at 25.
+        description: Minutes the reviewer may run before it is stopped and the job fails. At most 8; the job stops at 10.
         type: number
         required: false
-        default: 20
+        default: 8
       block:
         description: When true, a CHANGES_REQUESTED review on the head commit fails the verdict job.
         type: boolean
@@ -88,7 +88,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    timeout-minutes: 25 # pr-policy: timeout-exception an agent review on a local model needs its 20-minute limit plus setup
+    timeout-minutes: 10 # pr-policy: timeout-exception drop this comment once the pinned policy allows 10
     steps:
       - name: Checkout pull request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
