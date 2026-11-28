@@ -64,10 +64,10 @@ let retryDeadline = Infinity;
 const RENOVATE_UNCHECKED = '- [ ] <!-- rebase-check -->';
 const RENOVATE_CHECKED = '- [x] <!-- rebase-check -->';
 // Checks a code edit cannot fix: gate aggregators that mirror another check, review-router outages, review runs
-// that crashed instead of returning a verdict, release freezes and release checks, and eligibility gates. Review
+// that crashed instead of returning a verdict, release checks, and eligibility gates. Review
 // verdicts (Policy gate), Workflow Policy, CodeQL and dependency review do start a fix.
 // Flake Lock Fresh fails on upstream drift of the base's lock file: a lock bump on the base and update-branch clear it.
-const CI_FIX_SKIP_DEFAULT = 'merge gate|router availability|review the diff|freeze|release|eligibility|flake lock fresh';
+const CI_FIX_SKIP_DEFAULT = 'merge gate|router availability|review the diff|release|eligibility|flake lock fresh';
 const RERUN_CHECKS = /review the diff|uses resolve/i;
 const RERUN_CONTEXT = 'pr-reconcile-rerun';
 const RERUN_MAX = 2;
@@ -80,7 +80,7 @@ function classify(pr) {
   if (pr.state !== 'open') return { state: 'closed', action: 'none' };
   if (!pr.head.repo || pr.head.repo.full_name !== pr.base.repo.full_name) return { state: 'fork', action: 'skip' };
   if (pr.head.ref.startsWith('release-please--')) return { state: pr.mergeable_state, action: 'skip' };
-  const promotion = pr.base.ref === 'main' && pr.head.ref === 'develop';
+  const promotion = pr.base.ref === 'main' && (pr.head.ref === 'develop' || pr.head.ref.startsWith('promote/'));
   const renovate = (pr.user && pr.user.login || '').startsWith('renovate');
   switch (pr.mergeable_state) {
     case 'unknown':
@@ -219,7 +219,7 @@ function ciFixSettings() {
 
 // The CI fix applies only to pull requests the reconcile leaves alone otherwise.
 function ciFixEligible(pr, held) {
-  const promotion = pr.base.ref === 'main' && pr.head.ref === 'develop';
+  const promotion = pr.base.ref === 'main' && (pr.head.ref === 'develop' || pr.head.ref.startsWith('promote/'));
   // Renovate rebases its own conflicts, but a red Renovate update needs a code change like any other red PR.
   return !held && !promotion;
 }
