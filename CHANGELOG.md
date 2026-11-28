@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.91.0](https://github.com/JacobPEvans/.github-ai/compare/v2.90.0...v2.91.0) (2026-11-28)
+
+
+### Bug Fixes
+
+* **openhands-review:** let the SDK pin lmnr ([#380](https://github.com/JacobPEvans/.github-ai/issues/380)) ([6f5ee09](https://github.com/JacobPEvans/.github-ai/commit/6f5ee099144f2d2d494fa8df725751deee39c29c))
+
 ## [2.90.0](https://github.com/JacobPEvans/.github-ai/compare/v2.89.0...v2.90.0) (2026-11-28)
 
 
