@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.94.0](https://github.com/JacobPEvans/.github-ai/compare/v2.93.0...v2.94.0) (2026-11-28)
+
+
+### Bug Fixes
+
+* **openhands-review:** run the reviewer on Python 3.14 ([#388](https://github.com/JacobPEvans/.github-ai/issues/388)) ([5c06a88](https://github.com/JacobPEvans/.github-ai/commit/5c06a8807d2698dcb263e7bc5e21645f70e70556))
+
 ## [2.93.0](https://github.com/JacobPEvans/.github-ai/compare/v2.92.0...v2.93.0) (2026-11-28)
 
 
