@@ -21,18 +21,17 @@ function pr(overrides = {}) {
 
 const green = (name) => ({ name, status: 'completed', conclusion: 'success', app: { slug: 'github-actions' } });
 
-// A develop-to-main promotion on a git-flow repository, carrying the release label the sweep looks for.
+// A promote/<version> pull request into main on a git-flow repository.
 const promotion = (overrides = {}) => pr({
-  title: 'chore(develop): promotion',
-  head: { ref: 'develop', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } },
+  title: 'chore(release): promote 2.29.0 to main',
+  head: { ref: 'promote/2.29.0', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } },
   base: { ref: 'main', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } },
-  labels: [{ name: 'release:in-progress' }],
   ...overrides,
 });
 
 const releaseCommits = (version) => [{ commit: { message: `chore(develop): release ${version}`, committer: { date: '2026-11-20T00:00:00Z' } } }];
 
-function github(prData, { checks = [green('lint'), green('AI Merge Gate / AI Merge Gate')], statuses = [], live = {}, promotions = [], commits = [], comments = [] } = {}) {
+function github(prData, { checks = [green('lint'), green('AI Merge Gate / AI Merge Gate')], statuses = [], live = {}, commits = [], comments = [] } = {}) {
   const gh = createMockGithub();
   gh.rest.pulls.get.mockResolvedValue({ data: prData });
   gh.rest.pulls.merge = mock().mockResolvedValue({});
@@ -42,7 +41,6 @@ function github(prData, { checks = [green('lint'), green('AI Merge Gate / AI Mer
   gh.rest.repos.createCommitStatus = mock().mockResolvedValue({});
   gh.paginate.mockImplementation(async (fn) => (fn === gh.rest.pulls.listCommits ? commits
     : fn === gh.rest.issues.listComments ? comments
-    : fn === gh.rest.pulls.list ? promotions
     : checks));
   gh.graphql = mock(async (query) => (query.startsWith('mutation') ? {} : {
     repository: {
@@ -118,7 +116,7 @@ describe('sweep merge', () => {
     ['zcode-branch', pr({ head: { ref: 'agent/zcode/j-1', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
     ['sandbox-author', pr({ user: { login: 'jacobs-agent-smith[bot]', type: 'Bot' } }), {}],
     ['renovate-soak', pr({ head: { ref: 'renovate/lock-file-maintenance', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
-    ['promotion', promotion({ labels: [] }), {}],
+    ['promotion', promotion({ head: { ref: 'develop', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } } }), {}],
     ['stacked:fix/base', pr({ base: { ref: 'fix/base', repo: { full_name: 'test-owner/test-repo', default_branch: 'main' } } }), {}],
     ['stacked:fix/base', pr({ base: { ref: 'fix/base', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } } }), {}],
     ['state:blocked', pr({ mergeable_state: 'blocked' }), {}],
@@ -145,19 +143,16 @@ describe('sweep merge', () => {
     });
   }
 
-  it('skips a pull request into develop while the promotion is in release freeze, re-read before the merge', async () => {
-    const develop = pr({ base: { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } } });
-    const gh = github(develop, { promotions: [{ number: 9, labels: [{ name: 'release:in-progress' }] }] });
+  it('keeps the auto-merge the promotion workflow armed on a promotion', async () => {
+    const gh = github(promotion(), { commits: releaseCommits('2.29.0'), live: { autoMergeRequest: { enabledAt: '2026-11-28T00:00:00Z' } } });
     const event = await reconcileOne(gh);
-    expect(gh.paginate.mock.calls.some(([fn, args]) => fn === gh.rest.pulls.list && args.base === 'main' && args.head === 'test-owner:develop')).toBe(true);
-    expect(event.merge.reason).toBe('release-freeze');
-    expect(gh.rest.pulls.merge).not.toHaveBeenCalled();
+    expect(event.merge).toEqual({ outcome: 'merged', reason: '', disarmed: false });
   });
 
-  it('merges a release-please pull request during the freeze but never a major release', async () => {
+  it('merges a release-please pull request but never a major release', async () => {
     const head = { ref: 'release-please--branches--develop', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } };
     const base = { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } };
-    const minor = github(pr({ head, base, title: 'chore(develop): release 2.17.0' }), { promotions: [{ labels: [{ name: 'release:in-progress' }] }] });
+    const minor = github(pr({ head, base, title: 'chore(develop): release 2.17.0' }));
     expect((await reconcileOne(minor)).merge.outcome).toBe('merged');
     const major = github(pr({ head, base, title: 'chore(develop): release 3.0.0' }));
     expect((await reconcileOne(major)).merge.reason).toBe('major-release');
@@ -252,7 +247,7 @@ describe('sweep merge', () => {
     expect((await reconcileOne(older)).merge.reason).toMatch(/^check:/);
   });
 
-  it('merges a green labelled promotion with a merge commit and never touches its labels', async () => {
+  it('merges a green promotion with a merge commit and never touches its labels', async () => {
     const gh = github(promotion(), { commits: releaseCommits('2.29.0') });
     const event = await reconcileOne(gh);
     expect(gh.rest.pulls.merge).toHaveBeenCalledTimes(1);
@@ -262,7 +257,7 @@ describe('sweep merge', () => {
     expect(gh.rest.issues.addLabels).not.toHaveBeenCalled();
   });
 
-  it('holds a labelled promotion while any check is red, pending, or missing', async () => {
+  it('holds a promotion while any check is red, pending, or missing', async () => {
     for (const [reason, options] of [
       ['check:lint', { checks: [green('AI Merge Gate / AI Merge Gate'), { ...green('lint'), conclusion: 'failure' }] }],
       ['checks-pending', { checks: [{ ...green('AI Merge Gate / AI Merge Gate'), status: 'in_progress', conclusion: null }] }],
@@ -276,7 +271,7 @@ describe('sweep merge', () => {
     }
   });
 
-  it('skips a labelled promotion whose head moved after the read', async () => {
+  it('skips a promotion whose head moved after the read', async () => {
     const gh = github(promotion(), { commits: releaseCommits('2.29.0'), live: { headRefOid: 'head2' } });
     const event = await reconcileOne(gh);
     expect(gh.rest.pulls.merge).not.toHaveBeenCalled();

@@ -56,10 +56,13 @@ describe('classify', () => {
   it('labels a conflicted branch', () => {
     expect(classify(pr({ mergeable_state: 'dirty' })).action).toBe('label-conflict');
   });
-  it('never updates a develop-to-main promotion and sends its conflict to the lead', () => {
+  it('never updates a promotion and sends its conflict to the lead', () => {
     const promotion = { head: { ref: 'develop', sha: 's', repo: { full_name: 'test-owner/test-repo' } }, base: { ref: 'main', repo: { full_name: 'test-owner/test-repo' } } };
     expect(classify(pr({ ...promotion, mergeable_state: 'behind' })).action).toBe('none');
     expect(classify(pr({ ...promotion, mergeable_state: 'dirty' })).action).toBe('label-lead');
+    const pinned = { ...promotion, head: { ...promotion.head, ref: 'promote/2.29.0' } };
+    expect(classify(pr({ ...pinned, mergeable_state: 'behind' })).action).toBe('none');
+    expect(classify(pr({ ...pinned, mergeable_state: 'dirty' })).action).toBe('label-lead');
   });
   it('skips release-please branches and forks', () => {
     expect(classify(pr({ mergeable_state: 'dirty', head: { ref: 'release-please--branches--main', sha: 's', repo: { full_name: 'test-owner/test-repo' } } })).action).toBe('skip');
@@ -489,7 +492,7 @@ describe('reconcile', () => {
     process.env.CI_FIX_WORKFLOW = 'openhands-ci-fix.yml';
     for (const name of [
       'gate / AI Merge Gate', 'Merge Gate', 'gate / Review router availability',
-      'release-freeze', 'release-notes / Check eligibility', 'Flake Lock Fresh / Flake inputs at branch head',
+      'release-notes / Check eligibility', 'Flake Lock Fresh / Flake inputs at branch head',
     ]) {
       const gh = github(pr());
       gh.paginate.mockResolvedValueOnce([checkRun({ name })]);
