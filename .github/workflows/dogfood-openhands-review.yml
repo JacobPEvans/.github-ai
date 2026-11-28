@@ -1,0 +1,17 @@
+name: Dogfood OpenHands Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  # Local ref on purpose: the pull request's own version of the workflow runs.
+  openhands:
+    # Runs only where a self-hosted runner and the router secrets exist for this
+    # repository: set the repository variable DOGFOOD_SELF_HOSTED to 'true'.
+    if: vars.DOGFOOD_SELF_HOSTED == 'true'
+    uses: ./.github/workflows/openhands-review.yml
+    secrets:
+      LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+      LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
