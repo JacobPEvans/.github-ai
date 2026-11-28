@@ -34,6 +34,19 @@ on:
         type: boolean
         required: false
         default: false
+      agent:
+        description: >-
+          Agent that makes the simplification. Empty keeps the configured
+          default. Set openhands to run the OpenHands agent on the role named
+          by local_model.
+        type: string
+        required: false
+        default: ""
+      local_model:
+        description: Router role alias the OpenHands agent uses.
+        type: string
+        required: false
+        default: medium
     secrets:
       LLM_ROUTER_BASE_URL:
         required: true
@@ -151,7 +164,8 @@ jobs:
       - name: Run AI agent
         uses: ./.ai-workflows/.github/actions/run-ai-agent
         with:
-          agent: ${{ vars.GH_ACTION_AI_AGENT || 'claude' }}
+          agent: ${{ inputs.agent || vars.GH_ACTION_AI_AGENT || 'claude' }}
+          openhands_model: ${{ inputs.local_model }}
           prompt: ${{ steps.prompt.outputs.content }}
           claude_model: ${{ vars.GH_ACTION_AI_MODEL_CODE || vars.GH_ACTION_AI_MODEL }}
           codex_model: ${{ vars.GH_ACTION_AI_CODEX_MODEL }}
