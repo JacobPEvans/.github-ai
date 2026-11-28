@@ -1,0 +1,206 @@
+---
+# OpenHands pull request review, called from an organization's required review workflow:
+#
+#   openhands:
+#     permissions: {contents: read, pull-requests: write}
+#     uses: JacobPEvans/.github-ai/.github/workflows/openhands-review.yml@v2
+#     secrets:
+#       LLM_ROUTER_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+#       LLM_ROUTER_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+#
+# The review job runs OpenHands' own pr-review script with the organization's review guide installed as a project
+# skill. The verdict job reads the review posted on the head commit: none, or CHANGES_REQUESTED while `block` is
+# true, fails. To override a wrong blocking review, dismiss it and re-run the failed job.
+name: OpenHands Review
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        description: Runner label for the review job. OpenHands runs tools, so it uses the agent pool, which reaches the router.
+        type: string
+        required: false
+        default: review
+      model:
+        description: >-
+          Router capability name the reviewer requests, never a vendor model id. The same local-only capability is
+          used for private and open-source repositories.
+        type: string
+        required: false
+        default: medium
+      time_limit_minutes:
+        description: Minutes the reviewer may run before it is stopped and the job fails. At most 8; the job stops at 10.
+        type: number
+        required: false
+        default: 8
+      block:
+        description: When true, a CHANGES_REQUESTED review on the head commit fails the verdict job.
+        type: boolean
+        required: false
+        default: true
+      reviewer_login:
+        description: Login of the identity that posts the review; the verdict job reads only its reviews.
+        type: string
+        required: false
+        default: "github-actions[bot]"
+      extensions_ref:
+        description: Commit of OpenHands/extensions whose pr-review script runs.
+        type: string
+        required: false
+        # renovate: datasource=github-tags depName=OpenHands/extensions
+        default: bbc412d3bef7edcf0e26abd70292459d12a89299  # v0.44.0
+    secrets:
+      LLM_ROUTER_BASE_URL:
+        description: The router's OpenAI-compatible base URL, ending in /v1.
+        required: true
+      LLM_ROUTER_API_KEY:
+        description: Scoped router virtual key whose every route is a local model.
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: openhands-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  not-reviewed:
+    name: openhands/not-reviewed
+    if: >-
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      github.event.pull_request.user.login == 'renovate[bot]' ||
+      github.event.pull_request.user.login == 'jacobpevans-release-please[bot]'
+    runs-on: ubuntu-26.04
+    permissions: {}
+    timeout-minutes: 2
+    steps:
+      - name: Fork, dependency or release pull request
+        run: echo "Not reviewed by OpenHands - a fork pull request, or the author is a dependency or release bot."
+
+  review:
+    name: openhands/review
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login != 'renovate[bot]' &&
+      github.event.pull_request.user.login != 'jacobpevans-release-please[bot]'
+    runs-on: ${{ inputs.runner_label || 'review' }}
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 10 # pr-policy: timeout-exception drop this comment once the pinned policy allows 10
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: pr-repo
+          persist-credentials: false
+
+      - name: Checkout the OpenHands review script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: OpenHands/extensions
+          ref: ${{ inputs.extensions_ref }}
+          path: extensions
+          persist-credentials: false
+
+      - name: Checkout workflow actions
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: JacobPEvans/.github-ai
+          ref: ${{ fromJSON(toJSON(job))['workflow_sha'] }}
+          sparse-checkout: .github/actions/checkout-prompts
+          sparse-checkout-cone-mode: false
+          path: .ai-workflows
+          persist-credentials: false
+
+      - name: Checkout the review guide
+        uses: ./.ai-workflows/.github/actions/checkout-prompts
+        with:
+          sparse-checkout: automation/openhands-review-guide.md
+
+      # A project skill with the /codereview trigger is read together with the script's own review skill.
+      - name: Install the review guide as a project skill
+        run: |
+          set -euo pipefail
+          mkdir -p pr-repo/.agents/skills
+          {
+            printf '%s\n' '---' 'name: org-review-guide' \
+              'description: Organization review rules for every pull request.' 'triggers:' '- /codereview' '---'
+            awk 'seen >= 2; /^---$/ { seen++ }' .ai-llm-prompts/automation/openhands-review-guide.md
+          } > pr-repo/.agents/skills/org-review-guide.md
+          test "$(wc -l < pr-repo/.agents/skills/org-review-guide.md)" -gt 10
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install the OpenHands SDK
+        run: |
+          set -euo pipefail
+          command -v gh >/dev/null || { echo "::error::The runner has no gh command, which the reviewer uses to post its review"; exit 1; }
+          python -m pip install --disable-pip-version-check --quiet "openhands-sdk==1.64.1" "openhands-tools==1.64.1" "lmnr==0.9.3"
+
+      - name: Run the OpenHands review
+        working-directory: pr-repo
+        env:
+          # The SDK names an OpenAI-compatible endpoint's model with this prefix.
+          LLM_MODEL: openai/${{ inputs.model }}
+          LLM_BASE_URL: ${{ secrets.LLM_ROUTER_BASE_URL }}
+          LLM_API_KEY: ${{ secrets.LLM_ROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          AGENT_KIND: openhands
+          REQUIRE_PINNED_ACTIONS: "true"
+          COLLECT_FEEDBACK: "false"
+          LOAD_PUBLIC_SKILLS: "false"
+          REVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          REPO_NAME: ${{ github.repository }}
+          PYTHONPATH: ""
+          TIME_LIMIT_MINUTES: ${{ inputs.time_limit_minutes }}
+        run: |
+          set -euo pipefail
+          rc=0
+          timeout --kill-after=30s "${TIME_LIMIT_MINUTES}m" \
+            python ../extensions/plugins/pr-review/scripts/agent_script.py || rc=$?
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            echo "::error::OpenHands stopped at its ${TIME_LIMIT_MINUTES}-minute limit before it finished the review"
+          fi
+          exit "$rc"
+
+  verdict:
+    name: openhands/verdict
+    needs: review
+    runs-on: ubuntu-26.04
+    permissions:
+      pull-requests: read
+    timeout-minutes: 3
+    steps:
+      - name: Read the OpenHands review on the head commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER: ${{ inputs.reviewer_login }}
+          BLOCK: ${{ inputs.block }}
+        run: |
+          set -euo pipefail
+          state=$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" --jq \
+            "[.[] | select(.user.login == env.REVIEWER and .commit_id == env.HEAD_SHA and .state != \"PENDING\")] | last | .state // \"NONE\"")
+          echo "OpenHands review state on $HEAD_SHA: $state"
+          if [ "$state" = "NONE" ]; then
+            echo "::error::OpenHands posted no review on $HEAD_SHA, so the review did not complete"
+            exit 1
+          fi
+          if [ "$state" = "CHANGES_REQUESTED" ] && [ "$BLOCK" = "true" ]; then
+            echo "::error::OpenHands requested changes on $HEAD_SHA. Fix the critical finding, or dismiss the review and re-run this job."
+            exit 1
+          fi

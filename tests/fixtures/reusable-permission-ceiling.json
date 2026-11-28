@@ -107,6 +107,10 @@
     "contents": "write",
     "pull-requests": "write"
   },
+  "openhands-review.yml": {
+    "contents": "read",
+    "pull-requests": "write"
+  },
   "policy-gate.yml": {},
   "post-merge-docs-review.yml": {
     "actions": "read",
