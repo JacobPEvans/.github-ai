@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.93.0](https://github.com/JacobPEvans/.github-ai/compare/v2.92.0...v2.93.0) (2026-11-28)
+
+
+### Bug Fixes
+
+* **checkout-prompts:** pin the prompt catalog at v1.154.1 ([#386](https://github.com/JacobPEvans/.github-ai/issues/386)) ([29bf334](https://github.com/JacobPEvans/.github-ai/commit/29bf3340f2393ee94e0409f151f013b029cc62be))
+
 ## [2.92.0](https://github.com/JacobPEvans/.github-ai/compare/v2.91.0...v2.92.0) (2026-11-28)
 
 
