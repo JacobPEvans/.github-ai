@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.96.0](https://github.com/JacobPEvans/.github-ai/compare/v2.95.0...v2.96.0) (2026-11-28)
+
+
+### Features
+
+* **pr-reconcile:** batch releases by holding release PRs for four hours ([#392](https://github.com/JacobPEvans/.github-ai/issues/392)) ([021a3b1](https://github.com/JacobPEvans/.github-ai/commit/021a3b16eac9f5a669bd975149a4019dd94e3e96))
+
 ## [2.95.0](https://github.com/JacobPEvans/.github-ai/compare/v2.94.0...v2.95.0) (2026-11-28)
 
 
