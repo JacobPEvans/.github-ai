@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.89.0](https://github.com/JacobPEvans/.github-ai/compare/v2.88.0...v2.89.0) (2026-11-28)
+
+
+### Features
+
+* **cc-code-simplifier:** let the caller choose the agent and router role ([#374](https://github.com/JacobPEvans/.github-ai/issues/374)) ([85b85b7](https://github.com/JacobPEvans/.github-ai/commit/85b85b7b9e5aa32690a682befb2572d4fd2dd878))
+
 ## [2.88.0](https://github.com/JacobPEvans/.github-ai/compare/v2.87.0...v2.88.0) (2026-11-28)
 
 
