@@ -142,7 +142,8 @@ jobs:
         run: |
           set -euo pipefail
           command -v gh >/dev/null || { echo "::error::The runner has no gh command, which the reviewer uses to post its review"; exit 1; }
-          python -m pip install --disable-pip-version-check --quiet "openhands-sdk==1.64.1" "openhands-tools==1.64.1" "lmnr==0.9.3"
+          # lmnr comes from the SDK's own pinned range; a separate pin conflicts with it.
+          python -m pip install --disable-pip-version-check --quiet "openhands-sdk==1.64.1" "openhands-tools==1.64.1"
 
       - name: Run the OpenHands review
         working-directory: pr-repo
