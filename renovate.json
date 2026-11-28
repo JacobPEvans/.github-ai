@@ -10,6 +10,16 @@
         "actions/ai-inference"
       ],
       "allowedVersions": "<3"
+    },
+    {
+      "description": "The OpenHands SDK's pinned litellm range supports Python below 3.15 only.",
+      "matchFileNames": [
+        ".github/workflows/openhands-review.yml"
+      ],
+      "matchDepNames": [
+        "python"
+      ],
+      "allowedVersions": "<3.15"
     }
   ]
 }
