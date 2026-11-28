@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.95.0](https://github.com/JacobPEvans/.github-ai/compare/v2.94.0...v2.95.0) (2026-11-28)
+
+
+### Bug Fixes
+
+* **pr-reconcile:** treat promote/&lt;version&gt; heads as the promotion ([#390](https://github.com/JacobPEvans/.github-ai/issues/390)) ([4b01d29](https://github.com/JacobPEvans/.github-ai/commit/4b01d292efe1f1d9d3daa9b8e7196ccbfd4dceba))
+
 ## [2.94.0](https://github.com/JacobPEvans/.github-ai/compare/v2.93.0...v2.94.0) (2026-11-28)
 
 
