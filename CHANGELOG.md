@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.88.0](https://github.com/JacobPEvans/.github-ai/compare/v2.87.0...v2.88.0) (2026-11-28)
+
+
+### Features
+
+* **openhands-review:** add the OpenHands pull request review workflow ([#373](https://github.com/JacobPEvans/.github-ai/issues/373)) ([186c24f](https://github.com/JacobPEvans/.github-ai/commit/186c24fff9ef3f077a14dba79cb1635ff5474960))
+
 ## [2.87.0](https://github.com/JacobPEvans/.github-ai/compare/v2.86.0...v2.87.0) (2026-11-26)
 
 
