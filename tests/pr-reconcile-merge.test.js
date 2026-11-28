@@ -149,6 +149,19 @@ describe('sweep merge', () => {
     expect(event.merge).toEqual({ outcome: 'merged', reason: '', disarmed: false });
   });
 
+  it('holds a release-please pull request until it has been open four hours', async () => {
+    const head = { ref: 'release-please--branches--develop', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } };
+    const base = { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } };
+    const opened = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    const young = github(pr({ head, base, title: 'chore(develop): release 2.17.0', created_at: opened(3.9) }));
+    expect((await reconcileOne(young)).merge).toMatchObject({ outcome: 'merge-skip', reason: 'release-batch' });
+    expect(young.rest.pulls.merge).not.toHaveBeenCalled();
+    const old = github(pr({ head, base, title: 'chore(develop): release 2.17.0', created_at: opened(4.1) }));
+    expect((await reconcileOne(old)).merge.outcome).toBe('merged');
+    const renovate = github(pr({ user: { login: 'renovate[bot]', type: 'Bot' }, created_at: opened(0.1) }));
+    expect((await reconcileOne(renovate)).merge.outcome).toBe('merged');
+  });
+
   it('merges a release-please pull request but never a major release', async () => {
     const head = { ref: 'release-please--branches--develop', sha: 'head1', repo: { full_name: 'test-owner/test-repo' } };
     const base = { ref: 'develop', repo: { full_name: 'test-owner/test-repo', default_branch: 'develop' } };

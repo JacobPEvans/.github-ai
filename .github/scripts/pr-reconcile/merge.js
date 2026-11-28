@@ -6,6 +6,7 @@
 // repository's Merge Gate instead), no review asks for changes and no review thread is open. It merges with the head SHA, so a push after the read makes the merge fail instead of landing unreviewed code.
 // On a git-flow repository the promote/<version> promotion into main also merges through this path, with a merge commit.
 // A pull request based on any other branch than the default branch (or main on a git-flow repository) is stacked and waits.
+// A release-please pull request merges only after it has been open four hours, so several merges share one release.
 // A promotion that carries any major release commit is held for a human merge and noted once on the pull request. Auto-merge armed on an agent pull request is disarmed. Every decision returns a reason for the run summary.
 
 const GATE_CHECK = /(^|\/ )AI Merge Gate$/;
@@ -18,6 +19,8 @@ const BLOCK_LABELS = ['human:review', 'merge-hold', 'needs-lead'];
 const BAD_CONCLUSIONS = ['failure', 'cancelled', 'timed_out', 'action_required', 'stale'];
 const RELEASE_PLEASE = 'release-please--';
 const PROMOTE = 'promote/';
+// release-please reuses one pull request until it merges, so its age is how long the oldest unreleased change has waited.
+const RELEASE_BATCH_MS = 4 * 60 * 60 * 1000;
 const MAJOR_RELEASE = /(^|\s|\[)v?[1-9]\d*\.0\.0\b/;
 const RELEASE_HEADLINE = /chore\((?:develop|main)\): release [^\n]+/;
 const MAJOR_NOTE = '<!-- pr-reconcile:major-promotion -->';
@@ -96,6 +99,7 @@ function staticBlocker(pr, held) {
   const base = pr.base.ref;
   if (base !== pr.base.repo.default_branch && !(base === 'main' && pr.base.repo.default_branch === 'develop')) return `stacked:${base}`;
   if (majorRelease(pr)) return 'major-release';
+  if (pr.head.ref.startsWith(RELEASE_PLEASE) && Date.now() - Date.parse(pr.created_at) < RELEASE_BATCH_MS) return 'release-batch';
   if (!['clean', 'unstable'].includes(pr.mergeable_state)) return `state:${pr.mergeable_state}`;
   return '';
 }
